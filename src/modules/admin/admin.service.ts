@@ -3,7 +3,9 @@ import { EventStatus } from "@prisma/client";
 import { normalizeYoutubeVideoUrlForStorage } from "../../utils/youtube-url";
 import { uploadImage } from "../../services/cloudinary.service";
 import { randomBytes } from "crypto";
+import bcrypt from "bcryptjs";
 import { resolveFrontendBase, sendEventListingThankYouEmail } from "../../services/email.service";
+import { generateTempPassword } from "../../utils/temp-password";
 
 function toStatusLabel(status: EventStatus | string): string {
   switch (String(status)) {
@@ -850,13 +852,30 @@ export async function adminSendEventListingEmail(params: { organizerEmail: strin
   }
 
   let setPasswordUrl: string | undefined;
-  // Requirement: show "Set Password" only when email is not verified.
+  let tempPassword: string | undefined;
+  /**
+   * For unverified accounts (admin-created and never signed in) we both:
+   *   1. Generate a fresh temporary password, hash & save it on the user, and
+   *   2. Issue a reset-password token so they can pick their own password instead.
+   * The recipient sees both options in the email.
+   */
   if (!organizer.emailVerified) {
+    tempPassword = generateTempPassword();
+    if (!tempPassword.trim()) {
+      throw new Error("Temporary password generation failed");
+    }
+    const hashedPassword = await bcrypt.hash(tempPassword, 12);
+
     const resetToken = randomBytes(32).toString("hex");
     const resetTokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     await prisma.user.update({
       where: { id: organizer.id },
-      data: { resetToken, resetTokenExpiry },
+      data: {
+        password: hashedPassword,
+        resetToken,
+        resetTokenExpiry,
+        loginAttempts: 0,
+      },
     });
     const base = resolveFrontendBase().replace(/\/$/, "");
     setPasswordUrl = `${base}/reset-password?token=${resetToken}&email=${encodeURIComponent(organizerEmail)}`;
@@ -867,6 +886,7 @@ export async function adminSendEventListingEmail(params: { organizerEmail: strin
     firstName: organizer.firstName || "there",
     eventTitles,
     setPasswordUrl,
+    tempPassword,
   });
 }
 

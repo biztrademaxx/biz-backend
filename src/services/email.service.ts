@@ -30,6 +30,11 @@ function getEffectiveFromEmail(): string | undefined {
   return u || undefined;
 }
 
+/** Escape dynamic fragments embedded in HTML emails. */
+function escapeHtmlMail(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 function mailConfigured(): boolean {
   if (getResendApiKey()) return !!getResendFromEmail();
   if (getSendGridApiKey()) return !!getEffectiveFromEmail();
@@ -432,8 +437,12 @@ export async function sendEventImportThankYouEmail(params: {
   firstName: string;
   eventTitles: string[];
   setPasswordUrl?: string;
+  /** Shown in email when email is not verified — together with reset link. */
+  tempPassword?: string;
 }): Promise<void> {
-  const { toEmail, firstName, eventTitles, setPasswordUrl } = params;
+  const { toEmail, firstName, eventTitles, setPasswordUrl, tempPassword } = params;
+  const pwdPlain = tempPassword?.trim() ? tempPassword.trim() : "";
+  const pwdHtml = pwdPlain ? escapeHtmlMail(pwdPlain) : "";
   const listHtml = eventTitles
     .map(
       (t) =>
@@ -443,10 +452,25 @@ export async function sendEventImportThankYouEmail(params: {
     )
     .join("");
 
+  const textLines = [
+    `Hello ${firstName || "there"},`,
+    "",
+    "The following event(s) have been added on your behalf:",
+    ...eventTitles.map((t) => `• ${t}`),
+    "",
+  ];
+  if (pwdPlain || setPasswordUrl) {
+    textLines.push("Your sign-in details:", `Email: ${toEmail}`);
+    if (pwdPlain) textLines.push(`Temporary password: ${pwdPlain}`, "");
+    if (setPasswordUrl) textLines.push(`Reset password (choose your own): ${setPasswordUrl}`, "");
+  }
+  textLines.push("Best regards,", "The BizTradeFairs Team");
+
   await dispatchMail({
     from: `"BizTradeFairs" <${getEffectiveFromEmail()}>`,
     to: toEmail,
     subject: `Your events were imported (${eventTitles.length})`,
+    text: textLines.join("\n"),
     html: `
       <div style="font-family: Inter, Arial, sans-serif; background: #f1f5f9; padding: 24px;">
         <div style="max-width: 620px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden;">
@@ -462,12 +486,29 @@ export async function sendEventImportThankYouEmail(params: {
             </p>
             <ul style="padding: 0; margin: 0 0 18px 0; list-style: none;">${listHtml}</ul>
         ${
-          setPasswordUrl
-            ? `<p style="margin: 24px 0;">
-          <a href="${setPasswordUrl}" style="background: #2563eb; color: #fff; padding: 12px 22px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600;">Set your password</a>
-        </p>
-        <p style="font-size: 13px; color: #475569; line-height: 1.6;">Your organizer account was created during import. Use the button above to choose a password and sign in with <strong>${toEmail}</strong>.</p>
-        <p style="font-size: 12px; color: #94a3b8; word-break: break-all; margin-top: 10px;">${setPasswordUrl}</p>`
+          pwdPlain || setPasswordUrl
+            ? `<div style="margin: 22px 0; padding: 16px 18px; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 10px;">
+              <p style="margin: 0 0 10px 0; font-size: 14px; color: #0f172a;"><strong>Your sign-in details</strong></p>
+              <p style="margin: 0 0 6px 0; font-size: 13px; color: #475569;">Email: <strong>${escapeHtmlMail(toEmail)}</strong></p>
+              ${
+                pwdPlain
+                  ? `<p style="margin: 0 0 6px 0; font-size: 13px; color: #475569;">Temporary password:</p>
+                    <p style="margin: 4px 0 8px 0; font-size: 15px;">
+                      <code style="padding: 8px 12px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #0f172a;">${pwdHtml}</code>
+                    </p>
+                    <p style="margin: 8px 0 0 0; font-size: 12px; color: #64748b;">For security, change this password after you sign in, or use reset password below.</p>`
+                  : ""
+              }
+            </div>
+            ${
+              setPasswordUrl
+                ? `<p style="margin: 18px 0;">
+                    <a href="${setPasswordUrl}" style="background: #2563eb; color: #fff; padding: 12px 22px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600;">Reset password</a>
+                  </p>
+                  <p style="font-size: 13px; color: #475569; line-height: 1.6;">Prefer to pick your own password? Click the button above (link expires in 7 days).</p>
+                  <p style="font-size: 12px; color: #94a3b8; word-break: break-all; margin-top: 6px;">${setPasswordUrl}</p>`
+                : ""
+            }`
             : `<p style="margin: 8px 0 0 0; color: #475569;">You can sign in with this email address to manage your events.</p>`
         }
             <p style="margin: 22px 0 0 0; color: #334155;">Best regards,<br/><strong>The BizTradeFairs Team</strong></p>
@@ -502,8 +543,12 @@ export async function sendEventListingThankYouEmail(params: {
   firstName: string;
   eventTitles: string[];
   setPasswordUrl?: string;
+  /** Plain-text temporary password to display in the email (admin-created accounts only). */
+  tempPassword?: string;
 }): Promise<void> {
-  const { toEmail, firstName, eventTitles, setPasswordUrl } = params;
+  const { toEmail, firstName, eventTitles, setPasswordUrl, tempPassword } = params;
+  const pwdPlain = tempPassword?.trim() ? tempPassword.trim() : "";
+  const pwdHtml = pwdPlain ? escapeHtmlMail(pwdPlain) : "";
   const listHtml = eventTitles
     .map(
       (t) =>
@@ -513,10 +558,25 @@ export async function sendEventListingThankYouEmail(params: {
     )
     .join("");
 
+  const textLines = [
+    `Hello ${firstName || "there"},`,
+    "",
+    "Your event listing has been processed. Events:",
+    ...eventTitles.map((t) => `• ${t}`),
+    "",
+  ];
+  if (pwdPlain || setPasswordUrl) {
+    textLines.push("Your sign-in details:", `Email: ${toEmail}`);
+    if (pwdPlain) textLines.push(`Temporary password: ${pwdPlain}`, "");
+    if (setPasswordUrl) textLines.push(`Reset password (choose your own): ${setPasswordUrl}`, "");
+  }
+  textLines.push("Best regards,", "The BizTradeFairs Team");
+
   await dispatchMail({
     from: `"BizTradeFairs" <${getEffectiveFromEmail()}>`,
     to: toEmail,
     subject: `Event listing update (${eventTitles.length})`,
+    text: textLines.join("\n"),
     html: `
       <div style="font-family: Inter, Arial, sans-serif; background: #f1f5f9; padding: 24px;">
         <div style="max-width: 620px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden;">
@@ -532,11 +592,29 @@ export async function sendEventListingThankYouEmail(params: {
             </p>
             <ul style="padding: 0; margin: 0 0 18px 0; list-style: none;">${listHtml}</ul>
         ${
-          setPasswordUrl
-            ? `<p style="margin: 24px 0;">
-          <a href="${setPasswordUrl}" style="background: #2563eb; color: #fff; padding: 12px 22px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600;">Set password</a>
-        </p>
-        <p style="font-size: 13px; color: #475569; line-height: 1.6;">Use this email <strong>${toEmail}</strong> to sign in after setting your password.</p>`
+          pwdPlain || setPasswordUrl
+            ? `<div style="margin: 22px 0; padding: 16px 18px; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 10px;">
+              <p style="margin: 0 0 10px 0; font-size: 14px; color: #0f172a;"><strong>Your sign-in details</strong></p>
+              <p style="margin: 0 0 6px 0; font-size: 13px; color: #475569;">Email: <strong>${escapeHtmlMail(toEmail)}</strong></p>
+              ${
+                pwdPlain
+                  ? `<p style="margin: 0 0 6px 0; font-size: 13px; color: #475569;">Temporary password:</p>
+                    <p style="margin: 4px 0 8px 0; font-size: 15px;">
+                      <code style="padding: 8px 12px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #0f172a;">${pwdHtml}</code>
+                    </p>
+                    <p style="margin: 8px 0 0 0; font-size: 12px; color: #64748b;">For security, change this password after you sign in, or use reset password below.</p>`
+                  : ""
+              }
+            </div>
+            ${
+              setPasswordUrl
+                ? `<p style="margin: 18px 0;">
+                    <a href="${setPasswordUrl}" style="background: #2563eb; color: #fff; padding: 12px 22px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600;">Reset password</a>
+                  </p>
+                  <p style="font-size: 13px; color: #475569; line-height: 1.6;">Prefer to pick your own password? Click the button above (link expires in 7 days).</p>
+                  <p style="font-size: 12px; color: #94a3b8; word-break: break-all; margin-top: 6px;">${setPasswordUrl}</p>`
+                : ""
+            }`
             : ""
         }
             <p style="margin: 22px 0 0 0; color: #334155;">Best regards,<br/><strong>The BizTradeFairs Team</strong></p>
@@ -552,13 +630,32 @@ export async function sendUserAccountAccessEmail(params: {
   firstName: string;
   roleLabel: "Organizer" | "Venue Manager";
   setPasswordUrl?: string;
+  /** When email is not verified — shown together with reset link. */
+  tempPassword?: string;
 }): Promise<void> {
-  const { toEmail, firstName, roleLabel, setPasswordUrl } = params;
+  const { toEmail, firstName, roleLabel, setPasswordUrl, tempPassword } = params;
+  const pwdPlain = tempPassword?.trim() ? tempPassword.trim() : "";
+  const pwdHtml = pwdPlain ? escapeHtmlMail(pwdPlain) : "";
+
+  const textLines = [`Hello ${firstName || "there"},`, ""];
+  textLines.push(
+    `Your ${roleLabel} account uses this email: ${toEmail}.`,
+    "",
+  );
+  if (pwdPlain || setPasswordUrl) {
+    textLines.push("Your sign-in details:", `Email: ${toEmail}`);
+    if (pwdPlain) textLines.push(`Temporary password: ${pwdPlain}`, "");
+    if (setPasswordUrl) textLines.push(`Reset password (choose your own): ${setPasswordUrl}`, "");
+  } else {
+    textLines.push("You can sign in with your existing password.", "");
+  }
+  textLines.push("Best regards,", "The BizTradeFairs Team");
 
   await dispatchMail({
     from: `"BizTradeFairs" <${getEffectiveFromEmail()}>`,
     to: toEmail,
     subject: `${roleLabel} account access details`,
+    text: textLines.join("\n"),
     html: `
       <div style="font-family: Inter, Arial, sans-serif; background: #f1f5f9; padding: 24px;">
         <div style="max-width: 620px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden;">
@@ -569,17 +666,34 @@ export async function sendUserAccountAccessEmail(params: {
           <div style="padding: 22px 24px;">
             <p style="margin: 0 0 12px 0; color: #0f172a;">Hello <strong>${firstName || "there"}</strong>,</p>
             <p style="margin: 0 0 14px 0; color: #334155; line-height: 1.6;">
-              Your <strong>${roleLabel}</strong> account is available with this email: <strong>${toEmail}</strong>.
+              Your <strong>${roleLabel}</strong> account is available with this email: <strong>${escapeHtmlMail(toEmail)}</strong>.
             </p>
             ${
-              setPasswordUrl
-                ? `<p style="margin: 20px 0;">
-                    <a href="${setPasswordUrl}" style="background: #2563eb; color: #fff; padding: 12px 22px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600;">Verify Email & Set Password</a>
-                  </p>
-                  <p style="font-size: 13px; color: #475569; line-height: 1.6;">
-                    Please verify your email and set a password to sign in.
-                  </p>
-                  <p style="font-size: 12px; color: #94a3b8; word-break: break-all; margin-top: 10px;">${setPasswordUrl}</p>`
+              pwdPlain || setPasswordUrl
+                ? `<div style="margin: 18px 0; padding: 16px 18px; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 10px;">
+                    <p style="margin: 0 0 10px 0; font-size: 14px; color: #0f172a;"><strong>Your sign-in details</strong></p>
+                    <p style="margin: 0 0 6px 0; font-size: 13px; color: #475569;">Email: <strong>${escapeHtmlMail(toEmail)}</strong></p>
+                    ${
+                      pwdPlain
+                        ? `<p style="margin: 0 0 6px 0; font-size: 13px; color: #475569;">Temporary password:</p>
+                          <p style="margin: 4px 0 8px 0; font-size: 15px;">
+                            <code style="padding: 8px 12px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #0f172a;">${pwdHtml}</code>
+                          </p>
+                          <p style="margin: 8px 0 0 0; font-size: 12px; color: #64748b;">Change this after sign-in or use reset password below.</p>`
+                        : ""
+                    }
+                  </div>
+                  ${
+                    setPasswordUrl
+                      ? `<p style="margin: 18px 0;">
+                          <a href="${setPasswordUrl}" style="background: #2563eb; color: #fff; padding: 12px 22px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600;">Reset password</a>
+                        </p>
+                        <p style="font-size: 13px; color: #475569; line-height: 1.6;">
+                          Verify your email and choose your own password (link expires in 7 days).
+                        </p>
+                        <p style="font-size: 12px; color: #94a3b8; word-break: break-all; margin-top: 6px;">${setPasswordUrl}</p>`
+                      : ""
+                  }`
                 : `<p style="margin: 8px 0 0 0; color: #475569;">You can sign in directly using your existing password.</p>`
             }
             <p style="margin: 22px 0 0 0; color: #334155;">Best regards,<br/><strong>The BizTradeFairs Team</strong></p>

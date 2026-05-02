@@ -2,11 +2,13 @@
  * Bulk event import from CSV/TSV/XLSX — uses createEventAdmin + findOrCreateUser from events-writes.
  */
 import { randomBytes } from "crypto";
+import bcrypt from "bcryptjs";
 import * as XLSX from "xlsx";
 import prisma from "../../../config/prisma";
 import { normalizeYoutubeVideoUrlForStorage } from "../../../utils/youtube-url";
 import { createEventAdmin, findOrCreateUser } from "../../events/events-writes.service";
 import { sendEventImportThankYouEmail, FRONTEND_BASE } from "../../../services/email.service";
+import { generateTempPassword } from "../../../utils/temp-password";
 
 const BATCH_PAUSE_MS = 5;
 
@@ -505,17 +507,42 @@ async function sendThankYouEmails(
   for (const [email, { titles, wasNew }] of byEmail) {
     const user = await prisma.user.findFirst({
       where: { email, role: "ORGANIZER" },
-      select: { id: true, firstName: true },
+      select: { id: true, firstName: true, emailVerified: true },
     });
     const firstName = user?.firstName || "there";
 
+    /**
+     * Include a Set-Password link when the recipient cannot sign in yet:
+     *   - newly-created during this import (`wasNew`)
+     *   - OR existing organizer whose email was never verified (admin-created earlier,
+     *     no password chosen yet).
+     * Verified organizers already have credentials, so we skip the link.
+     */
+    const needsPasswordSetup = !!user && (wasNew || !user.emailVerified);
+
     let setPasswordUrl: string | undefined;
-    if (wasNew && user) {
+    let tempPassword: string | undefined;
+    if (needsPasswordSetup && user) {
       const resetToken = randomBytes(32).toString("hex");
       const resetTokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+      const updateData: {
+        resetToken: string;
+        resetTokenExpiry: Date;
+        password?: string;
+        loginAttempts?: number;
+      } = { resetToken, resetTokenExpiry };
+
+      /** New import rows used to get emailVerified=true without OTP — always mail a temp password for `wasNew`. */
+      if (!user.emailVerified || wasNew) {
+        tempPassword = generateTempPassword();
+        updateData.password = await bcrypt.hash(tempPassword, 12);
+        updateData.loginAttempts = 0;
+      }
+
       await prisma.user.update({
         where: { id: user.id },
-        data: { resetToken, resetTokenExpiry },
+        data: updateData,
       });
       const encodedEmail = encodeURIComponent(email);
       setPasswordUrl = `${base}/reset-password?token=${resetToken}&email=${encodedEmail}`;
@@ -527,6 +554,7 @@ async function sendThankYouEmails(
         firstName,
         eventTitles: titles,
         setPasswordUrl,
+        tempPassword,
       });
     } catch (err) {
       // eslint-disable-next-line no-console

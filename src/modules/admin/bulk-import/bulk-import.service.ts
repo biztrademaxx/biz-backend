@@ -77,17 +77,17 @@ export async function importOrganizersFromFile(params: {
         isActive: asBool(row.isActive, true),
       };
 
-      const created = await createOrganizer(payload);
+      const { organizer } = await createOrganizer(payload);
       successCount += 1;
 
-      if (params.adminId && created?.id) {
+      if (params.adminId && organizer?.id) {
         await prisma.adminLog.create({
           data: {
             adminId: params.adminId,
             adminType: params.adminType ?? "SUPER_ADMIN",
             action: "ADMIN_ORGANIZER_BULK_IMPORTED",
             resource: "ORGANIZER",
-            resourceId: created.id,
+            resourceId: organizer.id,
             details: { email },
           },
         });
@@ -137,17 +137,17 @@ export async function importVenuesFromFile(params: {
         isActive: asBool(row.isActive, true),
       };
 
-      const created = await createVenue(payload);
+      const { venue } = await createVenue(payload);
       successCount += 1;
 
-      if (params.adminId && created?.id) {
+      if (params.adminId && venue?.id) {
         await prisma.adminLog.create({
           data: {
             adminId: params.adminId,
             adminType: params.adminType ?? "SUPER_ADMIN",
             action: "ADMIN_VENUE_BULK_IMPORTED",
             resource: "VENUE",
-            resourceId: created.id,
+            resourceId: venue.id,
             details: { email, venueName },
           },
         });

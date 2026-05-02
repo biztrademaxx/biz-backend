@@ -2,7 +2,9 @@ import prisma from "../../../config/prisma";
 import { parseListQuery } from "../../../lib/admin-response";
 import type { UserRole } from "@prisma/client";
 import { randomBytes } from "crypto";
+import bcrypt from "bcryptjs";
 import { resolveFrontendBase, sendUserAccountAccessEmail } from "../../../services/email.service";
+import { generateTempPassword } from "../../../utils/temp-password";
 
 const ROLE: UserRole = "VENUE_MANAGER";
 
@@ -306,10 +308,16 @@ export async function createVenue(body: Record<string, unknown>) {
   // Prevent duplicate email across any role to avoid unique constraint error
   const existing = await prisma.user.findFirst({ where: { email } });
   if (existing) throw new Error("Venue with this email already exists");
+
+  const tempPassword = generateTempPassword();
+  const hashedPassword = await bcrypt.hash(tempPassword, 12);
+
   const user = await prisma.user.create({
     data: {
       email,
       role: ROLE,
+      password: hashedPassword,
+      emailVerified: false,
       firstName: String(body.firstName ?? body.venueName ?? "").trim() || "Venue",
       lastName: String(body.lastName ?? "").trim() || "",
       phone: body.phone != null ? String(body.phone) : null,
@@ -327,7 +335,9 @@ export async function createVenue(body: Record<string, unknown>) {
     venueState: body.venueState,
     venueCity: body.venueCity,
   });
-  return getVenueById(user.id);
+  const venue = await getVenueById(user.id);
+  if (!venue) throw new Error("Failed to load venue after create");
+  return { venue, tempPassword };
 }
 
 export async function updateVenue(id: string, body: Record<string, unknown>) {
@@ -376,12 +386,20 @@ export async function sendVenueAccountEmail(input: { venueId?: string; venueEmai
   if (!venue?.email) throw new Error("Venue manager not found");
 
   let setPasswordUrl: string | undefined;
+  let tempPassword: string | undefined;
   if (!venue.emailVerified) {
+    tempPassword = generateTempPassword();
+    const hashedPassword = await bcrypt.hash(tempPassword, 12);
     const resetToken = randomBytes(32).toString("hex");
     const resetTokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     await prisma.user.update({
       where: { id: venue.id },
-      data: { resetToken, resetTokenExpiry },
+      data: {
+        password: hashedPassword,
+        resetToken,
+        resetTokenExpiry,
+        loginAttempts: 0,
+      },
     });
     const base = resolveFrontendBase().replace(/\/$/, "");
     setPasswordUrl = `${base}/reset-password?token=${resetToken}&email=${encodeURIComponent(venue.email)}`;
@@ -392,5 +410,6 @@ export async function sendVenueAccountEmail(input: { venueId?: string; venueEmai
     firstName: venue.firstName || venue.venueName || "there",
     roleLabel: "Venue Manager",
     setPasswordUrl,
+    tempPassword,
   });
 }

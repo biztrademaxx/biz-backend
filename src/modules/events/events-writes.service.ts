@@ -283,7 +283,8 @@ export async function findOrCreateUser(userData: {
       role,
       password: hashedPassword,
       isActive: true,
-      emailVerified: role === "ORGANIZER" || role === "VENUE_MANAGER",
+      /** Backend-created users have not verified email; admin sends credentials via mail / reset link. */
+      emailVerified: false,
     },
   });
   return { user, created: true };

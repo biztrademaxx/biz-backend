@@ -2,7 +2,9 @@ import prisma from "../../../config/prisma";
 import { parseListQuery } from "../../../lib/admin-response";
 import type { UserRole } from "@prisma/client";
 import { randomBytes } from "crypto";
+import bcrypt from "bcryptjs";
 import { resolveFrontendBase, sendUserAccountAccessEmail } from "../../../services/email.service";
+import { generateTempPassword } from "../../../utils/temp-password";
 
 const ROLE: UserRole = "ORGANIZER";
 
@@ -133,10 +135,16 @@ export async function createOrganizer(body: Record<string, unknown>) {
   if (!email) throw new Error("Email is required");
   const existing = await prisma.user.findFirst({ where: { email, role: ROLE } });
   if (existing) throw new Error("Organizer with this email already exists");
+
+  const tempPassword = generateTempPassword();
+  const hashedPassword = await bcrypt.hash(tempPassword, 12);
+
   const user = await prisma.user.create({
     data: {
       email,
       role: ROLE,
+      password: hashedPassword,
+      emailVerified: false,
       firstName: String(body.firstName ?? "").trim() || "Organizer",
       lastName: String(body.lastName ?? "").trim() || "",
       phone: body.phone != null ? String(body.phone) : null,
@@ -155,7 +163,9 @@ export async function createOrganizer(body: Record<string, unknown>) {
       isActive: body.isActive !== false,
     },
   });
-  return getOrganizerById(user.id);
+  const organizer = await getOrganizerById(user.id);
+  if (!organizer) throw new Error("Failed to load organizer after create");
+  return { organizer, tempPassword };
 }
 
 export async function updateOrganizer(id: string, body: Record<string, unknown>) {
@@ -216,12 +226,20 @@ export async function sendOrganizerAccountEmail(input: { organizerId?: string; o
   if (!organizer?.email) throw new Error("Organizer not found");
 
   let setPasswordUrl: string | undefined;
+  let tempPassword: string | undefined;
   if (!organizer.emailVerified) {
+    tempPassword = generateTempPassword();
+    const hashedPassword = await bcrypt.hash(tempPassword, 12);
     const resetToken = randomBytes(32).toString("hex");
     const resetTokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     await prisma.user.update({
       where: { id: organizer.id },
-      data: { resetToken, resetTokenExpiry },
+      data: {
+        password: hashedPassword,
+        resetToken,
+        resetTokenExpiry,
+        loginAttempts: 0,
+      },
     });
     const base = resolveFrontendBase().replace(/\/$/, "");
     setPasswordUrl = `${base}/reset-password?token=${resetToken}&email=${encodeURIComponent(organizer.email)}`;
@@ -232,6 +250,7 @@ export async function sendOrganizerAccountEmail(input: { organizerId?: string; o
     firstName: organizer.firstName || "there",
     roleLabel: "Organizer",
     setPasswordUrl,
+    tempPassword,
   });
 }
 
