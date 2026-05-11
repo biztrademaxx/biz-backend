@@ -128,6 +128,11 @@ export async function importVenuesFromFile(params: {
         firstName: str(row.firstName || row.contactPerson || venueName) || "Venue",
         lastName: str(row.lastName),
         phone: str(row.phone || row.mobile) || undefined,
+        avatar: str(row.venueImage || row.logo || row.avatar) || undefined,
+        venueImages: [
+          str(row.venueImage || row.logo || row.avatar),
+          ...splitList(row.venueImages),
+        ].filter(Boolean),
         venueName,
         venueCity: str(row.venueCity || row.city) || undefined,
         venueState: str(row.venueState || row.state) || undefined,

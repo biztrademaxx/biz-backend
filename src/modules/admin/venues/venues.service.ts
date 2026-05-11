@@ -165,6 +165,7 @@ export async function listVenues(query: Record<string, unknown>) {
         firstName: true,
         lastName: true,
         email: true,
+        avatar: true,
         phone: true,
         venueName: true,
         venueCity: true,
@@ -204,6 +205,7 @@ export async function listVenues(query: Record<string, unknown>) {
       firstName: u.firstName,
       lastName: u.lastName,
       email: u.email,
+      logo: u.avatar ?? "",
       phone: u.phone,
       venueName: u.venueName,
       venueCity: u.venueCity,
@@ -235,6 +237,7 @@ export async function getVenueById(id: string) {
       firstName: true,
       lastName: true,
       email: true,
+      avatar: true,
       phone: true,
       venueName: true,
       venueCity: true,
@@ -276,6 +279,7 @@ export async function getVenueById(id: string) {
     firstName: user.firstName,
     lastName: user.lastName,
     email: user.email,
+    logo: user.avatar ?? "",
     phone: user.phone,
     venueName: user.venueName,
     venueCity: user.venueCity,
@@ -306,6 +310,22 @@ export async function createVenue(body: Record<string, unknown>) {
   // Prevent duplicate email across any role to avoid unique constraint error
   const existing = await prisma.user.findFirst({ where: { email } });
   if (existing) throw new Error("Venue with this email already exists");
+  const logo =
+    body.logo != null
+      ? String(body.logo).trim()
+      : body.avatar != null
+        ? String(body.avatar).trim()
+        : body.venueImage != null
+          ? String(body.venueImage).trim()
+          : "";
+  const venueImages = Array.isArray(body.venueImages)
+    ? (body.venueImages as unknown[])
+        .map((v) => String(v ?? "").trim())
+        .filter(Boolean)
+    : [];
+  if (logo && !venueImages.includes(logo)) {
+    venueImages.unshift(logo);
+  }
   const user = await prisma.user.create({
     data: {
       email,
@@ -320,6 +340,8 @@ export async function createVenue(body: Record<string, unknown>) {
       venueAddress: body.venueAddress != null ? String(body.venueAddress) : null,
       maxCapacity: body.maxCapacity != null ? Number(body.maxCapacity) : null,
       isActive: body.isActive !== false,
+      avatar: logo || null,
+      venueImages,
     },
   });
   await syncLocationMasterFromVenue({
