@@ -119,13 +119,9 @@ export class AuthService {
       return null;
     }
 
-    // Venue managers start isActive=false until admin activates; they may still sign in to finish setup.
-    if (!user.isActive) {
-      const venueAwaitingAdmin =
-        user.role === "VENUE_MANAGER" && !user.isVerified;
-      if (!venueAwaitingAdmin) {
-        return null;
-      }
+    // Venue managers may be delisted from /venues (isVerified=false) but must still be able to sign in.
+    if (!user.isActive && user.role !== "VENUE_MANAGER") {
+      return null;
     }
 
     const role = mapUserRoleToAuthRole(user.role);
@@ -186,7 +182,6 @@ export class AuthService {
         crypto.randomBytes(32).toString("hex"),
         10
       );
-      const isNewVenueManager = roleForCreate === "VENUE_MANAGER";
       user = await prisma.user.create({
         data: {
           email: normalizedEmail,
@@ -195,8 +190,8 @@ export class AuthService {
           password: hashedPassword,
           avatar: input.image || undefined,
           role: roleForCreate,
-          ...(isNewVenueManager
-            ? { isVerified: false, isActive: false }
+          ...(roleForCreate === "VENUE_MANAGER"
+            ? { isVerified: false, isActive: true }
             : { isVerified: true, isActive: true }),
           emailVerified: true,
           lastLogin: new Date(),
@@ -219,12 +214,8 @@ export class AuthService {
       user = refreshed;
     }
 
-    if (!user.isActive) {
-      const venueAwaitingAdmin =
-        user.role === "VENUE_MANAGER" && !user.isVerified;
-      if (!venueAwaitingAdmin) {
-        throw new Error("Account is deactivated");
-      }
+    if (!user.isActive && user.role !== "VENUE_MANAGER") {
+      throw new Error("Account is deactivated");
     }
 
     const role = mapUserRoleToAuthRole(user.role);
@@ -306,12 +297,8 @@ export class AuthService {
     if (!user) {
       throw new Error("User not found");
     }
-    if (!user.isActive) {
-      const venueAwaitingAdmin =
-        user.role === "VENUE_MANAGER" && !user.isVerified;
-      if (!venueAwaitingAdmin) {
-        throw new Error("Account is deactivated");
-      }
+    if (!user.isActive && user.role !== "VENUE_MANAGER") {
+      throw new Error("Account is deactivated");
     }
 
     const role = mapUserRoleToAuthRole(user.role);

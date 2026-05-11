@@ -1,7 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import prisma from "../../config/prisma";
 import {
-  activePublicProfileUserWhere,
   canUserViewOwnPrivateProfile,
   publicPublishedEventWhere,
 } from "../../utils/public-profile";
@@ -21,8 +20,8 @@ export async function listVenues(params: ListVenuesParams) {
 
   const where: any = {
     role: "VENUE_MANAGER",
-    ...activePublicProfileUserWhere(),
-    /** Only admin-approved venues appear on the public /venues directory. */
+    NOT: { profileVisibility: "private" },
+    /** Public /venues directory: admin-listed only (not tied to account isActive). */
     isVerified: true,
   };
   if (requireVenueImage) {
@@ -125,7 +124,7 @@ export async function getVenueEvents(id: string, viewerUserId?: string | null) {
       where: {
         id,
         role: "VENUE_MANAGER",
-        ...activePublicProfileUserWhere(),
+        NOT: { profileVisibility: "private" },
         isVerified: true,
       },
       select: { id: true },
@@ -204,13 +203,13 @@ export async function listVenueReviews(
 
   const venue = await prisma.user.findFirst({
     where: { id: venueId, role: "VENUE_MANAGER" },
-    select: { id: true, isVerified: true, isActive: true },
+    select: { id: true, isVerified: true },
   });
   if (!venue) {
     return [];
   }
   const isSelf = canUserViewOwnPrivateProfile(options?.viewerUserId ?? undefined, venueId);
-  const publicListing = venue.isVerified && venue.isActive;
+  const publicListing = venue.isVerified;
   if (!publicListing && !isSelf) {
     return [];
   }
@@ -303,12 +302,12 @@ export async function createVenueReview(params: {
 
   const venueRow = await prisma.user.findFirst({
     where: { id: venueId, role: "VENUE_MANAGER" },
-    select: { id: true, isVerified: true, isActive: true },
+    select: { id: true, isVerified: true },
   });
   if (!venueRow) {
     throw new Error("Venue not found");
   }
-  if (!venueRow.isVerified || !venueRow.isActive) {
+  if (!venueRow.isVerified) {
     throw new Error("This venue is not yet approved for public reviews");
   }
 

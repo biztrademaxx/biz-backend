@@ -322,9 +322,7 @@ router.post("/register", async (req, res) => {
         company: companyName || undefined,
         jobTitle: designation || undefined,
         website: website || undefined,
-        ...(role === "VENUE_MANAGER"
-          ? { isActive: false, isVerified: false }
-          : {}),
+        ...(role === "VENUE_MANAGER" ? { isVerified: false, isActive: true } : {}),
       },
     });
 

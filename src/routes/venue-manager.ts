@@ -84,8 +84,8 @@ router.get("/venue-manager/:id", optionalUser, async (req, res) => {
       const isOwner =
         req.auth?.domain === "USER" && req.auth.sub === venueManager.id;
       const isAdmin = req.auth?.domain === "ADMIN";
-      const visibleToPublic =
-        venueManager.isVerified && venueManager.isActive;
+      const profilePublic = venueManager.profileVisibility !== "private";
+      const visibleToPublic = venueManager.isVerified && profilePublic;
       if (!visibleToPublic && !isOwner && !isAdmin) {
         return res.status(404).json({
           success: false,
@@ -287,7 +287,7 @@ router.post("/venue-manager/:organizerId", async (req, res) => {
         lastName: managerLast || "Manager",
         password: passwordToUse,
         isVerified: false,
-        isActive: false,
+        isActive: true,
         venueName,
         company: venueName || null,
         avatar: logo || null,

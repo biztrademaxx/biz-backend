@@ -339,8 +339,8 @@ export async function createVenue(body: Record<string, unknown>) {
       venueCountry: body.venueCountry != null ? String(body.venueCountry) : null,
       venueAddress: body.venueAddress != null ? String(body.venueAddress) : null,
       maxCapacity: body.maxCapacity != null ? Number(body.maxCapacity) : null,
-      /** New venues stay off /venues until admin sets both active + verified. */
-      isActive: body.isActive === true,
+      /** Off /venues until admin sets isVerified; account stays active for login. */
+      isActive: body.isActive !== false,
       isVerified: body.isVerified === true,
       avatar: logo || null,
       venueImages,
