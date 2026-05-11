@@ -1,3 +1,4 @@
+import "./load-env";
 import { validateEnv } from "./config/env";
 import { createApp } from "./app";
 import { startDeactivationScheduler } from "./jobs/deactivation-scheduler";

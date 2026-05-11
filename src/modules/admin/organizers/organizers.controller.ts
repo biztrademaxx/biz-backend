@@ -2,6 +2,8 @@ import { Request, Response } from "express";
 import { sendList, sendOne, sendError } from "../../../lib/admin-response";
 import * as service from "./organizers.service";
 import * as promoAdmin from "../promotions/promotions-admin.service";
+import prisma from "../../../config/prisma";
+import { importOrganizersFromFile } from "../bulk-import/bulk-import.service";
 
 export async function list(req: Request, res: Response) {
   try {
@@ -25,6 +27,21 @@ export async function getById(req: Request, res: Response) {
 export async function create(req: Request, res: Response) {
   try {
     const item = await service.createOrganizer(req.body ?? {});
+    if (req.auth?.domain === "ADMIN") {
+      await prisma.adminLog.create({
+        data: {
+          adminId: req.auth.sub,
+          adminType: req.auth.role === "SUB_ADMIN" ? "SUB_ADMIN" : "SUPER_ADMIN",
+          action: "ADMIN_ORGANIZER_CREATED",
+          resource: "ORGANIZER",
+          resourceId: (item as any)?.id ?? null,
+          details: {
+            email: (item as any)?.email ?? null,
+            name: `${(item as any)?.firstName ?? ""} ${(item as any)?.lastName ?? ""}`.trim(),
+          },
+        },
+      });
+    }
     return res.status(201).json({ success: true, data: item });
   } catch (e: any) {
     if (e?.message?.includes("already exists")) return sendError(res, 400, e.message);
@@ -115,5 +132,47 @@ export async function patchOrganizerPromotion(req: Request, res: Response) {
       return sendError(res, 400, "Rejection reason is required");
     }
     return sendError(res, 500, "Failed to update promotion", e?.message);
+  }
+}
+
+export async function importBulk(req: Request, res: Response) {
+  try {
+    const auth = req.auth;
+    if (!auth || auth.domain !== "ADMIN") {
+      return sendError(res, 403, "Admin access required");
+    }
+
+    const file = (req as Request & { file?: Express.Multer.File }).file;
+    if (!file?.buffer) {
+      return sendError(res, 400, "No file uploaded (use field name: file)");
+    }
+
+    const result = await importOrganizersFromFile({
+      buffer: file.buffer,
+      adminId: auth.sub,
+      adminType: auth.role === "SUB_ADMIN" ? "SUB_ADMIN" : "SUPER_ADMIN",
+    });
+
+    return res.status(200).json({
+      success: true,
+      ...result,
+      message: `Imported ${result.successCount} organizer(s) with ${result.errorCount} error(s).`,
+    });
+  } catch (e: any) {
+    return sendError(res, 500, "Failed to import organizers", e?.message);
+  }
+}
+
+export async function sendAccountEmail(req: Request, res: Response) {
+  try {
+    await service.sendOrganizerAccountEmail({
+      organizerId: req.body?.organizerId,
+      organizerEmail: req.body?.organizerEmail,
+    });
+    return res.status(200).json({ success: true, message: "Organizer email sent successfully" });
+  } catch (e: any) {
+    if (e?.message?.includes("required")) return sendError(res, 400, e.message);
+    if (e?.message?.includes("not found")) return sendError(res, 404, e.message);
+    return sendError(res, 500, "Failed to send organizer email", e?.message);
   }
 }

@@ -28,6 +28,7 @@ export async function createBanner(req: Request, res: Response) {
     }
     const created = await service.createBanner({
       title: String(b.title),
+      description: typeof b.description === "string" ? b.description : undefined,
       page: String(b.page),
       position: String(b.position ?? "hero"),
       imageUrl: String(b.imageUrl),

@@ -12,6 +12,8 @@ import {
   adminGetDashboardSummary,
   adminListEventCategories,
   adminVerifyEvent,
+  adminGetEventMailCandidates,
+  adminSendEventListingEmail,
 } from "./admin.service";
 
 export async function adminGetEventsHandler(req: Request, res: Response) {
@@ -142,9 +144,6 @@ export async function adminUpdateEventHandler(req: Request, res: Response) {
     }
     if (body.layout !== undefined) {
       body.layoutPlan = body.layout;
-    }
-    if (body.subTitle !== undefined && body.shortDescription === undefined) {
-      body.shortDescription = body.subTitle;
     }
     if (body.maxCapacity !== undefined) {
       body.maxAttendees = body.maxCapacity;
@@ -354,6 +353,46 @@ export async function adminGetEventCategoriesHandler(_req: Request, res: Respons
     // eslint-disable-next-line no-console
     console.error("Admin get event categories error (backend):", error);
     return res.status(500).json([]);
+  }
+}
+
+export async function adminGetEventMailCandidatesHandler(_req: Request, res: Response) {
+  try {
+    const rows = await adminGetEventMailCandidates();
+    return res.json({ success: true, data: rows });
+  } catch (error: any) {
+    console.error("Admin get event mail candidates error (backend):", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to fetch event mail candidates",
+      details: error.message,
+    });
+  }
+}
+
+export async function adminSendEventListingEmailHandler(req: Request, res: Response) {
+  try {
+    const organizerEmail = String(req.body?.organizerEmail ?? "").trim();
+    const eventTitles = Array.isArray(req.body?.eventTitles)
+      ? req.body.eventTitles.map((x: unknown) => String(x)).filter(Boolean)
+      : [];
+
+    if (!organizerEmail || eventTitles.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: "organizerEmail and eventTitles are required",
+      });
+    }
+
+    await adminSendEventListingEmail({ organizerEmail, eventTitles });
+    return res.json({ success: true, message: "Email sent" });
+  } catch (error: any) {
+    console.error("Admin send event listing email error (backend):", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to send email",
+      details: error.message,
+    });
   }
 }
 

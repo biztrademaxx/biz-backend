@@ -49,6 +49,7 @@ export function getPublicProfileSlug(user: ProfileLike, preferredRole?: ProfileR
   if (role === "ORGANIZER") {
     return (
       slugifyProfileValue(user.organizationName) ||
+      slugifyProfileValue(user.company) ||
       slugifyProfileValue(user.firstName) ||
       "organizer"
     );

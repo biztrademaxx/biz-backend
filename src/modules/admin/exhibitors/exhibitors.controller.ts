@@ -3,6 +3,7 @@ import { sendList, sendOne, sendError } from "../../../lib/admin-response";
 import * as service from "./exhibitors.service";
 import { updateEventAppointment } from "../../appointments/appointments.service";
 import * as promoAdmin from "../promotions/promotions-admin.service";
+import prisma from "../../../config/prisma";
 
 export async function list(req: Request, res: Response) {
   try {
@@ -35,6 +36,21 @@ export async function getStats(req: Request, res: Response) {
 export async function create(req: Request, res: Response) {
   try {
     const item = await service.createExhibitor(req.body ?? {});
+    if (req.auth?.domain === "ADMIN") {
+      await prisma.adminLog.create({
+        data: {
+          adminId: req.auth.sub,
+          adminType: req.auth.role === "SUB_ADMIN" ? "SUB_ADMIN" : "SUPER_ADMIN",
+          action: "ADMIN_EXHIBITOR_CREATED",
+          resource: "EXHIBITOR",
+          resourceId: (item as any)?.id ?? null,
+          details: {
+            email: (item as any)?.email ?? null,
+            company: (item as any)?.company ?? null,
+          },
+        },
+      });
+    }
     return res.status(201).json({ success: true, data: item });
   } catch (e: any) {
     if (e?.message?.includes("already exists")) return sendError(res, 400, e.message);

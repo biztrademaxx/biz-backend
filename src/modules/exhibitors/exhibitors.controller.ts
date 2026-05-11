@@ -5,6 +5,8 @@ import {
   updateExhibitorProfile,
   getExhibitorAnalytics,
   getExhibitorEvents,
+  getExhibitorPromotionsMarketingForSelf,
+  createExhibitorPromotionForSelf,
   createExhibitor,
   listExhibitorReviews,
   createExhibitorReview,
@@ -130,6 +132,68 @@ export async function getExhibitorEventsHandler(req: Request, res: Response) {
   }
 }
 
+/** Logged-in exhibitor: promotions + events for Promotions & Marketing dashboard. */
+export async function getExhibitorPromotionsMarketingHandler(req: Request, res: Response) {
+  try {
+    const exhibitorId = typeof req.query.exhibitorId === "string" ? req.query.exhibitorId.trim() : "";
+    if (!exhibitorId) {
+      return res.status(400).json({ error: "exhibitorId is required" });
+    }
+    const viewerId = req.auth?.domain === "USER" ? req.auth.sub : undefined;
+    if (!viewerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const data = await getExhibitorPromotionsMarketingForSelf(exhibitorId, viewerId);
+    return res.status(200).json(data);
+  } catch (error: any) {
+    if (error instanceof Error && error.message === "FORBIDDEN") {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    // eslint-disable-next-line no-console
+    console.error("Error fetching exhibitor promotions marketing (backend):", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+export async function createExhibitorPromotionHandler(req: Request, res: Response) {
+  try {
+    if (req.auth?.domain !== "USER" || !req.auth.sub) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const viewerUserId = req.auth.sub;
+    const raw = req.body ?? {};
+    const result = await createExhibitorPromotionForSelf(viewerUserId, {
+      exhibitorId: typeof raw.exhibitorId === "string" ? raw.exhibitorId : "",
+      eventId: typeof raw.eventId === "string" ? raw.eventId : "",
+      packageType: typeof raw.packageType === "string" ? raw.packageType : "",
+      targetCategories: Array.isArray(raw.targetCategories) ? (raw.targetCategories as string[]) : [],
+      amount: Number(raw.amount),
+      duration: Number(raw.duration),
+    });
+    if ("error" in result) {
+      if (result.error === "FORBIDDEN") {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      if (result.error === "NOT_FOUND") {
+        return res.status(404).json({ error: "Event not found" });
+      }
+      if (result.error === "NOT_BOOTH") {
+        return res.status(403).json({ error: "No booth booking for this event" });
+      }
+      return res.status(400).json({ error: "Missing or invalid fields" });
+    }
+    return res.status(201).json({
+      success: true,
+      message: "Promotion created successfully",
+      promotion: result.promotion,
+    });
+  } catch (error: any) {
+    // eslint-disable-next-line no-console
+    console.error("Error creating exhibitor promotion (backend):", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+}
+
 export async function getExhibitorLeadsCountHandler(req: Request, res: Response) {
   try {
     const exhibitorId = req.params.id;
@@ -170,6 +234,12 @@ export async function createExhibitorReviewHandler(req: Request, res: Response) 
     const review = await createExhibitorReview(exhibitorId, req.body ?? {}, userId);
     return res.status(201).json(review);
   } catch (error: any) {
+    if (error instanceof Error && error.message === "Exhibitor not found") {
+      return res.status(404).json({ error: "Exhibitor not found" });
+    }
+    if (error instanceof Error && error.message.includes("exhibitorId is required")) {
+      return res.status(400).json({ error: "exhibitorId is required" });
+    }
     // eslint-disable-next-line no-console
     console.error("Error creating exhibitor review (backend):", error);
     return res.status(500).json({ error: "Internal server error" });
@@ -195,6 +265,9 @@ export async function createExhibitorReviewReplyHandler(req: Request, res: Respo
     );
     return res.status(201).json(reply);
   } catch (error: any) {
+    if (error instanceof Error && error.message === "Exhibitor not found") {
+      return res.status(404).json({ error: "Exhibitor not found" });
+    }
     if (error instanceof Error && error.message === "Review not found") {
       return res.status(404).json({ error: "Review not found" });
     }

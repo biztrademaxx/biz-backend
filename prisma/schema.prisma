@@ -8,6 +8,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // ─── Enums ─────────────────────────────────────────────────────────────────
@@ -359,6 +360,8 @@ model User {
   venueCurrency    String  @default("USD")
   latitude         Float?
   longitude        Float?
+  /// IANA time zone for this venue (e.g. Asia/Kolkata); used when scheduling events at the venue.
+  venueTimezone    String?
 
   speakingExperience String?
 
@@ -515,6 +518,9 @@ model Event {
 
   venueId     String? @db.Uuid
   venue       User?   @relation("EventVenue", fields: [venueId], references: [id])
+  city        String?
+  state       String?
+  country     String?
   isVirtual   Boolean @default(false)
   virtualLink String?
 
@@ -569,6 +575,7 @@ model Event {
   conferences      Conference[]
   exhibitorManuals ExhibitorManual[]
 
+  @@index([status, isPublic, createdAt])
   @@map("events")
 }
 
@@ -1124,10 +1131,26 @@ model Country {
   isPermitted  Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+  states       State[]
   cities       City[]
   @@index([isActive])
   @@index([isPermitted])
   @@map("countries")
+}
+model State {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  countryId   String   @db.Uuid
+  country     Country  @relation(fields: [countryId], references: [id], onDelete: Cascade)
+  isActive    Boolean  @default(true)
+  isPermitted Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@unique([name, countryId])
+  @@index([countryId])
+  @@index([isActive])
+  @@index([isPermitted])
+  @@map("states")
 }
 model ExhibitorSuggestion {
   id           String   @id @default(uuid()) @db.Uuid
@@ -1151,6 +1174,7 @@ model ExhibitorSuggestion {
 model City {
   id            String   @id @default(uuid()) @db.Uuid
   name          String
+  state         String
   countryId     String   @db.Uuid
   country       Country  @relation(fields: [countryId], references: [id], onDelete: Cascade)
   latitude      Float?
@@ -1169,6 +1193,82 @@ model City {
   @@map("cities")
 }
 
+model EmailCampaign {
+  id               String   @id @default(uuid()) @db.Uuid
+  title            String
+  subject          String
+  content          String   @db.Text
+  htmlContent      String?  @db.Text
+  status           String   @default("draft")
+  priority         String   @default("medium")
+  targetAudiences  Json?
+  scheduledAt      DateTime?
+  sentAt           DateTime?
+  totalRecipients  Int      @default(0)
+  sent             Int      @default(0)
+  delivered        Int      @default(0)
+  opened           Int      @default(0)
+  clicked          Int      @default(0)
+  bounced          Int      @default(0)
+  unsubscribed     Int      @default(0)
+  openRate         Float    @default(0)
+  clickRate        Float    @default(0)
+  deliveryRate     Float    @default(0)
+  bounceRate       Float    @default(0)
+  unsubscribeRate  Float    @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("email_campaigns")
+}
+
+model PushNotification {
+  id              String   @id @default(uuid()) @db.Uuid
+  title           String
+  message         String   @db.Text
+  imageUrl        String?
+  actionUrl       String?
+  status          String   @default("draft")
+  priority        String   @default("medium")
+  targetAudiences Json?
+  targetPlatforms Json?
+  scheduledAt     DateTime?
+  sentAt          DateTime?
+  totalRecipients Int      @default(0)
+  sent            Int      @default(0)
+  delivered       Int      @default(0)
+  opened          Int      @default(0)
+  clicked         Int      @default(0)
+  failed          Int      @default(0)
+  deliveryRate    Float    @default(0)
+  openRate        Float    @default(0)
+  clickRate       Float    @default(0)
+  failureRate     Float    @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("push_notifications")
+}
+
+model SeoKeyword {
+  id         String   @id @default(uuid()) @db.Uuid
+  keyword    String   @unique
+  intent     String   @default("long-tail")
+  volume     Int      @default(0)
+  difficulty Int      @default(0)
+  priority   String   @default("medium")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([priority])
+  @@index([intent])
+  @@map("seo_keywords")
+}
+
 // ─── Admin CMS & settings (key-value + structured content) ───────────────────
 model AdminAppSetting {
   id        String   @id @default(uuid()) @db.Uuid
@@ -1180,6 +1280,12 @@ model AdminAppSetting {
   @@map("admin_app_settings")
 }
 
+/// CMS rows shared across admin: news, blog, banners, featured events, media library.
+/// For `type = BLOG`, `extras` JSON typically includes:
+/// - `coverImageUrl` (string, Cloudinary `secure_url`)
+/// - `coverImagePublicId` (string, optional — Cloudinary `public_id` for transforms/deletion)
+/// - `author` (string, optional)
+/// - `tag` (string, optional category/label)
 model AdminContent {
   id        String           @id @default(uuid()) @db.Uuid
   type      AdminContentType
@@ -1194,6 +1300,8 @@ model AdminContent {
 
   @@index([type])
   @@index([published])
+  @@index([type, published])
+  @@index([type, slug])
   @@map("admin_content")
 }
 
@@ -1231,4 +1339,29 @@ model AdminUserSubscription {
   @@index([planId])
   @@index([status])
   @@map("admin_user_subscriptions")
+}
+
+/// Admin bulk event import from CSV/TSV/XLSX (processed asynchronously on the API server).
+model EventImportJob {
+  id              String   @id @default(uuid()) @db.Uuid
+  status          String   @default("PENDING")
+  fileName        String?
+  totalRows       Int      @default(0)
+  processedRows   Int      @default(0)
+  successCount    Int      @default(0)
+  errorCount      Int      @default(0)
+  /// Parsed sheet rows (array of objects keyed by header names).
+  rowsPayload     Json?
+  /// Per-row errors: [{ row: number, message: string }]
+  errors          Json?
+  /// Successful imports: [{ title: string, organizerEmail: string }]
+  importedSummary Json?
+  createdByAdminId String?
+  createdByAdminRole String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("event_import_jobs")
 }

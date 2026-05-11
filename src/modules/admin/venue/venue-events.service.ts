@@ -14,6 +14,8 @@ export async function listVenueEventsForAdmin() {
       phone: true,
       venueName: true,
       venueCity: true,
+      averageRating: true,
+      totalReviews: true,
       venueEvents: {
         select: {
           id: true,
@@ -52,7 +54,8 @@ export async function listVenueEventsForAdmin() {
       completedEvents: completed,
       activeEvents: active,
       totalRevenue: 0,
-      averageRating: 0,
+      averageRating: v.averageRating != null ? Number(v.averageRating) : 0,
+      totalReviews: v.totalReviews ?? 0,
       events: events.map((e) => ({
         id: e.id,
         title: e.title,

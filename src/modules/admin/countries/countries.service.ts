@@ -1,5 +1,51 @@
 import prisma from "../../../config/prisma";
 
+export async function listStateStats(countryCode?: string) {
+  const countries = await prisma.country.findMany({
+    select: { name: true, code: true },
+  });
+  const countryByCode = new Map(countries.map((c) => [c.code.toUpperCase(), c.name]));
+  const selectedCountryName = countryCode ? countryByCode.get(countryCode.toUpperCase()) : null;
+
+  const events = await prisma.event.findMany({
+    select: {
+      country: true,
+      state: true,
+      city: true,
+      venue: {
+        select: {
+          venueCountry: true,
+          venueState: true,
+          venueCity: true,
+        },
+      },
+    },
+  });
+
+  const byState = new Map<string, { state: string; country: string; eventCount: number; citySet: Set<string> }>();
+  for (const row of events) {
+    const country = (row.country || row.venue?.venueCountry || "").trim();
+    const state = (row.state || row.venue?.venueState || "").trim();
+    const city = (row.city || row.venue?.venueCity || "").trim();
+    if (!country || !state) continue;
+    if (selectedCountryName && country.toLowerCase() !== selectedCountryName.toLowerCase()) continue;
+    const key = `${country.toLowerCase()}::${state.toLowerCase()}`;
+    const current = byState.get(key) ?? { state, country, eventCount: 0, citySet: new Set<string>() };
+    current.eventCount += 1;
+    if (city) current.citySet.add(city.toLowerCase());
+    byState.set(key, current);
+  }
+
+  return Array.from(byState.values())
+    .map((x) => ({
+      state: x.state,
+      country: x.country,
+      eventCount: x.eventCount,
+      cityCount: x.citySet.size,
+    }))
+    .sort((a, b) => b.eventCount - a.eventCount || a.state.localeCompare(b.state));
+}
+
 export async function listCountries(includeCounts: boolean) {
   const countries = await prisma.country.findMany({
     include: {
@@ -38,13 +84,20 @@ export async function listCountries(includeCounts: boolean) {
       let eventCount = 0;
       const venueCountryMatch = await prisma.event.count({
         where: {
-          venue: {
-            OR: [
-              { venueCountry: country.name },
-              { venueCountry: { contains: country.name, mode: "insensitive" } },
-              { venueCountry: { contains: country.code, mode: "insensitive" } },
-            ],
-          },
+          OR: [
+            { country: country.name },
+            { country: { contains: country.name, mode: "insensitive" } },
+            { country: { contains: country.code, mode: "insensitive" } },
+            {
+              venue: {
+                OR: [
+                  { venueCountry: country.name },
+                  { venueCountry: { contains: country.name, mode: "insensitive" } },
+                  { venueCountry: { contains: country.code, mode: "insensitive" } },
+                ],
+              },
+            },
+          ],
         },
       });
       eventCount += venueCountryMatch;
@@ -85,13 +138,20 @@ export async function getCountryById(id: string) {
   let eventCount = 0;
   const venueCountryMatch = await prisma.event.count({
     where: {
-      venue: {
-        OR: [
-          { venueCountry: country.name },
-          { venueCountry: { contains: country.name, mode: "insensitive" } },
-          { venueCountry: { contains: country.code, mode: "insensitive" } },
-        ],
-      },
+      OR: [
+        { country: country.name },
+        { country: { contains: country.name, mode: "insensitive" } },
+        { country: { contains: country.code, mode: "insensitive" } },
+        {
+          venue: {
+            OR: [
+              { venueCountry: country.name },
+              { venueCountry: { contains: country.name, mode: "insensitive" } },
+              { venueCountry: { contains: country.code, mode: "insensitive" } },
+            ],
+          },
+        },
+      ],
     },
   });
   eventCount += venueCountryMatch;

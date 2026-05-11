@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { UploadApiResponse } from "cloudinary";
 import type { Express } from "express";
 import { uploadImage, uploadDocument } from "./cloudinary.service";
@@ -10,11 +11,48 @@ export interface UploadResult {
 const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB (align with organizer dashboard)
 const MAX_DOCUMENT_SIZE_BYTES = 15 * 1024 * 1024; // 15MB
 
-const ALLOWED_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const ALLOWED_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+/** Brochure / document uploads (Cloudinary raw). Images allowed for one-sheet “brochures”. */
 const ALLOWED_DOCUMENT_MIME_TYPES = new Set([
   "application/pdf",
   "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/rtf",
+  "text/rtf",
+  "text/plain",
+  "text/csv",
+  "application/vnd.oasis.opendocument.text",
+  "application/vnd.oasis.opendocument.spreadsheet",
+  "application/vnd.oasis.opendocument.presentation",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+]);
+
+const ALLOWED_DOCUMENT_EXTENSIONS = new Set([
+  ".pdf",
+  ".doc",
+  ".docx",
+  ".xls",
+  ".xlsx",
+  ".ppt",
+  ".pptx",
+  ".rtf",
+  ".txt",
+  ".csv",
+  ".odt",
+  ".ods",
+  ".odp",
+  ".jpeg",
+  ".jpg",
+  ".png",
+  ".webp",
+  ".gif",
 ]);
 const MAX_MATERIAL_SIZE_BYTES = 20 * 1024 * 1024; // 20MB for presentation materials
 const ALLOWED_MATERIAL_MIME_TYPES = new Set([
@@ -44,7 +82,13 @@ export function validateImageFile(file: Express.Multer.File): void {
 }
 
 export function validateDocumentFile(file: Express.Multer.File): void {
-  if (!ALLOWED_DOCUMENT_MIME_TYPES.has(file.mimetype)) {
+  const ext = file.originalname ? path.extname(file.originalname).toLowerCase() : "";
+  const extOk = ext.length > 0 && ALLOWED_DOCUMENT_EXTENSIONS.has(ext);
+  const mimeOk = ALLOWED_DOCUMENT_MIME_TYPES.has(file.mimetype);
+  const looseBinary =
+    (file.mimetype === "application/octet-stream" || file.mimetype === "") && extOk;
+
+  if (!mimeOk && !looseBinary) {
     throw new Error("UNSUPPORTED_DOCUMENT_TYPE");
   }
   if (file.size > MAX_DOCUMENT_SIZE_BYTES) {

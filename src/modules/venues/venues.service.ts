@@ -58,6 +58,7 @@ export async function listVenues(params: ListVenuesParams) {
         venueCurrency: true,
         avatar: true,
         venueImages: true,
+        venueTimezone: true,
         createdAt: true,
         updatedAt: true,
         _count: {
@@ -91,6 +92,7 @@ export async function listVenues(params: ListVenuesParams) {
         city: v.venueCity || "",
         state: v.venueState || "",
         country: v.venueCountry || "",
+        timezone: v.venueTimezone || "",
       },
       address,
     };

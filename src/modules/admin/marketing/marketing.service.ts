@@ -76,9 +76,6 @@ export interface PushTemplateItem {
   updatedAt?: string;
 }
 
-const campaignsStore: EmailCampaignItem[] = [];
-const pushStore: PushNotificationItem[] = [];
-
 const templatesStore: EmailTemplateItem[] = [
   {
     id: "welcome",
@@ -113,10 +110,38 @@ const pushTemplatesStore: PushTemplateItem[] = [
   },
 ];
 
-export function listEmailCampaigns(status?: string): EmailCampaignItem[] {
-  if (!status || status === "all") return campaignsStore;
-  const normalized = status.toLowerCase();
-  return campaignsStore.filter((c) => c.status === normalized);
+export async function listEmailCampaigns(status?: string): Promise<EmailCampaignItem[]> {
+  const where = !status || status === "all" ? {} : { status: status.toLowerCase() };
+  const rows = await prisma.emailCampaign.findMany({
+    where,
+    orderBy: { createdAt: "desc" },
+  });
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    subject: row.subject,
+    content: row.content,
+    status: row.status as CampaignStatus,
+    priority: row.priority as CampaignPriority,
+    targetAudiences: Array.isArray(row.targetAudiences) ? row.targetAudiences.map(String) : [],
+    createdAt: row.createdAt.toISOString(),
+    scheduledAt: row.scheduledAt?.toISOString(),
+    sentAt: row.sentAt?.toISOString(),
+    stats: {
+      totalRecipients: row.totalRecipients,
+      sent: row.sent,
+      delivered: row.delivered,
+      opened: row.opened,
+      clicked: row.clicked,
+      bounced: row.bounced,
+      unsubscribed: row.unsubscribed,
+    },
+    engagement: {
+      openRate: row.openRate,
+      clickRate: row.clickRate,
+      deliveryRate: row.deliveryRate,
+    },
+  }));
 }
 
 export async function createEmailCampaign(input: {
@@ -157,8 +182,34 @@ export async function createEmailCampaign(input: {
     failed = mailResults.length - sent;
   }
 
+  const created = await prisma.emailCampaign.create({
+    data: {
+      title: input.title,
+      subject: input.subject,
+      content: input.content,
+      htmlContent: input.htmlContent,
+      status: sendNow ? "sending" : "scheduled",
+      priority: (input.priority as CampaignPriority) || "medium",
+      targetAudiences: Array.isArray(input.targetAudiences) ? input.targetAudiences : [],
+      scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : null,
+      sentAt: sendNow ? new Date(nowIso) : null,
+      totalRecipients: uniqueEmails.length,
+      sent,
+      delivered: sent,
+      opened: 0,
+      clicked: 0,
+      bounced: failed,
+      unsubscribed: 0,
+      openRate: 0,
+      clickRate: 0,
+      deliveryRate: uniqueEmails.length > 0 ? Number(((sent / uniqueEmails.length) * 100).toFixed(2)) : 0,
+      bounceRate: uniqueEmails.length > 0 ? Number(((failed / uniqueEmails.length) * 100).toFixed(2)) : 0,
+      unsubscribeRate: 0,
+    },
+  });
+
   const item: EmailCampaignItem = {
-    id: `${Date.now()}`,
+    id: created.id,
     title: input.title,
     subject: input.subject,
     content: input.content,
@@ -183,7 +234,6 @@ export async function createEmailCampaign(input: {
       deliveryRate: uniqueEmails.length > 0 ? Number(((sent / uniqueEmails.length) * 100).toFixed(2)) : 0,
     },
   };
-  campaignsStore.unshift(item);
   return item;
 }
 
@@ -227,24 +277,63 @@ export function deleteEmailTemplate(id: string): boolean {
   return true;
 }
 
-export function listPushNotifications(status?: string): PushNotificationItem[] {
-  if (!status || status === "all") return pushStore;
-  const normalized = status.toLowerCase();
-  return pushStore.filter((n) => n.status === normalized);
+export async function listPushNotifications(status?: string): Promise<PushNotificationItem[]> {
+  const where = !status || status === "all" ? {} : { status: status.toLowerCase() };
+  const rows = await prisma.pushNotification.findMany({
+    where,
+    orderBy: { createdAt: "desc" },
+  });
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    body: row.message,
+    status: row.status as CampaignStatus,
+    priority: row.priority as CampaignPriority,
+    targetAudiences: Array.isArray(row.targetAudiences) ? row.targetAudiences.map(String) : [],
+    createdAt: row.createdAt.toISOString(),
+    scheduledAt: row.scheduledAt?.toISOString(),
+    sentAt: row.sentAt?.toISOString(),
+    stats: {
+      totalRecipients: row.totalRecipients,
+      sent: row.sent,
+      delivered: row.delivered,
+      opened: row.opened,
+      clicked: row.clicked,
+      failed: row.failed,
+    },
+    engagement: {
+      openRate: row.openRate,
+      clickRate: row.clickRate,
+      deliveryRate: row.deliveryRate,
+    },
+  }));
 }
 
-export function createPushNotification(input: {
+export async function createPushNotification(input: {
   title: string;
   bodyText: string;
   priority?: string;
   targetAudiences?: string[];
+  targetPlatforms?: string[];
   scheduledAt?: string;
   sendImmediately?: boolean;
-}): PushNotificationItem {
+}): Promise<PushNotificationItem> {
   const nowIso = new Date().toISOString();
   const sendNow = !!input.sendImmediately;
+  const created = await prisma.pushNotification.create({
+    data: {
+      title: input.title,
+      message: input.bodyText,
+      status: sendNow ? "sending" : "scheduled",
+      priority: (input.priority as CampaignPriority) || "medium",
+      targetAudiences: Array.isArray(input.targetAudiences) ? input.targetAudiences : [],
+      targetPlatforms: Array.isArray(input.targetPlatforms) ? input.targetPlatforms : ["ios", "android", "web"],
+      scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : null,
+      sentAt: sendNow ? new Date(nowIso) : null,
+    },
+  });
   const item: PushNotificationItem = {
-    id: `${Date.now()}`,
+    id: created.id,
     title: input.title,
     body: input.bodyText,
     status: sendNow ? "sending" : "scheduled",
@@ -267,7 +356,6 @@ export function createPushNotification(input: {
       deliveryRate: 0,
     },
   };
-  pushStore.unshift(item);
   return item;
 }
 
@@ -308,5 +396,136 @@ export function deletePushTemplate(id: string): boolean {
   const idx = pushTemplatesStore.findIndex((t) => t.id === id);
   if (idx === -1) return false;
   pushTemplatesStore.splice(idx, 1);
+  return true;
+}
+
+export interface MarketingTrafficSummary {
+  totals: {
+    emailCampaigns: number;
+    pushNotifications: number;
+    sent: number;
+    delivered: number;
+    opened: number;
+    clicked: number;
+  };
+  rates: {
+    openRate: number;
+    clickRate: number;
+    deliveryRate: number;
+  };
+  channels: {
+    email: { sent: number; delivered: number; opened: number; clicked: number };
+    push: { sent: number; delivered: number; opened: number; clicked: number };
+  };
+}
+
+export async function getMarketingTrafficSummaryAsync(): Promise<MarketingTrafficSummary> {
+  const [emailCount, pushCount, emailAgg, pushAgg] = await Promise.all([
+    prisma.emailCampaign.count(),
+    prisma.pushNotification.count(),
+    prisma.emailCampaign.aggregate({ _sum: { sent: true, delivered: true, opened: true, clicked: true } }),
+    prisma.pushNotification.aggregate({ _sum: { sent: true, delivered: true, opened: true, clicked: true } }),
+  ]);
+
+  const emailTotals = {
+    sent: emailAgg._sum.sent ?? 0,
+    delivered: emailAgg._sum.delivered ?? 0,
+    opened: emailAgg._sum.opened ?? 0,
+    clicked: emailAgg._sum.clicked ?? 0,
+  };
+  const pushTotals = {
+    sent: pushAgg._sum.sent ?? 0,
+    delivered: pushAgg._sum.delivered ?? 0,
+    opened: pushAgg._sum.opened ?? 0,
+    clicked: pushAgg._sum.clicked ?? 0,
+  };
+
+  const sent = emailTotals.sent + pushTotals.sent;
+  const delivered = emailTotals.delivered + pushTotals.delivered;
+  const opened = emailTotals.opened + pushTotals.opened;
+  const clicked = emailTotals.clicked + pushTotals.clicked;
+
+  return {
+    totals: {
+      emailCampaigns: emailCount,
+      pushNotifications: pushCount,
+      sent,
+      delivered,
+      opened,
+      clicked,
+    },
+    rates: {
+      openRate: delivered > 0 ? Number(((opened / delivered) * 100).toFixed(2)) : 0,
+      clickRate: delivered > 0 ? Number(((clicked / delivered) * 100).toFixed(2)) : 0,
+      deliveryRate: sent > 0 ? Number(((delivered / sent) * 100).toFixed(2)) : 0,
+    },
+    channels: {
+      email: emailTotals,
+      push: pushTotals,
+    },
+  };
+}
+
+export interface SeoKeywordItem {
+  id: string;
+  keyword: string;
+  intent: "brand" | "event" | "location" | "long-tail";
+  volume: number;
+  difficulty: number;
+  priority: "low" | "medium" | "high";
+  updatedAt: string;
+}
+
+export async function listSeoKeywords(): Promise<SeoKeywordItem[]> {
+  const rows = await prisma.seoKeyword.findMany({ orderBy: { updatedAt: "desc" } });
+  return rows.map((row) => ({
+    id: row.id,
+    keyword: row.keyword,
+    intent: row.intent as SeoKeywordItem["intent"],
+    volume: row.volume,
+    difficulty: row.difficulty,
+    priority: row.priority as SeoKeywordItem["priority"],
+    updatedAt: row.updatedAt.toISOString(),
+  }));
+}
+
+export async function createSeoKeyword(input: {
+  keyword: string;
+  intent?: SeoKeywordItem["intent"];
+  volume?: number;
+  difficulty?: number;
+  priority?: SeoKeywordItem["priority"];
+}): Promise<SeoKeywordItem> {
+  const row = await prisma.seoKeyword.upsert({
+    where: { keyword: input.keyword.trim() },
+    update: {
+      intent: input.intent || "long-tail",
+      volume: Number.isFinite(input.volume) ? Number(input.volume) : 0,
+      difficulty: Number.isFinite(input.difficulty) ? Number(input.difficulty) : 0,
+      priority: input.priority || "medium",
+    },
+    create: {
+      keyword: input.keyword.trim(),
+      intent: input.intent || "long-tail",
+      volume: Number.isFinite(input.volume) ? Number(input.volume) : 0,
+      difficulty: Number.isFinite(input.difficulty) ? Number(input.difficulty) : 0,
+      priority: input.priority || "medium",
+    },
+  });
+  return {
+    id: row.id,
+    keyword: row.keyword,
+    intent: row.intent as SeoKeywordItem["intent"],
+    volume: row.volume,
+    difficulty: row.difficulty,
+    priority: row.priority as SeoKeywordItem["priority"],
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export async function deleteSeoKeyword(id: string): Promise<boolean> {
+  const found = await prisma.seoKeyword.findUnique({ where: { id } });
+  if (!found) return false;
+  await prisma.seoKeyword.delete({ where: { id } });
   return true;
 }

@@ -16,16 +16,7 @@ export async function listCountries(_req: Request, res: Response) {
 export async function listCities(req: Request, res: Response) {
   try {
     const countryId = typeof req.query.countryId === "string" ? req.query.countryId : undefined;
-    const rows = await service.listPublicCities(countryId);
-    const data = rows.map((c) => ({
-      id: c.id,
-      name: c.name,
-      image: c.image,
-      countryId: c.countryId,
-      country: c.country,
-      createdAt: c.createdAt.toISOString(),
-      updatedAt: c.updatedAt.toISOString(),
-    }));
+    const data = await service.listPublicCities(countryId);
     return res.json({ success: true, data });
   } catch (e: any) {
     return res.status(500).json({

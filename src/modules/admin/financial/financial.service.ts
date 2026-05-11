@@ -101,7 +101,7 @@ export async function listTransactions(query: Record<string, unknown>) {
 }
 
 export async function listPayments(query: Record<string, unknown>) {
-  const { page, limit, skip, search, status } = parseListQuery(query);
+  const { page, limit, skip, search, status } = parseFinancialListQuery(query);
 
   const searchFilter =
     search.length > 0

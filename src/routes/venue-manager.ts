@@ -1,7 +1,62 @@
 import { Router } from "express";
 import prisma from "../config/prisma";
+import { normalizeVenueTimezoneInput } from "../utils/iana-timezones";
 
 const router = Router();
+
+async function syncLocationMasterFromVenue(input: { country?: string; state?: string; city?: string }) {
+  const countryName = String(input.country ?? "").trim();
+  const stateName = String(input.state ?? "").trim();
+  const cityName = String(input.city ?? "").trim();
+  if (!countryName) return;
+
+  const normalizedCode = countryName.replace(/[^A-Za-z]/g, "").slice(0, 3).toUpperCase() || "UNK";
+  const country = await prisma.country.upsert({
+    where: { name: countryName },
+    update: {},
+    create: {
+      name: countryName,
+      code: normalizedCode,
+      timezone: "UTC",
+      currency: "USD",
+      isActive: true,
+      isPermitted: false,
+    },
+  });
+  if (stateName) {
+    await (prisma as any).state.upsert({
+      where: { name_countryId: { name: stateName, countryId: country.id } },
+      update: {},
+      create: {
+        name: stateName,
+        countryId: country.id,
+        isActive: true,
+        isPermitted: false,
+      },
+    });
+  }
+
+  if (!cityName || !stateName) return;
+
+  const existingCity = await prisma.city.findFirst({
+    where: {
+      countryId: country.id,
+      name: { equals: cityName, mode: "insensitive" },
+    },
+  });
+  if (!existingCity) {
+    await prisma.city.create({
+      data: {
+        name: cityName,
+        state: stateName,
+        countryId: country.id,
+        timezone: country.timezone || "UTC",
+        isActive: true,
+        isPermitted: false,
+      },
+    });
+  }
+}
 
 // GET /api/venue-manager/:id – venue manager profile + basic stats
 router.get("/venue-manager/:id", async (req, res) => {
@@ -23,6 +78,19 @@ router.get("/venue-manager/:id", async (req, res) => {
         error: "Venue manager not found",
       });
     }
+
+    const now = new Date();
+    const [totalEvents, activeBookings] = await Promise.all([
+      prisma.event.count({
+        where: { venueId: venueManager.id },
+      }),
+      prisma.event.count({
+        where: {
+          venueId: venueManager.id,
+          endDate: { gte: now },
+        },
+      }),
+    ]);
 
     const data = {
       id: venueManager.id,
@@ -53,6 +121,7 @@ router.get("/venue-manager/:id", async (req, res) => {
         state: venueManager.venueState ?? "",
         country: venueManager.venueCountry ?? "",
         zipCode: venueManager.venueZipCode ?? "",
+        timezone: venueManager.venueTimezone ?? "",
         coordinates: {
           lat: venueManager.latitude ?? 0,
           lng: venueManager.longitude ?? 0,
@@ -74,8 +143,8 @@ router.get("/venue-manager/:id", async (req, res) => {
       stats: {
         averageRating: venueManager.averageRating ?? 0,
         totalReviews: venueManager.totalReviews ?? 0,
-        activeBookings: venueManager.activeBookings ?? 0,
-        totalEvents: venueManager.totalEvents ?? 0,
+        activeBookings,
+        totalEvents,
       },
       amenities: (venueManager.amenities as string[] | null) ?? [],
       images: (venueManager.venueImages as string[] | null) ?? [],
@@ -132,6 +201,7 @@ router.post("/venue-manager/:organizerId", async (req, res) => {
       totalReviews,
       amenities,
       meetingSpaces,
+      venueTimezone,
     } = body;
 
     if (!organizerId) {
@@ -192,6 +262,8 @@ router.post("/venue-manager/:organizerId", async (req, res) => {
       });
     }
 
+    const tzCreate = normalizeVenueTimezoneInput(venueTimezone);
+
     const venueManager = await prisma.user.create({
       data: {
         role: "VENUE_MANAGER",
@@ -222,7 +294,14 @@ router.post("/venue-manager/:organizerId", async (req, res) => {
         totalReviews: totalReviews ? parseInt(String(totalReviews), 10) : 0,
         amenities: amenities || [],
         organizerIdForVenueManager: organizerId,
+        ...(tzCreate !== undefined ? { venueTimezone: tzCreate } : {}),
       },
+    });
+
+    await syncLocationMasterFromVenue({
+      country: venueCountry,
+      state: venueState,
+      city: venueCity,
     });
 
     // Meeting spaces are not yet modeled in backend schema; echo back the
@@ -301,6 +380,8 @@ router.put("/venue-manager/:id", async (req, res) => {
       longitude,
       basePrice,
       currency,
+      timezone,
+      venueTimezone: venueTimezoneBody,
     } = body;
 
     let firstName = "";
@@ -310,6 +391,13 @@ router.put("/venue-manager/:id", async (req, res) => {
       firstName = parts[0] || "";
       lastName = parts.slice(1).join(" ") || "";
     }
+
+    const rawVenueTz =
+      timezone !== undefined ? timezone : venueTimezoneBody;
+    const tzUpdate =
+      rawVenueTz !== undefined
+        ? normalizeVenueTimezoneInput(rawVenueTz)
+        : undefined;
 
     const updatedVenue = await prisma.user.update({
       where: { id },
@@ -372,7 +460,14 @@ router.put("/venue-manager/:id", async (req, res) => {
         basePrice:
           basePrice !== undefined ? parseFloat(String(basePrice)) : undefined,
         venueCurrency: currency ?? undefined,
+        ...(tzUpdate !== undefined ? { venueTimezone: tzUpdate } : {}),
       },
+    });
+
+    await syncLocationMasterFromVenue({
+      country,
+      state,
+      city,
     });
 
     const savedMeetingSpaces = (updatedVenue.meetingSpaces as any[] | null) ?? [];
@@ -410,6 +505,7 @@ router.put("/venue-manager/:id", async (req, res) => {
       longitude: updatedVenue.longitude || 0,
       basePrice: updatedVenue.basePrice || 0,
       currency: updatedVenue.venueCurrency || "₹",
+      timezone: updatedVenue.venueTimezone || "",
     };
 
     return res.json({

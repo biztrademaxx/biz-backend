@@ -4,7 +4,7 @@ import * as service from "./marketing.service";
 export async function listEmailCampaignsHandler(req: Request, res: Response) {
   try {
     const status = typeof req.query.status === "string" ? req.query.status : "all";
-    const data = service.listEmailCampaigns(status);
+    const data = await service.listEmailCampaigns(status);
     return res.json({ success: true, data });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: "Failed to fetch email campaigns", details: error?.message });
@@ -63,7 +63,7 @@ export async function deleteEmailTemplateHandler(req: Request, res: Response) {
 export async function listPushNotificationsHandler(req: Request, res: Response) {
   try {
     const status = typeof req.query.status === "string" ? req.query.status : "all";
-    const data = service.listPushNotifications(status);
+    const data = await service.listPushNotifications(status);
     return res.json({ success: true, data });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: "Failed to fetch push notifications", details: error?.message });
@@ -116,5 +116,49 @@ export async function deletePushTemplateHandler(req: Request, res: Response) {
     return res.json({ success: true });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: "Failed to delete push template", details: error?.message });
+  }
+}
+
+export async function trafficSummaryHandler(_req: Request, res: Response) {
+  try {
+    const data = await service.getMarketingTrafficSummaryAsync();
+    return res.json({ success: true, data });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: "Failed to fetch traffic summary", details: error?.message });
+  }
+}
+
+export async function listSeoKeywordsHandler(_req: Request, res: Response) {
+  try {
+    const data = await service.listSeoKeywords();
+    return res.json({ success: true, data });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: "Failed to fetch SEO keywords", details: error?.message });
+  }
+}
+
+export async function createSeoKeywordHandler(req: Request, res: Response) {
+  try {
+    const { keyword } = req.body ?? {};
+    if (!keyword || typeof keyword !== "string" || !keyword.trim()) {
+      return res.status(400).json({ success: false, error: "keyword is required" });
+    }
+    const data = await service.createSeoKeyword(req.body ?? {});
+    return res.status(201).json({ success: true, data });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: "Failed to create SEO keyword", details: error?.message });
+  }
+}
+
+export async function deleteSeoKeywordHandler(req: Request, res: Response) {
+  try {
+    const id = req.params.id;
+    const deleted = await service.deleteSeoKeyword(id);
+    if (!deleted) {
+      return res.status(404).json({ success: false, error: "SEO keyword not found" });
+    }
+    return res.json({ success: true });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: "Failed to delete SEO keyword", details: error?.message });
   }
 }

@@ -21,14 +21,15 @@
   "scripts": {
     "postinstall": "prisma generate",
     "dev": "nodemon --watch src --ext ts,js --exec ts-node src/server.ts",
-    "build": "prisma generate && tsc -p tsconfig.json",
+    "build": "prisma generate && node --max-old-space-size=512 ./node_modules/typescript/lib/tsc.js -p tsconfig.json",
     "start": "node dist/server.js",
     "test": "jest --config jest.config.cjs",
     "test:watch": "jest --config jest.config.cjs --watch",
     "test:coverage": "jest --config jest.config.cjs --coverage",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
-    "db:migrate": "prisma migrate dev"
+    "db:migrate": "prisma migrate dev",
+    "admin:bootstrap": "node scripts/create-super-admin.js"
   },
   "dependencies": {
     "@prisma/client": "^6.0.0",
@@ -38,6 +39,7 @@
     "cloudinary": "^1.41.0",
     "compression": "^1.8.1",
     "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
     "express": "^4.21.0",
     "express-rate-limit": "^8.2.1",
     "helmet": "^8.1.0",
@@ -45,7 +47,10 @@
     "morgan": "^1.10.0",
     "multer": "^2.1.0",
     "nodemailer": "^6.9.16",
-    "nodemon": "^3.1.14"
+    "nodemon": "^3.1.14",
+    "resend": "^6.12.2",
+    "undici": "^7.25.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

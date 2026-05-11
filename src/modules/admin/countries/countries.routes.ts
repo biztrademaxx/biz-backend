@@ -5,6 +5,7 @@ import * as ctrl from "./countries.controller";
 const router = Router();
 
 router.get("/", requireAdmin, ctrl.list);
+router.get("/states", requireAdmin, ctrl.listStates);
 router.get("/:id", requireAdmin, ctrl.getById);
 router.post("/", requireAdmin, ctrl.create);
 router.put("/:id", requireAdmin, ctrl.update);

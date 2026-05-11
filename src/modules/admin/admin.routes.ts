@@ -11,8 +11,11 @@ import {
   adminRejectEventHandler,
   adminGetDashboardHandler,
   adminVerifyEventHandler,
+  adminGetEventMailCandidatesHandler,
+  adminSendEventListingEmailHandler,
 } from "./admin.controller";
 import { createEventAdminHandler } from "../events/events.controller";
+import { getEventImportJobHandler, postEventImportHandler } from "./event-import/event-import.controller";
 
 import organizersRoutes from "./organizers/organizers.routes";
 import exhibitorsRoutes from "./exhibitors/exhibitors.routes";
@@ -26,6 +29,7 @@ import subAdminsRoutes from "./sub-admins/sub-admins.routes";
 import eventCategoriesRoutes from "./event-categories/event-categories.routes";
 import countriesRoutes from "./countries/countries.routes";
 import citiesRoutes from "./cities/cities.routes";
+import statesRoutes from "./states/states.routes";
 import uploadRoutes from "./upload/upload.routes";
 import financialRoutes from "./financial/financial.routes";
 import reportsRoutes from "./reports/reports.routes";
@@ -47,15 +51,30 @@ const verifyBadgeUpload = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
 });
 
+const eventImportUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
+
 // ─── Events (existing) ─────────────────────────────────────────────────────
 router.get("/events/stats", requireAdmin, adminGetEventStatsHandler);
 router.get("/events", requireAdmin, adminGetEventsHandler);
+/** Bulk import — must be registered before `/events/:id` so `import` is not captured as :id */
+router.post(
+  "/events/import",
+  requireAdmin,
+  eventImportUpload.single("file"),
+  postEventImportHandler,
+);
+router.get("/events/import/:jobId", requireAdmin, getEventImportJobHandler);
 router.post(
   "/events/:id/verify",
   requireAdmin,
   verifyBadgeUpload.single("badgeFile"),
   adminVerifyEventHandler
 );
+router.get("/events/mail-candidates", requireAdmin, adminGetEventMailCandidatesHandler);
+router.post("/events/send-listing-email", requireAdmin, adminSendEventListingEmailHandler);
 router.get("/events/:id", requireAdmin, adminGetEventByIdHandler);
 router.patch("/events/:id", requireAdmin, adminUpdateEventHandler);
 router.delete("/events/:id", requireAdmin, adminDeleteEventHandler);
@@ -78,6 +97,7 @@ router.use("/users", usersRoutes);
 router.use("/sub-admins", subAdminsRoutes);
 router.use("/event-categories", eventCategoriesRoutes);
 router.use("/countries", countriesRoutes);
+router.use("/states", statesRoutes);
 router.use("/cities", citiesRoutes);
 router.use("/upload", uploadRoutes);
 router.use("/financial", financialRoutes);

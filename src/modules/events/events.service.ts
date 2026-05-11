@@ -6,6 +6,7 @@ import {
   canBypassEventPrivacy,
   isEventPubliclyVisible,
 } from "../../utils/public-profile";
+import { getPublicProfileSlug } from "../../utils/profile-slug";
 
 const statusMap: Record<string, string> = {
   PUBLISHED: "Approved",
@@ -15,6 +16,12 @@ const statusMap: Record<string, string> = {
   REJECTED: "Rejected",
   COMPLETED: "Approved",
 };
+
+function trimOrganizerEventText(v: unknown): string | null {
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s.length > 0 ? s : null;
+}
 
 export interface ListEventsParams {
   page?: number;
@@ -115,6 +122,9 @@ export async function listEvents(params: ListEventsParams) {
   const [events, total] = await Promise.all([
     prisma.event.findMany({
       where,
+      omit: {
+        description: true,
+      },
       include: {
         organizer: {
           select: {
@@ -169,11 +179,6 @@ export async function listEvents(params: ListEventsParams) {
             },
           },
         },
-        reviews: {
-          select: {
-            rating: true,
-          },
-        },
       },
       orderBy,
       skip,
@@ -183,22 +188,15 @@ export async function listEvents(params: ListEventsParams) {
   ]);
 
   const transformedEvents = events.map((event: any) => {
-    const avgRating =
-      event.reviews.length > 0
-        ? event.reviews.reduce(
-            (sum: number, review: { rating: number | null }) => sum + (review.rating ?? 0),
-            0,
-          ) / event.reviews.length
-        : 0;
-
     const cheapestTicket = event.ticketTypes[0]?.price || 0;
 
     return {
       id: event.id,
       title: event.title,
-      description: event.description,
+      /** Full body omitted at DB layer for listing — cards use short text only. */
+      description: event.shortDescription ?? "",
       shortDescription: event.shortDescription,
-      subTitle: event.subTitle ?? event.shortDescription,
+      subTitle: event.subTitle ?? null,
       edition: event.edition,
       slug: event.slug,
       startDate: event.startDate.toISOString(),
@@ -241,7 +239,7 @@ export async function listEvents(params: ListEventsParams) {
             avatar: se.user.avatar ?? null,
           }))
         : [],
-      averageRating: avgRating,
+      averageRating: Number(event.averageRating ?? 0),
       cheapestTicket,
       currency: event.currency,
       images: event.images,
@@ -447,19 +445,74 @@ export async function getEventByIdentifier(id: string, viewerUserId?: string | n
 
   const slug = event.slug || generateSlug(event.title);
 
-  // Map venue to frontend shape (event-dashboard expects company, bio, location, website, amenities)
+  // Map venue to frontend shape: keep address/geo fields for public event pages + dashboard extras.
+  // (Previously we only sent `company`/`bio`/joined `location`, so `venueAddress` was missing and UIs showed "Location TBA".)
   const venue = event.venue
     ? {
         id: event.venue.id,
+        venueName: event.venue.venueName,
+        venueAddress: event.venue.venueAddress,
+        venueCity: event.venue.venueCity,
+        venueState: event.venue.venueState,
+        venueCountry: event.venue.venueCountry,
+        venueZipCode: event.venue.venueZipCode,
+        venuePhone: event.venue.venuePhone,
+        venueEmail: event.venue.venueEmail,
+        venueWebsite: event.venue.venueWebsite,
+        venueDescription: event.venue.venueDescription,
+        organizationName: event.venue.organizationName,
+        latitude: event.venue.latitude,
+        longitude: event.venue.longitude,
+        amenities: event.venue.amenities ?? [],
+        venueImages: event.venue.venueImages ?? [],
         company: event.venue.company ?? event.venue.organizationName ?? event.venue.venueName ?? "",
         bio: event.venue.bio ?? event.venue.venueDescription ?? "",
         location:
           ([event.venue.venueAddress, event.venue.venueCity, event.venue.venueState, event.venue.venueCountry]
             .filter(Boolean)
             .join(", ") ||
-            event.venue.location) ?? "",
+            event.venue.location) ??
+          "",
         website: event.venue.venueWebsite ?? event.venue.website ?? "",
-        amenities: event.venue.amenities ?? [],
+      }
+    : null;
+
+  // Match GET /organizers/:id — User.totalEvents/activeEvents are often stale; counts must come from Event rows.
+  let organizerEventCounts: { totalEvents: number; activeEvents: number } | null = null;
+  if (event.organizerId && event.organizer) {
+    const [allEv, publishedEv] = await Promise.all([
+      prisma.event.aggregate({
+        where: { organizerId: event.organizerId },
+        _count: { id: true },
+      }),
+      prisma.event.aggregate({
+        where: { organizerId: event.organizerId, status: "PUBLISHED" },
+        _count: { id: true },
+      }),
+    ]);
+    organizerEventCounts = {
+      totalEvents: allEv._count.id,
+      activeEvents: publishedEv._count.id,
+    };
+  }
+
+  const organizerPublic = event.organizer
+    ? {
+        ...event.organizer,
+        publicSlug: getPublicProfileSlug(
+          {
+            role: "ORGANIZER",
+            firstName: event.organizer.firstName,
+            lastName: event.organizer.lastName,
+            organizationName: event.organizer.organizationName,
+            company: event.organizer.company,
+          },
+          "ORGANIZER",
+        ),
+        ...(organizerEventCounts && {
+          totalEvents: organizerEventCounts.totalEvents,
+          activeEvents: organizerEventCounts.activeEvents,
+        }),
       }
     : null;
 
@@ -467,7 +520,7 @@ export async function getEventByIdentifier(id: string, viewerUserId?: string | n
     ...event,
     title: event.title || "Untitled Event",
     description: event.description || event.shortDescription || "",
-    subTitle: event.subTitle ?? event.shortDescription ?? null,
+    subTitle: event.subTitle ?? null,
     edition: event.edition || null,
     availableTickets,
     isAvailable: availableTickets > 0 && new Date() < event.registrationEnd,
@@ -476,6 +529,7 @@ export async function getEventByIdentifier(id: string, viewerUserId?: string | n
     layoutPlan: event.layoutPlan,
     slug,
     venue,
+    ...(organizerPublic ? { organizer: organizerPublic } : {}),
     metadata: {
       title: event.title,
       description: event.description || event.shortDescription,
@@ -1513,26 +1567,19 @@ export async function updateEventByOrganizer(
   });
   if (!existingEvent) return { error: "NOT_FOUND" as const };
 
-  const resolvedShortDescription = (
-    body.shortDescription ??
-    body.subTitle ??
-    body.eventSubTitle ??
-    body.slug ??
-    existingEvent.shortDescription ??
-    null
-  ) as string | null;
+  const nextShortDescription =
+    "shortDescription" in body
+      ? trimOrganizerEventText(body.shortDescription)
+      : existingEvent.shortDescription;
+
+  const nextSubTitle =
+    "subTitle" in body ? trimOrganizerEventText(body.subTitle) : existingEvent.subTitle;
 
   const eventUpdateData: Record<string, unknown> = {
     title: body.title,
     description: body.description,
-    shortDescription:
-      resolvedShortDescription && String(resolvedShortDescription).trim().length > 0
-        ? String(resolvedShortDescription).trim()
-        : null,
-    subTitle:
-      resolvedShortDescription && String(resolvedShortDescription).trim().length > 0
-        ? String(resolvedShortDescription).trim()
-        : existingEvent.subTitle ?? null,
+    shortDescription: nextShortDescription,
+    subTitle: nextSubTitle,
     edition:
       body.edition != null && String(body.edition).trim() !== ""
         ? String(body.edition).trim()
@@ -1659,7 +1706,7 @@ export async function updateEventByOrganizer(
   return {
     event: {
       ...updatedEvent,
-      subTitle: updatedEvent.subTitle ?? updatedEvent.shortDescription ?? null,
+      subTitle: updatedEvent.subTitle ?? null,
       edition: updatedEvent.edition || null,
     },
   };

@@ -3,11 +3,12 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import prisma from "../config/prisma";
 import { AuthService } from "../services/auth.service";
+import { isPlaceholderOrInvalidPhone } from "../utils/phone-validation";
 import {
   sendOtpEmail,
   sendPasswordResetLinkEmail,
   sendAdminPasswordResetOtpEmail,
-  FRONTEND_BASE,
+  resolveFrontendBase,
 } from "../services/email.service";
 
 const router = Router();
@@ -76,6 +77,58 @@ router.post("/refresh", async (req, res) => {
   }
 });
 
+// POST /api/auth/oauth-sync — server-to-server from Next.js NextAuth (header secret).
+// Persists Google/LinkedIn users to PostgreSQL and returns the same JWT shape as /login.
+router.post("/oauth-sync", async (req, res) => {
+  try {
+    const expected = process.env.OAUTH_SYNC_SECRET;
+    if (!expected) {
+      return res.status(503).json({
+        message: "OAuth sync is not configured (OAUTH_SYNC_SECRET)",
+      });
+    }
+
+    const headerSecret = req.headers["x-oauth-sync-secret"];
+    if (headerSecret !== expected) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const body = req.body as {
+      email?: string;
+      name?: string | null;
+      image?: string | null;
+      provider?: string;
+      intendedRole?: string | null;
+    };
+
+    const email = body.email?.trim();
+    if (!email) {
+      return res.status(400).json({ message: "email is required" });
+    }
+
+    const result = await AuthService.syncOAuthPortalUser({
+      email,
+      name: body.name,
+      image: body.image,
+      intendedRole: body.intendedRole,
+    });
+
+    return res.json({
+      user: result.user,
+      accessToken: result.tokens.accessToken,
+      refreshToken: result.tokens.refreshToken,
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("OAuth sync error (backend):", err);
+    const msg = err instanceof Error ? err.message : "OAuth sync failed";
+    if (msg === "Account is deactivated") {
+      return res.status(403).json({ message: msg });
+    }
+    return res.status(500).json({ message: msg });
+  }
+});
+
 // POST /api/auth/send-otp
 router.post("/send-otp", async (req, res) => {
   try {
@@ -116,7 +169,29 @@ router.post("/send-otp", async (req, res) => {
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error("Send OTP error (backend):", err);
-    return res.status(500).json({ message: "Failed to send OTP" });
+    const msg = err instanceof Error ? err.message : String(err);
+    const prismaCode = typeof err === "object" && err && "code" in err ? String((err as { code?: string }).code) : "";
+    let code: string | undefined;
+    if (msg.includes("Resend network error")) {
+      code = "EMAIL_NETWORK";
+    } else if (msg.includes("SendGrid network error")) {
+      code = "EMAIL_NETWORK";
+    } else if (msg.includes("Resend error") || msg.includes("Resend")) {
+      code = "EMAIL_VENDOR";
+    } else if (msg.includes("SendGrid error") || msg.includes("SendGrid")) {
+      code = "EMAIL_VENDOR";
+    } else if (msg.includes("credentials are not configured") || msg.includes("sender email")) {
+      code = "EMAIL_NOT_CONFIGURED";
+    } else if (prismaCode.startsWith("P") || msg.includes("Prisma")) {
+      code = "DATABASE";
+    }
+    const exposeDetail =
+      process.env.NODE_ENV === "development" || process.env.EXPOSE_EMAIL_ERRORS === "true";
+    return res.status(500).json({
+      message: "Failed to send OTP",
+      ...(code ? { code } : {}),
+      ...(exposeDetail ? { detail: msg.slice(0, 500) } : {}),
+    });
   }
 });
 
@@ -191,6 +266,13 @@ router.post("/register", async (req, res) => {
       });
     }
 
+    const phoneTrimmed = (phone ?? "").trim();
+    if (phoneTrimmed && isPlaceholderOrInvalidPhone(phoneTrimmed)) {
+      return res.status(400).json({
+        error: "Please enter a valid phone number (test or autofill values are not accepted)",
+      });
+    }
+
     const normalizedEmail = email.trim().toLowerCase();
 
     // Name parsing (same logic as Next.js route)
@@ -235,7 +317,7 @@ router.post("/register", async (req, res) => {
         lastName,
         email: normalizedEmail,
         password: hashedPassword,
-        phone: phone || undefined,
+        phone: phoneTrimmed || undefined,
         role: role as any,
         company: companyName || undefined,
         jobTitle: designation || undefined,
@@ -365,12 +447,11 @@ router.post("/forgot-password", async (req, res) => {
       });
     }
 
-    if (!user.emailVerified) {
-      return res.status(403).json({
-        success: false,
-        error: "Email not verified. Please verify your email first.",
-      });
-    }
+    // NOTE:
+    // Some legacy signup flows allow login but did not persist emailVerified=true
+    // after OTP verification. Do not block password reset for those valid users.
+    // We still keep the same secure reset-token flow and send the link only to
+    // the account email itself.
 
     const maxResetAttempts = 5;
     if ((user.passwordResetAttempts ?? 0) >= maxResetAttempts) {
@@ -386,6 +467,7 @@ router.post("/forgot-password", async (req, res) => {
     await prisma.user.update({
       where: { id: user.id },
       data: {
+        emailVerified: true,
         resetToken,
         resetTokenExpiry,
         loginAttempts: 0,
@@ -393,7 +475,18 @@ router.post("/forgot-password", async (req, res) => {
       },
     });
 
-    const base = FRONTEND_BASE.replace(/\/$/, "");
+    const headerOrigin =
+      (typeof req.headers.origin === "string" ? req.headers.origin : undefined) ||
+      (typeof req.headers.referer === "string" ? req.headers.referer : undefined);
+    let parsedOrigin: string | undefined;
+    if (headerOrigin) {
+      try {
+        parsedOrigin = new URL(headerOrigin).origin;
+      } catch {
+        parsedOrigin = undefined;
+      }
+    }
+    const base = resolveFrontendBase(parsedOrigin).replace(/\/$/, "");
     const encodedEmail = encodeURIComponent(emailLower);
     const resetUrl = `${base}/reset-password?token=${resetToken}&email=${encodedEmail}`;
     const userRole = ROLE_DISPLAY[user.role] || user.role;
@@ -626,6 +719,7 @@ router.post("/reset-password", async (req, res) => {
       where: { id: user.id },
       data: {
         password: hashedPassword,
+        emailVerified: true,
         resetToken: null,
         resetTokenExpiry: null,
         loginAttempts: 0,
@@ -636,7 +730,7 @@ router.post("/reset-password", async (req, res) => {
 
     return res.json({
       success: true,
-      message: "Password has been reset successfully. You can now login with your new password.",
+      message: "Email verified and password set successfully. You can now login with your new password.",
     });
   } catch (err) {
     // eslint-disable-next-line no-console

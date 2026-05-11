@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const exhibitor_manuals_controller_1 = require("./exhibitor-manuals.controller");
+const router = (0, express_1.Router)();
+router.get("/exhibitor-manuals", exhibitor_manuals_controller_1.listHandler);
+router.get("/exhibitor-manuals/:id", exhibitor_manuals_controller_1.getByIdHandler);
+router.post("/exhibitor-manuals", exhibitor_manuals_controller_1.createHandler);
+router.delete("/exhibitor-manuals/:id", exhibitor_manuals_controller_1.deleteHandler);
+router.patch("/exhibitor-manuals/:id", exhibitor_manuals_controller_1.updateHandler);
+exports.default = router;

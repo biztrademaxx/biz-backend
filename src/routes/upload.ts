@@ -44,7 +44,7 @@ router.post("/upload/cloudinary", requireUser, upload.single("file"), imageUploa
 // POST /api/upload/image - image upload alias (authenticated)
 router.post("/upload/image", requireUser, upload.single("file"), imageUploadHandler);
 
-// POST /api/upload/brochure - document upload (PDF, authenticated)
+// POST /api/upload/brochure — documents & common brochure formats (PDF, Office, ODF, images), authenticated
 router.post(
   "/upload/brochure",
   requireUser,

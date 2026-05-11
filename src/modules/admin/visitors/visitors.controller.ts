@@ -2,6 +2,9 @@ import { Request, Response } from "express";
 import { sendOne, sendError } from "../../../lib/admin-response";
 import * as service from "./visitors.service";
 import * as suggestionsSvc from "./visitor-suggestions.service";
+import * as visitorEventsSvc from "./visitor-events.service";
+import * as visitorConnectionsSvc from "./visitor-connections.service";
+import * as visitorAppointmentsSvc from "./visitor-appointments.service";
 
 export async function list(req: Request, res: Response) {
   try {
@@ -10,6 +13,38 @@ export async function list(req: Request, res: Response) {
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Unknown error";
     return sendError(res, 500, "Failed to list visitors", msg);
+  }
+}
+
+export async function listVisitorEvents(req: Request, res: Response) {
+  try {
+    const data = await visitorEventsSvc.listVisitorEventsForAdmin();
+    return res.status(200).json(data);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    return sendError(res, 500, "Failed to list visitor events", msg);
+  }
+}
+
+export async function listVisitorConnections(req: Request, res: Response) {
+  try {
+    const data = await visitorConnectionsSvc.listVisitorConnectionsForAdmin(
+      req.query as Record<string, unknown>,
+    );
+    return res.status(200).json(data);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    return sendError(res, 500, "Failed to list visitor connections", msg);
+  }
+}
+
+export async function listVisitorAppointments(req: Request, res: Response) {
+  try {
+    const data = await visitorAppointmentsSvc.listVisitorAppointmentsForAdmin();
+    return res.status(200).json(data);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    return sendError(res, 500, "Failed to list visitor appointments", msg);
   }
 }
 

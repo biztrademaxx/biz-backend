@@ -22,6 +22,16 @@ export async function getById(req: Request, res: Response) {
   }
 }
 
+export async function listStates(req: Request, res: Response) {
+  try {
+    const countryCode = typeof req.query.countryCode === "string" ? req.query.countryCode : undefined;
+    const data = await service.listStateStats(countryCode);
+    return res.json(data);
+  } catch (e: any) {
+    return sendError(res, 500, "Failed to list states", e?.message);
+  }
+}
+
 export async function create(req: Request, res: Response) {
   try {
     const body = req.body ?? {};

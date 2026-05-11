@@ -25,8 +25,12 @@ export async function getById(req: Request, res: Response) {
 export async function create(req: Request, res: Response) {
   try {
     const body = req.body ?? {};
+    if (!body.name || !body.state || !body.countryId) {
+      return sendError(res, 400, "name, state and countryId are required");
+    }
     const item = await service.createCity({
       name: body.name,
+      state: body.state,
       countryId: body.countryId,
       latitude: body.latitude != null ? Number(body.latitude) : undefined,
       longitude: body.longitude != null ? Number(body.longitude) : undefined,
@@ -47,6 +51,7 @@ export async function update(req: Request, res: Response) {
     const body = req.body ?? {};
     const item = await service.updateCity(req.params.id, {
       name: body.name,
+      state: body.state,
       countryId: body.countryId,
       latitude: body.latitude != null ? Number(body.latitude) : undefined,
       longitude: body.longitude != null ? Number(body.longitude) : undefined,

@@ -495,16 +495,24 @@ export async function getExhibitorEvents(exhibitorId: string, viewerUserId?: str
       event: {
         select: {
           id: true,
+          slug: true,
           title: true,
           description: true,
           startDate: true,
           endDate: true,
           status: true,
           currency: true,
+          images: true,
+          bannerImage: true,
+          thumbnailImage: true,
           venue: {
             select: {
               venueName: true,
               venueAddress: true,
+              venueCity: true,
+              venueState: true,
+              venueCountry: true,
+              venueZipCode: true,
             },
           },
           organizer: {
@@ -530,8 +538,14 @@ export async function getExhibitorEvents(exhibitorId: string, viewerUserId?: str
   });
 
   const events = booths.map((booth) => {
-    const venue = booth.event.venue as { venueName?: string; venueAddress?: string } | null
-    const venueDisplay = venue?.venueName || venue?.venueAddress || "TBD"
+    const venue = booth.event.venue as {
+      venueName?: string
+      venueAddress?: string
+      venueCity?: string
+      venueState?: string
+      venueCountry?: string
+      venueZipCode?: string
+    } | null
     const rawStart = booth.event.startDate as Date
     const rawEnd = booth.event.endDate as Date
     const startIso = rawStart instanceof Date ? rawStart.toISOString() : String(rawStart)
@@ -539,12 +553,24 @@ export async function getExhibitorEvents(exhibitorId: string, viewerUserId?: str
     return {
       id: booth.id,
       eventId: booth.eventId,
+      eventSlug: booth.event.slug || booth.event.id,
       eventName: booth.event.title,
+      bannerImage: booth.event.bannerImage || booth.event.images?.[0] || null,
+      thumbnailImage: booth.event.thumbnailImage || booth.event.images?.[0] || null,
       date: startIso.split("T")[0],
       endDate: endIso.split("T")[0],
       rawStartDate: startIso,
       rawEndDate: endIso,
-      venue: venueDisplay,
+      venue: venue
+        ? {
+            venueName: venue.venueName ?? "",
+            venueAddress: venue.venueAddress ?? "",
+            venueCity: venue.venueCity ?? "",
+            venueState: venue.venueState ?? "",
+            venueCountry: venue.venueCountry ?? "",
+            venueZipCode: venue.venueZipCode ?? "",
+          }
+        : null,
       boothSize: "Standard",
       boothNumber: booth.boothNumber,
       paymentStatus: booth.status === "BOOKED" ? "PAID" : "PENDING",
@@ -561,6 +587,163 @@ export async function getExhibitorEvents(exhibitorId: string, viewerUserId?: str
   })
 
   return events;
+}
+
+/** Logged-in exhibitor only: promotions + event dropdown (same shape as Next `/api/exhibitors/promotions`). */
+export async function getExhibitorPromotionsMarketingForSelf(
+  exhibitorId: string,
+  viewerUserId: string,
+): Promise<{
+  promotions: Array<{
+    id: string;
+    eventId: string | null;
+    eventName: string;
+    packageType: string;
+    status: string;
+    impressions: number;
+    clicks: number;
+    conversions: number;
+    startDate: Date;
+    endDate: Date;
+    amount: number;
+    duration: number;
+    targetCategories: string[];
+  }>;
+  events: Array<{ id: string; title: string; date: string; location: string; status: string }>;
+}> {
+  const resolved = (await resolveExhibitorId(exhibitorId)) ?? exhibitorId;
+  if (!resolved || viewerUserId !== resolved) {
+    throw new Error("FORBIDDEN");
+  }
+
+  const eventsFull = await getExhibitorEvents(resolved, viewerUserId);
+  const eventsMap = new Map<
+    string,
+    { id: string; title: string; date: string; location: string; status: string }
+  >();
+  for (const row of eventsFull) {
+    const eid = row.eventId;
+    if (!eid || eventsMap.has(eid)) continue;
+    const v = row.venue as {
+      venueName?: string;
+      venueCity?: string;
+      venueState?: string;
+    } | null;
+    const parts = v ? [v.venueName, v.venueCity, v.venueState].filter(Boolean) : [];
+    const location = parts.length ? parts.join(", ") : "N/A";
+    eventsMap.set(eid, {
+      id: eid,
+      title: row.eventName,
+      date: row.date,
+      location,
+      status: String(row.status ?? "Scheduled"),
+    });
+  }
+
+  const promotions = await prisma.promotion.findMany({
+    where: { exhibitorId: resolved },
+    include: {
+      event: { select: { title: true, startDate: true, endDate: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const formattedPromotions = promotions.map((promotion) => ({
+    id: promotion.id,
+    eventId: promotion.eventId,
+    eventName: promotion.event?.title || "Unknown Event",
+    packageType: promotion.packageType,
+    status: promotion.status,
+    impressions: promotion.impressions ?? 0,
+    clicks: promotion.clicks ?? 0,
+    conversions: promotion.conversions ?? 0,
+    startDate: promotion.startDate,
+    endDate: promotion.endDate,
+    amount: promotion.amount,
+    duration: promotion.duration,
+    targetCategories: promotion.targetCategories ?? [],
+  }));
+
+  return {
+    promotions: formattedPromotions,
+    events: Array.from(eventsMap.values()),
+  };
+}
+
+export type CreateExhibitorPromotionBody = {
+  exhibitorId: string;
+  eventId: string;
+  packageType: string;
+  targetCategories: string[];
+  amount: number;
+  duration: number;
+};
+
+/** Logged-in exhibitor only: create promotion if they have a booth for the event. */
+export async function createExhibitorPromotionForSelf(
+  viewerUserId: string,
+  body: CreateExhibitorPromotionBody,
+): Promise<
+  | { promotion: Awaited<ReturnType<typeof prisma.promotion.create>> }
+  | { error: "FORBIDDEN" | "NOT_FOUND" | "NOT_BOOTH" | "INVALID" }
+> {
+  const resolved = (await resolveExhibitorId(body.exhibitorId)) ?? body.exhibitorId;
+  if (!resolved || viewerUserId !== resolved) {
+    return { error: "FORBIDDEN" };
+  }
+
+  const eventId = body.eventId?.trim();
+  const packageType = body.packageType?.trim();
+  const targetCategories = Array.isArray(body.targetCategories) ? body.targetCategories : [];
+  if (!eventId || !packageType || targetCategories.length === 0) {
+    return { error: "INVALID" };
+  }
+
+  const amount = Number(body.amount);
+  const duration = Number(body.duration);
+  if (!Number.isFinite(amount) || amount <= 0 || !Number.isFinite(duration) || duration <= 0) {
+    return { error: "INVALID" };
+  }
+
+  const booth = await prisma.exhibitorBooth.findFirst({
+    where: { exhibitorId: resolved, eventId },
+    select: { id: true },
+  });
+  if (!booth) {
+    return { error: "NOT_BOOTH" };
+  }
+
+  const event = await prisma.event.findFirst({
+    where: { id: eventId },
+    select: { id: true },
+  });
+  if (!event) {
+    return { error: "NOT_FOUND" };
+  }
+
+  const startDate = new Date();
+  const endDate = new Date();
+  endDate.setDate(endDate.getDate() + Math.floor(duration));
+
+  const promotion = await prisma.promotion.create({
+    data: {
+      exhibitorId: resolved,
+      eventId,
+      organizerId: null,
+      packageType,
+      targetCategories,
+      amount,
+      duration: Math.floor(duration),
+      startDate,
+      endDate,
+      status: "PENDING",
+      impressions: 0,
+      clicks: 0,
+      conversions: 0,
+    },
+  });
+
+  return { promotion };
 }
 
 // --- Exhibitor reviews ---
@@ -664,6 +847,10 @@ export async function addExhibitorReviewReply(
   body: { content: string },
   userId: string
 ) {
+  exhibitorId = (await resolveExhibitorId(exhibitorId)) ?? "";
+  if (!exhibitorId) {
+    throw new Error("Exhibitor not found");
+  }
   const review = await prisma.review.findFirst({
     where: { id: reviewId, exhibitorId },
   });
@@ -704,8 +891,9 @@ export async function createExhibitorReview(
   body: { rating: number; title?: string; comment: string },
   userId?: string
 ) {
+  exhibitorId = (await resolveExhibitorId(exhibitorId)) ?? "";
   if (!exhibitorId) {
-    throw new Error("exhibitorId is required");
+    throw new Error("Exhibitor not found");
   }
   const review = await prisma.review.create({
     data: {

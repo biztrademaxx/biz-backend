@@ -27,6 +27,7 @@ export async function listOrganizers(options?: { requireProfileImage?: boolean }
       website: true,
       location: true,
       organizationName: true,
+      company: true,
       description: true,
       headquarters: true,
       totalReviews: true,
@@ -50,78 +51,90 @@ export async function listOrganizers(options?: { requireProfileImage?: boolean }
     ? organizers.filter((o) => hasPublicProfileImage(o.avatar))
     : organizers;
 
-  const organizersWithStats = await Promise.all(
-    rows.map(async (organizer) => {
-      const eventIds = organizer.organizedEvents.map((e) => e.id);
-
-      const attendeeCount = await prisma.eventRegistration.count({
-        where: {
-          eventId: { in: eventIds },
-          status: "CONFIRMED",
-        },
+  /** One grouped query instead of 2×N concurrent queries (avoids exhausting the DB pool on small VPS). */
+  const allEventIds = [...new Set(rows.flatMap((o) => o.organizedEvents.map((e) => e.id)))];
+  const statsByEventId = new Map<string, { registrations: number; revenue: number }>();
+  if (allEventIds.length > 0) {
+    const grouped = await prisma.eventRegistration.groupBy({
+      by: ["eventId"],
+      where: {
+        eventId: { in: allEventIds },
+        status: "CONFIRMED",
+      },
+      _count: { _all: true },
+      _sum: { totalAmount: true },
+    });
+    for (const g of grouped) {
+      statsByEventId.set(g.eventId, {
+        registrations: g._count._all,
+        revenue: g._sum.totalAmount ?? 0,
       });
+    }
+  }
 
-      const foundedYear = organizer.founded ? parseInt(organizer.founded) : new Date().getFullYear();
-      const yearsOfExperience = Number.isNaN(foundedYear) ? 0 : new Date().getFullYear() - foundedYear;
+  const organizersWithStats = rows.map((organizer) => {
+    const eventIds = organizer.organizedEvents.map((e) => e.id);
+    let attendeeCount = 0;
+    let totalRevenue = 0;
+    for (const id of eventIds) {
+      const s = statsByEventId.get(id);
+      if (s) {
+        attendeeCount += s.registrations;
+        totalRevenue += s.revenue;
+      }
+    }
 
-      const revenueData = await prisma.eventRegistration.aggregate({
-        where: {
-          eventId: { in: eventIds },
-          status: "CONFIRMED",
+    const foundedYear = organizer.founded ? parseInt(organizer.founded) : new Date().getFullYear();
+    const yearsOfExperience = Number.isNaN(foundedYear) ? 0 : new Date().getFullYear() - foundedYear;
+
+    const displayName = getDisplayName({
+      role: "ORGANIZER",
+      firstName: organizer.firstName,
+      lastName: organizer.lastName,
+      organizationName: organizer.organizationName,
+    });
+    return {
+      id: organizer.id,
+      name: displayName,
+      displayName,
+      publicSlug: getPublicProfileSlug(
+        {
+          role: "ORGANIZER",
+          firstName: organizer.firstName,
+          lastName: organizer.lastName,
+          organizationName: organizer.organizationName,
+          company: organizer.company,
         },
-        _sum: {
-          totalAmount: true,
-        },
-      });
-
-      const displayName = getDisplayName({
-        role: "ORGANIZER",
-        firstName: organizer.firstName,
-        lastName: organizer.lastName,
-        organizationName: organizer.organizationName,
-      });
-      return {
-        id: organizer.id,
-        name: displayName,
-        displayName,
-        publicSlug: getPublicProfileSlug(
-          {
-            role: "ORGANIZER",
-            firstName: organizer.firstName,
-            lastName: organizer.lastName,
-            organizationName: organizer.organizationName,
-          },
-          "ORGANIZER",
-        ),
-        company: organizer.organizationName || "",
-        image: requireProfileImage
-          ? organizer.avatar ?? ""
-          : organizer.avatar || "/placeholder.svg?height=100&width=100&text=Org",
-        avgRating: organizer.averageRating || 0,
-        totalReviews: organizer.totalReviews || 0,
-        headquarters: organizer.headquarters || organizer.location || "Not specified",
-        reviewCount: organizer.totalReviews || 0,
-        location: organizer.location || "Not specified",
-        country: "India",
-        category: organizer.specialties?.[0] || "General Events",
-        eventsOrganized: organizer.organizedEvents.length,
-        yearsOfExperience,
-        specialties: organizer.specialties || ["Event Management"],
-        description: organizer.description || organizer.bio || "No description provided",
-        phone: organizer.phone || "Not provided",
-        email: organizer.email,
-        website: organizer.website || "",
-        verified: organizer.isVerified || false,
-        active: organizer.isActive || false,
-        featured: false,
-        totalAttendees: attendeeCount,
-        totalRevenue: revenueData._sum.totalAmount || 0,
-        successRate: organizer.organizedEvents.length > 0 ? 95 : 0,
-        joinDate: organizer.createdAt.toISOString().split("T")[0],
-        lastActive: organizer.updatedAt.toISOString().split("T")[0],
-      };
-    }),
-  );
+        "ORGANIZER",
+      ),
+      company: organizer.organizationName || "",
+      image: requireProfileImage
+        ? organizer.avatar ?? ""
+        : organizer.avatar || "/city/c4.jpg",
+      avgRating: organizer.averageRating || 0,
+      totalReviews: organizer.totalReviews || 0,
+      headquarters: organizer.headquarters || organizer.location || "Not specified",
+      reviewCount: organizer.totalReviews || 0,
+      location: organizer.location || "Not specified",
+      country: "India",
+      category: organizer.specialties?.[0] || "General Events",
+      eventsOrganized: organizer.organizedEvents.length,
+      yearsOfExperience,
+      specialties: organizer.specialties || ["Event Management"],
+      description: organizer.description || organizer.bio || "No description provided",
+      phone: organizer.phone || "Not provided",
+      email: organizer.email,
+      website: organizer.website || "",
+      verified: organizer.isVerified || false,
+      active: organizer.isActive || false,
+      featured: false,
+      totalAttendees: attendeeCount,
+      totalRevenue,
+      successRate: organizer.organizedEvents.length > 0 ? 95 : 0,
+      joinDate: organizer.createdAt.toISOString().split("T")[0],
+      lastActive: organizer.updatedAt.toISOString().split("T")[0],
+    };
+  });
 
   return organizersWithStats;
 }
@@ -134,7 +147,7 @@ async function resolveOrganizerId(identifier: string): Promise<string | null> {
   if (!targetSlug) return null;
   const organizers = await prisma.user.findMany({
     where: { role: "ORGANIZER", isActive: true },
-    select: { id: true, firstName: true, lastName: true, organizationName: true },
+    select: { id: true, firstName: true, lastName: true, organizationName: true, company: true },
   });
   const withSlug = organizers.map((u) => ({
     u,
@@ -144,6 +157,7 @@ async function resolveOrganizerId(identifier: string): Promise<string | null> {
         firstName: u.firstName,
         lastName: u.lastName,
         organizationName: u.organizationName,
+        company: u.company,
       },
       "ORGANIZER",
     ),
@@ -281,6 +295,7 @@ export async function getOrganizerById(identifier: string, viewerUserId?: string
         firstName: organizer.firstName,
         lastName: organizer.lastName,
         organizationName: organizer.organizationName,
+        company: organizer.company,
       },
       "ORGANIZER",
     ),

@@ -22,12 +22,16 @@ export async function listCities(includeCounts: boolean) {
     cities.map(async (city) => {
       const eventCount = await prisma.event.count({
         where: {
-          venue: { venueCity: { contains: city.name, mode: "insensitive" } },
+          OR: [
+            { city: { contains: city.name, mode: "insensitive" } },
+            { venue: { venueCity: { contains: city.name, mode: "insensitive" } } },
+          ],
         },
       });
       return {
         id: city.id,
         name: city.name,
+        state: city.state,
         countryId: city.countryId,
         latitude: city.latitude,
         longitude: city.longitude,
@@ -54,7 +58,10 @@ export async function getCityById(id: string) {
   if (!city) return null;
   const eventCount = await prisma.event.count({
     where: {
-      venue: { venueCity: { contains: city.name, mode: "insensitive" } },
+      OR: [
+        { city: { contains: city.name, mode: "insensitive" } },
+        { venue: { venueCity: { contains: city.name, mode: "insensitive" } } },
+      ],
     },
   });
   return {
@@ -67,6 +74,7 @@ export async function getCityById(id: string) {
 
 export async function createCity(data: {
   name: string;
+  state: string;
   countryId: string;
   latitude?: number;
   longitude?: number;
@@ -79,6 +87,7 @@ export async function createCity(data: {
   const city = await prisma.city.create({
     data: {
       name: data.name.trim(),
+      state: data.state.trim(),
       countryId: data.countryId,
       latitude: data.latitude ?? null,
       longitude: data.longitude ?? null,
@@ -102,6 +111,7 @@ export async function updateCity(
   id: string,
   data: Partial<{
     name: string;
+    state: string;
     countryId: string;
     latitude: number;
     longitude: number;
@@ -116,6 +126,7 @@ export async function updateCity(
     where: { id },
     data: {
       ...(data.name != null && { name: data.name.trim() }),
+      ...(data.state != null && { state: data.state.trim() }),
       ...(data.countryId != null && { countryId: data.countryId }),
       ...(data.latitude != null && { latitude: data.latitude }),
       ...(data.longitude != null && { longitude: data.longitude }),

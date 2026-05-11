@@ -1,6 +1,8 @@
 import prisma from "../../../config/prisma";
 import { parseListQuery } from "../../../lib/admin-response";
 import type { UserRole } from "@prisma/client";
+import { randomBytes } from "crypto";
+import { resolveFrontendBase, sendUserAccountAccessEmail } from "../../../services/email.service";
 
 const ROLE: UserRole = "ORGANIZER";
 
@@ -50,6 +52,13 @@ export async function listOrganizers(query: Record<string, unknown>) {
         activeEvents: true,
         totalAttendees: true,
         totalRevenue: true,
+        averageRating: true,
+        totalReviews: true,
+        _count: {
+          select: {
+            organizedEvents: true,
+          },
+        },
       },
     }),
     prisma.user.count({ where }),
@@ -79,10 +88,14 @@ export async function listOrganizers(query: Record<string, unknown>) {
     businessPhone: u.businessPhone,
     businessAddress: u.businessAddress,
     taxId: u.taxId,
-    totalEvents: u.totalEvents,
+    // Prefer live relation count — User.totalEvents is often stale vs Event rows
+    totalEvents: u._count.organizedEvents,
     activeEvents: u.activeEvents,
     totalAttendees: u.totalAttendees,
     totalRevenue: u.totalRevenue,
+    averageRating: u.averageRating ?? 0,
+    totalReviews: u.totalReviews ?? 0,
+    _count: u._count,
   }));
   return { data, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
 }
@@ -128,6 +141,17 @@ export async function createOrganizer(body: Record<string, unknown>) {
       lastName: String(body.lastName ?? "").trim() || "",
       phone: body.phone != null ? String(body.phone) : null,
       company: body.company != null ? String(body.company) : null,
+      organizationName:
+        body.organizationName != null ? String(body.organizationName) : body.company != null ? String(body.company) : null,
+      description: body.description != null ? String(body.description) : null,
+      headquarters: body.headquarters != null ? String(body.headquarters) : null,
+      founded: body.founded != null ? String(body.founded) : null,
+      teamSize: body.teamSize != null ? String(body.teamSize) : null,
+      specialties: Array.isArray(body.specialties) ? body.specialties.map((s) => String(s)) : [],
+      businessEmail: body.businessEmail != null ? String(body.businessEmail) : null,
+      businessPhone: body.businessPhone != null ? String(body.businessPhone) : null,
+      businessAddress: body.businessAddress != null ? String(body.businessAddress) : null,
+      taxId: body.taxId != null ? String(body.taxId) : null,
       isActive: body.isActive !== false,
     },
   });
@@ -137,10 +161,30 @@ export async function createOrganizer(body: Record<string, unknown>) {
 export async function updateOrganizer(id: string, body: Record<string, unknown>) {
   const existing = await prisma.user.findFirst({ where: { id, role: ROLE } });
   if (!existing) return null;
-  const allowed = ["firstName", "lastName", "phone", "company", "isActive", "isVerified", "description", "website"];
+  const allowed = [
+    "firstName",
+    "lastName",
+    "phone",
+    "company",
+    "organizationName",
+    "description",
+    "headquarters",
+    "founded",
+    "teamSize",
+    "businessEmail",
+    "businessPhone",
+    "businessAddress",
+    "taxId",
+    "isActive",
+    "isVerified",
+    "website",
+  ];
   const data: Record<string, unknown> = {};
   for (const k of allowed) {
     if (body[k] !== undefined) data[k] = body[k];
+  }
+  if (body.specialties !== undefined) {
+    data.specialties = Array.isArray(body.specialties) ? body.specialties.map((s) => String(s)) : [];
   }
   if (body.email !== undefined) data.email = String(body.email).trim().toLowerCase();
   await prisma.user.update({ where: { id }, data: data as any });
@@ -152,6 +196,42 @@ export async function deleteOrganizer(id: string) {
   if (!existing) return null;
   await prisma.user.delete({ where: { id } });
   return { deleted: true };
+}
+
+export async function sendOrganizerAccountEmail(input: { organizerId?: string; organizerEmail?: string }) {
+  const organizerId = String(input.organizerId ?? "").trim();
+  const organizerEmail = String(input.organizerEmail ?? "").trim().toLowerCase();
+  if (!organizerId && !organizerEmail) {
+    throw new Error("organizerId or organizerEmail is required");
+  }
+
+  const organizer = await prisma.user.findFirst({
+    where: {
+      role: ROLE,
+      ...(organizerId ? { id: organizerId } : {}),
+      ...(organizerEmail ? { email: organizerEmail } : {}),
+    },
+    select: { id: true, email: true, firstName: true },
+  });
+  if (!organizer?.email) throw new Error("Organizer not found");
+
+  const resetToken = randomBytes(32).toString("hex");
+  const resetTokenExpiry = new Date(Date.now() + 15 * 60 * 1000);
+
+  await prisma.user.update({
+    where: { id: organizer.id },
+    data: { resetToken, resetTokenExpiry },
+  });
+
+  const base = resolveFrontendBase().replace(/\/$/, "");
+  const resetPasswordUrl = `${base}/reset-password?token=${resetToken}&email=${encodeURIComponent(organizer.email)}`;
+
+  await sendUserAccountAccessEmail({
+    toEmail: organizer.email,
+    firstName: organizer.firstName || "there",
+    roleLabel: "Organizer",
+    resetPasswordUrl,
+  });
 }
 
 // ---------- Organizer followers / connections (admin dashboard) ----------

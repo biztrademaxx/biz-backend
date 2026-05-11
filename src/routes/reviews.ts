@@ -4,6 +4,89 @@ import { requireUser } from "../middleware/auth.middleware";
 
 const router = Router();
 
+function canModerateReview(
+  review: {
+    organizerId: string | null;
+    venueId: string | null;
+    event: { organizerId: string | null } | null;
+  },
+  userId: string
+): boolean {
+  if (review.event?.organizerId === userId) return true;
+  if (review.organizerId === userId) return true;
+  if (review.venueId === userId) return true;
+  return false;
+}
+
+/**
+ * PATCH /api/reviews/:id/approve
+ * Set isApproved = true. Caller must moderate this review (JWT).
+ */
+router.patch("/reviews/:id/approve", requireUser, async (req: Request, res: Response) => {
+  try {
+    const reviewId = req.params.id;
+    const userId = req.auth?.sub;
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const review = await prisma.review.findUnique({
+      where: { id: reviewId },
+      include: { event: { select: { organizerId: true } } },
+    });
+    if (!review) {
+      return res.status(404).json({ error: "Review not found" });
+    }
+    if (!canModerateReview(review, userId)) {
+      return res.status(403).json({ error: "Not authorized to moderate this review" });
+    }
+
+    await prisma.review.update({
+      where: { id: reviewId },
+      data: { isApproved: true },
+    });
+
+    return res.json({ message: "Review approved successfully" });
+  } catch (err: any) {
+    console.error("Error approving review:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * DELETE /api/reviews/:id
+ * Delete a review. Caller must moderate this review (JWT).
+ */
+router.delete("/reviews/:id", requireUser, async (req: Request, res: Response) => {
+  try {
+    const reviewId = req.params.id;
+    const userId = req.auth?.sub;
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const review = await prisma.review.findUnique({
+      where: { id: reviewId },
+      include: { event: { select: { organizerId: true } } },
+    });
+    if (!review) {
+      return res.status(404).json({ error: "Review not found" });
+    }
+    if (!canModerateReview(review, userId)) {
+      return res.status(403).json({ error: "Not authorized to delete this review" });
+    }
+
+    await prisma.review.delete({
+      where: { id: reviewId },
+    });
+
+    return res.json({ message: "Review deleted successfully" });
+  } catch (err: any) {
+    console.error("Error deleting review:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 /**
  * POST /api/reviews/:id/replies
  * Create a reply to a review. Caller must be the event organizer (JWT).
@@ -79,8 +162,8 @@ router.get("/reviews/:id/replies", requireUser, async (req: Request, res: Respon
     if (!review) {
       return res.status(404).json({ error: "Review not found" });
     }
-    if (review.event?.organizerId !== userId) {
-      return res.status(403).json({ error: "Only the event organizer can view replies" });
+    if (!canModerateReview(review, userId)) {
+      return res.status(403).json({ error: "Not authorized to view replies for this review" });
     }
 
     const replies = await prisma.reviewReply.findMany({

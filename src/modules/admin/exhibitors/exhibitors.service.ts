@@ -82,6 +82,17 @@ export async function createExhibitor(body: Record<string, unknown>) {
       lastName: String(body.lastName ?? "").trim() || "",
       phone: body.phone != null ? String(body.phone) : null,
       company: body.company != null ? String(body.company) : null,
+      companyIndustry: body.companyIndustry != null ? String(body.companyIndustry) : null,
+      jobTitle: body.jobTitle != null ? String(body.jobTitle) : null,
+      website: body.website != null ? String(body.website) : null,
+      linkedin: body.linkedin != null ? String(body.linkedin) : null,
+      twitter: body.twitter != null ? String(body.twitter) : null,
+      location: body.location != null ? String(body.location) : null,
+      businessEmail: body.businessEmail != null ? String(body.businessEmail) : null,
+      businessPhone: body.businessPhone != null ? String(body.businessPhone) : null,
+      businessAddress: body.businessAddress != null ? String(body.businessAddress) : null,
+      taxId: body.taxId != null ? String(body.taxId) : null,
+      bio: body.bio != null ? String(body.bio) : null,
       isActive: body.isActive !== false,
     },
   });
@@ -91,7 +102,24 @@ export async function createExhibitor(body: Record<string, unknown>) {
 export async function updateExhibitor(id: string, body: Record<string, unknown>) {
   const existing = await prisma.user.findFirst({ where: { id, role: ROLE } });
   if (!existing) return null;
-  const allowed = ["firstName", "lastName", "phone", "company", "isActive"];
+  const allowed = [
+    "firstName",
+    "lastName",
+    "phone",
+    "company",
+    "companyIndustry",
+    "jobTitle",
+    "website",
+    "linkedin",
+    "twitter",
+    "location",
+    "businessEmail",
+    "businessPhone",
+    "businessAddress",
+    "taxId",
+    "bio",
+    "isActive",
+  ];
   const data: Record<string, unknown> = {};
   for (const k of allowed) {
     if (body[k] !== undefined) data[k] = body[k];

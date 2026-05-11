@@ -4,6 +4,10 @@ import type { UserRole } from "@prisma/client";
 
 const ROLE: UserRole = "ATTENDEE";
 
+function isUuid(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
+
 export async function listVisitors(query: Record<string, unknown>) {
   const { page, limit, search, skip, sort, order } = parseListQuery(query);
   const where: Record<string, unknown> = { role: ROLE };
@@ -146,6 +150,7 @@ export async function listVisitors(query: Record<string, unknown>) {
 }
 
 export async function getVisitorById(id: string) {
+  if (!isUuid(id)) return null;
   const user = await prisma.user.findFirst({
     where: { id, role: ROLE },
     include: {
@@ -283,6 +288,7 @@ export async function getVisitorById(id: string) {
 }
 
 export async function updateVisitor(id: string, body: { isActive?: boolean }) {
+  if (!isUuid(id)) return null;
   const user = await prisma.user.findFirst({ where: { id, role: ROLE } });
   if (!user) return null;
   const updated = await prisma.user.update({
@@ -313,6 +319,7 @@ export async function updateVisitor(id: string, body: { isActive?: boolean }) {
 }
 
 export async function deleteVisitor(id: string) {
+  if (!isUuid(id)) return false;
   const user = await prisma.user.findFirst({ where: { id, role: ROLE } });
   if (!user) return false;
   await prisma.user.delete({ where: { id } });
