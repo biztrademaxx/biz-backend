@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import prisma from "../config/prisma";
 import { AuthService } from "../services/auth.service";
+import { isPlaceholderOrInvalidPhone } from "../utils/phone-validation";
 import {
   sendOtpEmail,
   sendPasswordResetLinkEmail,
@@ -265,6 +266,13 @@ router.post("/register", async (req, res) => {
       });
     }
 
+    const phoneTrimmed = (phone ?? "").trim();
+    if (phoneTrimmed && isPlaceholderOrInvalidPhone(phoneTrimmed)) {
+      return res.status(400).json({
+        error: "Please enter a valid phone number (test or autofill values are not accepted)",
+      });
+    }
+
     const normalizedEmail = email.trim().toLowerCase();
 
     // Name parsing (same logic as Next.js route)
@@ -309,7 +317,7 @@ router.post("/register", async (req, res) => {
         lastName,
         email: normalizedEmail,
         password: hashedPassword,
-        phone: phone || undefined,
+        phone: phoneTrimmed || undefined,
         role: role as any,
         company: companyName || undefined,
         jobTitle: designation || undefined,
