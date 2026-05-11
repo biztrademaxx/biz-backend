@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import type { UserRole } from "@prisma/client";
 import prisma from "../config/prisma";
 import { AuthTokenPayload, AuthRole, AuthDomain } from "../modules/auth.types";
 import { getDisplayName } from "../utils/display-name";
@@ -146,6 +147,8 @@ export class AuthService {
     email: string;
     name?: string | null;
     image?: string | null;
+    /** Only applied when creating a new user (never upgrades/downgrades existing accounts). */
+    intendedRole?: string | null;
   }): Promise<AuthResult> {
     const normalizedEmail = input.email.trim().toLowerCase();
     if (!normalizedEmail) {
@@ -163,6 +166,17 @@ export class AuthService {
     });
 
     if (!user) {
+      const allowed: UserRole[] = [
+        "ATTENDEE",
+        "ORGANIZER",
+        "EXHIBITOR",
+        "SPEAKER",
+        "VENUE_MANAGER",
+      ];
+      const raw = (input.intendedRole ?? "").trim().toUpperCase();
+      const roleForCreate =
+        raw && (allowed as string[]).includes(raw) ? (raw as UserRole) : "ATTENDEE";
+
       const hashedPassword = await bcrypt.hash(
         crypto.randomBytes(32).toString("hex"),
         10
@@ -174,7 +188,7 @@ export class AuthService {
           lastName,
           password: hashedPassword,
           avatar: input.image || undefined,
-          role: "ATTENDEE",
+          role: roleForCreate,
           isVerified: true,
           isActive: true,
           emailVerified: true,

@@ -97,6 +97,7 @@ router.post("/oauth-sync", async (req, res) => {
       name?: string | null;
       image?: string | null;
       provider?: string;
+      intendedRole?: string | null;
     };
 
     const email = body.email?.trim();
@@ -108,6 +109,7 @@ router.post("/oauth-sync", async (req, res) => {
       email,
       name: body.name,
       image: body.image,
+      intendedRole: body.intendedRole,
     });
 
     return res.json({
