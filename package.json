@@ -2,6 +2,22 @@
   "name": "biz-backend",
   "version": "0.1.0",
   "private": true,
+  "description": "Express + TypeScript API. Uses **PostgreSQL** (Neon) and Prisma. No MongoDB/Mongoose.",
+  "homepage": "https://github.com/toolingtrends/biz-backend#readme",
+  "bugs": {
+    "url": "https://github.com/toolingtrends/biz-backend/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/toolingtrends/biz-backend.git"
+  },
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
   "scripts": {
     "postinstall": "prisma generate",
     "dev": "nodemon --watch src --ext ts,js --exec ts-node src/server.ts",
@@ -47,17 +63,5 @@
     "ts-jest": "^29.4.9",
     "ts-node": "^10.9.2",
     "typescript": "^5.6.0"
-  },
-  "description": "Express + TypeScript API. Uses **PostgreSQL** (Neon) and Prisma. No MongoDB/Mongoose.",
-  "main": "index.js",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/toolingtrends/biz-backend.git"
-  },
-  "author": "",
-  "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/toolingtrends/biz-backend/issues"
-  },
-  "homepage": "https://github.com/toolingtrends/biz-backend#readme"
+  }
 }
