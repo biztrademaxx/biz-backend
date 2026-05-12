@@ -6,7 +6,7 @@ import {
   publicPublishedEventWhere,
 } from "../../utils/public-profile";
 import { getDisplayName } from "../../utils/display-name";
-import { getPublicProfileSlug, isUuidLike, publicSlugRequestMatches } from "../../utils/profile-slug";
+import { getPublicProfileSlug, isUuidLike, isUuidSegment, publicSlugRequestMatches } from "../../utils/profile-slug";
 
 // List exhibitors (read-only)
 export async function listExhibitors() {
@@ -24,6 +24,7 @@ export async function listExhibitors() {
       avatar: true,
       bio: true,
       company: true,
+      organizationName: true,
       jobTitle: true,
       location: true,
       website: true,
@@ -43,6 +44,7 @@ export async function listExhibitors() {
         role: "EXHIBITOR",
         firstName: e.firstName,
         lastName: e.lastName,
+        organizationName: e.organizationName,
         company: e.company,
       },
       "EXHIBITOR",
@@ -148,8 +150,13 @@ export async function updateExhibitorProfile(
     throw new Error("Invalid exhibitor ID");
   }
 
+  const resolvedId = (await resolveExhibitorId(id)) ?? "";
+  if (!resolvedId) {
+    throw new Error("Exhibitor not found");
+  }
+
   const existing = await prisma.user.findFirst({
-    where: { id, role: "EXHIBITOR" },
+    where: { id: resolvedId, role: "EXHIBITOR" },
     select: { id: true },
   });
   if (!existing) {
@@ -175,21 +182,24 @@ export async function updateExhibitorProfile(
   if (body.businessAddress !== undefined) data.businessAddress = body.businessAddress === "" ? null : (body.businessAddress as string);
 
   if (Object.keys(data).length === 0) {
-    return getExhibitorById(id, id);
+    return getExhibitorById(resolvedId, resolvedId);
   }
 
   await prisma.user.update({
-    where: { id },
+    where: { id: resolvedId },
     data: data as any,
   });
 
-  return getExhibitorById(id, id);
+  return getExhibitorById(resolvedId, resolvedId);
 }
 
 // Single exhibitor (read-only) – shape for public exhibitor page
 async function resolveExhibitorId(identifier: string): Promise<string | null> {
-  if (isUuidLike(identifier)) return identifier;
-  const targetSlug = String(identifier || "").trim().toLowerCase();
+  const raw = String(identifier || "").trim();
+  if (isUuidLike(raw) || isUuidSegment(raw)) {
+    return raw.toLowerCase();
+  }
+  const targetSlug = raw.toLowerCase();
   if (!targetSlug) return null;
   const exhibitors = await prisma.user.findMany({
     where: { role: "EXHIBITOR", isActive: true },
@@ -317,6 +327,7 @@ export async function getExhibitorById(identifier: string, viewerUserId?: string
     companyName: user.company ?? user.organizationName ?? undefined,
     companyLogo: user.avatar ?? undefined,
     company: user.company ?? user.organizationName ?? undefined,
+    organizationName: user.organizationName ?? user.company ?? undefined,
     linkedin: user.linkedin ?? undefined,
     location: user.location ?? undefined,
     isVerified: user.isVerified,
@@ -813,18 +824,19 @@ export async function listExhibitorReviews(exhibitorId: string) {
 
 /** Leads count = distinct users who followed this exhibitor OR have a connection (Connect) with them (PENDING or ACCEPTED). */
 export async function getExhibitorLeadsCount(exhibitorId: string): Promise<number> {
-  if (!exhibitorId) return 0;
+  const resolved = (await resolveExhibitorId(exhibitorId)) ?? "";
+  if (!resolved) return 0;
 
   const [followerRows, connectionRows] = await Promise.all([
     (prisma as any).follow.findMany({
-      where: { followingId: exhibitorId },
+      where: { followingId: resolved },
       select: { followerId: true },
     }),
     (prisma as any).connection.findMany({
       where: {
         OR: [
-          { requesterId: exhibitorId, status: { in: ["PENDING", "ACCEPTED"] } },
-          { receiverId: exhibitorId, status: { in: ["PENDING", "ACCEPTED"] } },
+          { requesterId: resolved, status: { in: ["PENDING", "ACCEPTED"] } },
+          { receiverId: resolved, status: { in: ["PENDING", "ACCEPTED"] } },
         ],
       },
       select: { requesterId: true, receiverId: true },
@@ -837,7 +849,7 @@ export async function getExhibitorLeadsCount(exhibitorId: string): Promise<numbe
     leadIds.add(r.requesterId);
     leadIds.add(r.receiverId);
   });
-  leadIds.delete(exhibitorId);
+  leadIds.delete(resolved);
   return leadIds.size;
 }
 
@@ -937,11 +949,12 @@ export async function createExhibitorReview(
 // --- Exhibitor products ---
 
 export async function listExhibitorProducts(exhibitorId: string) {
-  if (!exhibitorId) {
+  const resolved = (await resolveExhibitorId(exhibitorId)) ?? "";
+  if (!resolved) {
     throw new Error("exhibitorId is required");
   }
   const products = await prisma.product.findMany({
-    where: { exhibitorId },
+    where: { exhibitorId: resolved },
     orderBy: { createdAt: "desc" },
   });
   return products.map((p) => toProductShape(p));
@@ -974,7 +987,8 @@ export async function createExhibitorProduct(
     youtube?: string | string[];
   }
 ) {
-  if (!exhibitorId) {
+  const resolved = (await resolveExhibitorId(exhibitorId)) ?? "";
+  if (!resolved) {
     throw new Error("exhibitorId is required");
   }
   const youtubeArr = Array.isArray(body.youtube)
@@ -984,7 +998,7 @@ export async function createExhibitorProduct(
       : [];
   const product = await prisma.product.create({
     data: {
-      exhibitorId,
+      exhibitorId: resolved,
       name: body.name ?? "",
       category: body.category ?? null,
       description: body.description ?? null,
@@ -1012,8 +1026,12 @@ export async function updateExhibitorProduct(
     youtube: string | string[];
   }>
 ) {
+  const resolved = (await resolveExhibitorId(exhibitorId)) ?? "";
+  if (!resolved) {
+    return null;
+  }
   const existing = await prisma.product.findFirst({
-    where: { id: productId, exhibitorId },
+    where: { id: productId, exhibitorId: resolved },
   });
   if (!existing) {
     return null;
@@ -1043,8 +1061,12 @@ export async function updateExhibitorProduct(
 }
 
 export async function deleteExhibitorProduct(exhibitorId: string, productId: string) {
+  const resolved = (await resolveExhibitorId(exhibitorId)) ?? "";
+  if (!resolved) {
+    return false;
+  }
   const existing = await prisma.product.findFirst({
-    where: { id: productId, exhibitorId },
+    where: { id: productId, exhibitorId: resolved },
   });
   if (!existing) {
     return false;

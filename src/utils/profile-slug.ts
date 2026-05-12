@@ -26,6 +26,11 @@ export function isUuidLike(value: string): boolean {
   );
 }
 
+/** Any standard 8-4-4-4-12 hex UUID (URL segment); use with Prisma `id` when strict `isUuidLike` is too narrow. */
+export function isUuidSegment(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value ?? "").trim());
+}
+
 /**
  * True if a URL segment (e.g. `maxx`) should resolve to this profile's canonical slug
  * (e.g. `maxx-trade-fairs`). Supports exact match, `maxx-*` prefix, and first hyphen segment.
@@ -56,9 +61,11 @@ export function getPublicProfileSlug(user: ProfileLike, preferredRole?: ProfileR
   }
 
   if (role === "EXHIBITOR") {
+    const fullName = `${String(user.firstName ?? "").trim()} ${String(user.lastName ?? "").trim()}`.trim();
     return (
       slugifyProfileValue(user.organizationName) ||
       slugifyProfileValue(user.company) ||
+      slugifyProfileValue(fullName) ||
       slugifyProfileValue(user.firstName) ||
       "exhibitor"
     );

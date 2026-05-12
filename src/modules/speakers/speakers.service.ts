@@ -71,7 +71,7 @@ export async function listSpeakers(options?: { requireProfileImage?: boolean }) 
 }
 
 // Single speaker profile
-async function resolveSpeakerId(identifier: string): Promise<string | null> {
+export async function resolveSpeakerId(identifier: string): Promise<string | null> {
   if (isUuidLike(identifier)) return identifier;
   const targetSlug = String(identifier || "").trim().toLowerCase();
   if (!targetSlug) return null;

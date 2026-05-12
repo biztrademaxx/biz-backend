@@ -4,6 +4,7 @@ import { requireUser, optionalUser } from "../middleware/auth.middleware";
 import { canUserViewOwnPrivateProfile, activePublicProfileUserWhere } from "../utils/public-profile";
 import { getDisplayName } from "../utils/display-name";
 import { getPublicProfileSlug, isUuidLike, publicSlugRequestMatches } from "../utils/profile-slug";
+import { resolveSpeakerId } from "../modules/speakers/speakers.service";
 
 const router = Router();
 
@@ -25,6 +26,11 @@ async function resolveUserId(identifier: string): Promise<string | null> {
   if (isUuidLike(identifier)) return identifier;
   const targetSlug = String(identifier || "").trim().toLowerCase();
   if (!targetSlug) return null;
+
+  /** Same slug rules as `GET /api/speakers/:id` and public `/speaker/{slug}`. */
+  const speakerId = await resolveSpeakerId(identifier);
+  if (speakerId) return speakerId;
+
   const users = await prisma.user.findMany({
     where: { role: "ATTENDEE", isActive: true },
     select: { id: true, firstName: true, lastName: true },

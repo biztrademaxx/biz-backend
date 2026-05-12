@@ -141,12 +141,21 @@ export async function listOrganizers(options?: { requireProfileImage?: boolean }
 
 // ---------- Single organizer ----------
 
+/** Accept any standard hex UUID segment shape (Prisma); stricter `isUuidLike` rejects some RFC variants. */
+function resolveOrganizerIdLooksLikeUuid(raw: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(raw ?? "").trim());
+}
+
 async function resolveOrganizerId(identifier: string): Promise<string | null> {
-  if (isUuidLike(identifier)) return identifier;
-  const targetSlug = String(identifier || "").trim().toLowerCase();
+  const trimmed = String(identifier || "").trim();
+  if (isUuidLike(trimmed) || resolveOrganizerIdLooksLikeUuid(trimmed)) {
+    return trimmed.toLowerCase();
+  }
+  const targetSlug = trimmed.toLowerCase();
   if (!targetSlug) return null;
+  /** Slug discovery includes unverified; `getOrganizerById` still hides them from everyone except self. */
   const organizers = await prisma.user.findMany({
-    where: { role: "ORGANIZER", isActive: true, isVerified: true },
+    where: { role: "ORGANIZER", isActive: true },
     select: { id: true, firstName: true, lastName: true, organizationName: true, company: true },
   });
   const withSlug = organizers.map((u) => ({
@@ -230,12 +239,13 @@ export async function getOrganizerById(identifier: string, viewerUserId?: string
     return null;
   }
 
-  if (!organizer.isVerified) {
+  const isSelf = canUserViewOwnPrivateProfile(viewerUserId ?? undefined, id);
+  if (!organizer.isVerified && !isSelf) {
     return null;
   }
 
   if (
-    !canUserViewOwnPrivateProfile(viewerUserId ?? undefined, id) &&
+    !isSelf &&
     (!organizer.isActive || organizer.profileVisibility === "private")
   ) {
     return null;
