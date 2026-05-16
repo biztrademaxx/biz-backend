@@ -158,6 +158,7 @@ export async function getVenueEvents(id: string, viewerUserId?: string | null) {
 
   const transformedEvents = events.map((event) => ({
     id: event.id,
+    slug: event.slug,
     title: event.title,
     description: event.description,
     shortDescription: event.shortDescription,
@@ -165,8 +166,13 @@ export async function getVenueEvents(id: string, viewerUserId?: string | null) {
     endDate: event.endDate.toISOString(),
     status: event.status,
     category: event.category,
+    timezone: event.timezone,
+    city: event.city,
+    state: event.state,
+    country: event.country,
     images: event.images,
     bannerImage: event.bannerImage,
+    thumbnailImage: event.thumbnailImage,
     venueId: event.venueId,
     organizerId: event.organizerId,
     maxAttendees: event.maxAttendees,
