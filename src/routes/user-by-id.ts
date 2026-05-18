@@ -413,12 +413,21 @@ router.get("/users/:id/connections", async (req: Request, res: Response) => {
 router.get(
   "/users/:id/interested-events",
   async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const { id: identifier } = req.params;
 
-    if (!id) {
+    if (!identifier) {
       return res
         .status(400)
         .json({ success: false, error: "User id required" });
+    }
+
+    const id =
+      (await resolveUserId(identifier)) ||
+      (isUuidLike(identifier) ? identifier : null);
+    if (!id) {
+      return res
+        .status(404)
+        .json({ success: false, error: "User not found" });
     }
 
     try {
