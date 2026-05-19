@@ -13,7 +13,7 @@ router.get("/exhibitors/promotions", auth_middleware_1.requireUser, exhibitors_c
 router.post("/exhibitors/promotions", auth_middleware_1.requireUser, exhibitors_controller_1.createExhibitorPromotionHandler);
 // Single exhibitor (GET + PUT for profile); optional JWT to view own private profile
 router.get("/exhibitors/:id", auth_middleware_1.optionalUser, exhibitors_controller_1.getExhibitorHandler);
-router.put("/exhibitors/:id", exhibitors_controller_1.updateExhibitorHandler);
+router.put("/exhibitors/:id", auth_middleware_1.optionalUser, exhibitors_controller_1.updateExhibitorHandler);
 // Exhibitor analytics
 router.get("/exhibitors/:id/analytics", exhibitors_controller_1.getExhibitorAnalyticsHandler);
 // Exhibitor events
@@ -24,9 +24,9 @@ router.get("/exhibitors/:id/leads-count", exhibitors_controller_1.getExhibitorLe
 router.get("/exhibitors/:id/reviews", exhibitors_controller_1.getExhibitorReviewsHandler);
 router.post("/exhibitors/:id/reviews/:reviewId/replies", auth_middleware_1.requireUser, exhibitors_controller_1.createExhibitorReviewReplyHandler);
 router.post("/exhibitors/:id/reviews", auth_middleware_1.optionalUser, exhibitors_controller_1.createExhibitorReviewHandler);
-// Exhibitor products (list, create, update, delete)
-router.get("/exhibitors/:id/products", exhibitors_controller_1.getExhibitorProductsHandler);
-router.post("/exhibitors/:id/products", exhibitors_controller_1.createExhibitorProductHandler);
-router.put("/exhibitors/:id/products/:productId", exhibitors_controller_1.updateExhibitorProductHandler);
-router.delete("/exhibitors/:id/products/:productId", exhibitors_controller_1.deleteExhibitorProductHandler);
+// Exhibitor products (list, create, update, delete); optional JWT so slug URLs resolve like GET /exhibitors/:id
+router.get("/exhibitors/:id/products", auth_middleware_1.optionalUser, exhibitors_controller_1.getExhibitorProductsHandler);
+router.post("/exhibitors/:id/products", auth_middleware_1.optionalUser, exhibitors_controller_1.createExhibitorProductHandler);
+router.put("/exhibitors/:id/products/:productId", auth_middleware_1.optionalUser, exhibitors_controller_1.updateExhibitorProductHandler);
+router.delete("/exhibitors/:id/products/:productId", auth_middleware_1.optionalUser, exhibitors_controller_1.deleteExhibitorProductHandler);
 exports.default = router;

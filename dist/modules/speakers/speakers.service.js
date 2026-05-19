@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.listSpeakers = listSpeakers;
+exports.resolveSpeakerId = resolveSpeakerId;
 exports.getSpeakerById = getSpeakerById;
 exports.getSpeakerSessions = getSpeakerSessions;
 exports.createSpeaker = createSpeaker;

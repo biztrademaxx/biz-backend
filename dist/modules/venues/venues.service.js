@@ -16,7 +16,12 @@ async function listVenues(params) {
     const limit = params.limit && params.limit > 0 ? params.limit : 10;
     const skip = (page - 1) * limit;
     const requireVenueImage = params.requireVenueImage === true;
-    const where = { role: "VENUE_MANAGER", ...(0, public_profile_1.activePublicProfileUserWhere)() };
+    const where = {
+        role: "VENUE_MANAGER",
+        NOT: { profileVisibility: "private" },
+        /** Public /venues directory: admin-listed only (not tied to account isActive). */
+        isVerified: true,
+    };
     if (requireVenueImage) {
         where.venueImages = { isEmpty: false };
     }
@@ -107,7 +112,12 @@ async function getVenueEvents(id, viewerUserId) {
     const isSelf = (0, public_profile_1.canUserViewOwnPrivateProfile)(viewerUserId ?? undefined, id);
     if (!isSelf) {
         const visible = await prisma_1.default.user.findFirst({
-            where: { id, role: "VENUE_MANAGER", ...(0, public_profile_1.activePublicProfileUserWhere)() },
+            where: {
+                id,
+                role: "VENUE_MANAGER",
+                NOT: { profileVisibility: "private" },
+                isVerified: true,
+            },
             select: { id: true },
         });
         if (!visible) {
@@ -136,6 +146,7 @@ async function getVenueEvents(id, viewerUserId) {
     });
     const transformedEvents = events.map((event) => ({
         id: event.id,
+        slug: event.slug,
         title: event.title,
         description: event.description,
         shortDescription: event.shortDescription,
@@ -143,8 +154,13 @@ async function getVenueEvents(id, viewerUserId) {
         endDate: event.endDate.toISOString(),
         status: event.status,
         category: event.category,
+        timezone: event.timezone,
+        city: event.city,
+        state: event.state,
+        country: event.country,
         images: event.images,
         bannerImage: event.bannerImage,
+        thumbnailImage: event.thumbnailImage,
         venueId: event.venueId,
         organizerId: event.organizerId,
         maxAttendees: event.maxAttendees,
@@ -172,6 +188,18 @@ async function getVenueEvents(id, viewerUserId) {
 async function listVenueReviews(venueId, options) {
     if (!venueId) {
         throw new Error("Invalid venue ID");
+    }
+    const venue = await prisma_1.default.user.findFirst({
+        where: { id: venueId, role: "VENUE_MANAGER" },
+        select: { id: true, isVerified: true },
+    });
+    if (!venue) {
+        return [];
+    }
+    const isSelf = (0, public_profile_1.canUserViewOwnPrivateProfile)(options?.viewerUserId ?? undefined, venueId);
+    const publicListing = venue.isVerified;
+    if (!publicListing && !isSelf) {
+        return [];
     }
     let reviews = [];
     try {
@@ -249,6 +277,16 @@ async function createVenueReview(params) {
     }
     if (!rating || rating < 1 || rating > 5) {
         throw new Error("Rating must be between 1 and 5");
+    }
+    const venueRow = await prisma_1.default.user.findFirst({
+        where: { id: venueId, role: "VENUE_MANAGER" },
+        select: { id: true, isVerified: true },
+    });
+    if (!venueRow) {
+        throw new Error("Venue not found");
+    }
+    if (!venueRow.isVerified) {
+        throw new Error("This venue is not yet approved for public reviews");
     }
     const review = await prisma_1.default.review.create({
         data: {

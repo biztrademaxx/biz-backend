@@ -149,6 +149,7 @@ async function listVenues(query) {
                 firstName: true,
                 lastName: true,
                 email: true,
+                avatar: true,
                 phone: true,
                 venueName: true,
                 venueCity: true,
@@ -184,6 +185,7 @@ async function listVenues(query) {
             firstName: u.firstName,
             lastName: u.lastName,
             email: u.email,
+            logo: u.avatar ?? "",
             phone: u.phone,
             venueName: u.venueName,
             venueCity: u.venueCity,
@@ -214,6 +216,7 @@ async function getVenueById(id) {
             firstName: true,
             lastName: true,
             email: true,
+            avatar: true,
             phone: true,
             venueName: true,
             venueCity: true,
@@ -252,6 +255,7 @@ async function getVenueById(id) {
         firstName: user.firstName,
         lastName: user.lastName,
         email: user.email,
+        logo: user.avatar ?? "",
         phone: user.phone,
         venueName: user.venueName,
         venueCity: user.venueCity,
@@ -283,6 +287,21 @@ async function createVenue(body) {
     const existing = await prisma_1.default.user.findFirst({ where: { email } });
     if (existing)
         throw new Error("Venue with this email already exists");
+    const logo = body.logo != null
+        ? String(body.logo).trim()
+        : body.avatar != null
+            ? String(body.avatar).trim()
+            : body.venueImage != null
+                ? String(body.venueImage).trim()
+                : "";
+    const venueImages = Array.isArray(body.venueImages)
+        ? body.venueImages
+            .map((v) => String(v ?? "").trim())
+            .filter(Boolean)
+        : [];
+    if (logo && !venueImages.includes(logo)) {
+        venueImages.unshift(logo);
+    }
     const user = await prisma_1.default.user.create({
         data: {
             email,
@@ -296,7 +315,11 @@ async function createVenue(body) {
             venueCountry: body.venueCountry != null ? String(body.venueCountry) : null,
             venueAddress: body.venueAddress != null ? String(body.venueAddress) : null,
             maxCapacity: body.maxCapacity != null ? Number(body.maxCapacity) : null,
+            /** Off /venues until admin sets isVerified; account stays active for login. */
             isActive: body.isActive !== false,
+            isVerified: body.isVerified === true,
+            avatar: logo || null,
+            venueImages,
         },
     });
     await syncLocationMasterFromVenue({
@@ -312,7 +335,7 @@ async function updateVenue(id, body) {
         return null;
     const allowed = [
         "firstName", "lastName", "phone", "venueName", "venueCity", "venueState",
-        "venueCountry", "venueAddress", "maxCapacity", "isActive",
+        "venueCountry", "venueAddress", "maxCapacity", "isActive", "isVerified",
     ];
     const data = {};
     for (const k of allowed) {

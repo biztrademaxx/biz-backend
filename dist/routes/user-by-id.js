@@ -9,6 +9,7 @@ const auth_middleware_1 = require("../middleware/auth.middleware");
 const public_profile_1 = require("../utils/public-profile");
 const display_name_1 = require("../utils/display-name");
 const profile_slug_1 = require("../utils/profile-slug");
+const speakers_service_1 = require("../modules/speakers/speakers.service");
 const router = (0, express_1.Router)();
 function serializeUser(user) {
     return {
@@ -29,6 +30,10 @@ async function resolveUserId(identifier) {
     const targetSlug = String(identifier || "").trim().toLowerCase();
     if (!targetSlug)
         return null;
+    /** Same slug rules as `GET /api/speakers/:id` and public `/speaker/{slug}`. */
+    const speakerId = await (0, speakers_service_1.resolveSpeakerId)(identifier);
+    if (speakerId)
+        return speakerId;
     const users = await prisma_1.default.user.findMany({
         where: { role: "ATTENDEE", isActive: true },
         select: { id: true, firstName: true, lastName: true },
@@ -379,11 +384,18 @@ router.get("/users/:id/connections", async (req, res) => {
  * Used by calendar, past-events, and events-section to show a user's saved (interested) events.
  */
 router.get("/users/:id/interested-events", async (req, res) => {
-    const { id } = req.params;
-    if (!id) {
+    const { id: identifier } = req.params;
+    if (!identifier) {
         return res
             .status(400)
             .json({ success: false, error: "User id required" });
+    }
+    const id = (await resolveUserId(identifier)) ||
+        ((0, profile_slug_1.isUuidLike)(identifier) ? identifier : null);
+    if (!id) {
+        return res
+            .status(404)
+            .json({ success: false, error: "User not found" });
     }
     try {
         const saved = await prisma_1.default.savedEvent.findMany({

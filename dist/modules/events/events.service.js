@@ -341,6 +341,11 @@ async function getEventByIdentifier(id, viewerUserId) {
                 avatar: true,
                 organizationName: true,
                 company: true,
+                headquarters: true,
+                location: true,
+                organizerCountry: true,
+                organizerState: true,
+                organizerCity: true,
                 description: true,
                 phone: true,
                 totalEvents: true,
@@ -348,6 +353,7 @@ async function getEventByIdentifier(id, viewerUserId) {
                 totalReviews: true,
                 createdAt: true,
                 isActive: true,
+                isVerified: true,
                 profileVisibility: true,
             },
         },
@@ -687,7 +693,8 @@ async function searchEntities(query, limit = 5) {
             where: {
                 role: "VENUE_MANAGER",
                 venueName: { contains: trimmed, mode: "insensitive" },
-                ...(0, public_profile_1.activePublicProfileUserWhere)(),
+                isVerified: true,
+                NOT: { profileVisibility: "private" },
             },
             select: {
                 id: true,
@@ -1120,6 +1127,7 @@ async function listEventSpaceCosts(eventId) {
             description: true,
             area: true,
             basePrice: true,
+            minArea: true,
             pricePerSqm: true,
             currency: true,
             additionalPowerRate: true,
@@ -1153,6 +1161,7 @@ async function listExhibitionSpaces(eventId) {
         minArea: s.minArea,
         unit: s.unit,
         pricePerUnit: s.pricePerUnit,
+        currency: s.currency,
         isAvailable: s.isAvailable && (s.bookedBooths ?? 0) < (s.maxBooths ?? 999),
         maxBooths: s.maxBooths,
         bookedBooths: s.bookedBooths ?? 0,
@@ -1173,7 +1182,7 @@ const EXHIBITION_SPACE_TYPES = [
 async function createExhibitionSpace(eventId, body) {
     const event = await prisma_1.default.event.findUnique({
         where: { id: eventId },
-        select: { id: true },
+        select: { id: true, currency: true },
     });
     if (!event)
         return { error: "NOT_FOUND" };
@@ -1183,6 +1192,13 @@ async function createExhibitionSpace(eventId, body) {
     const spaceType = EXHIBITION_SPACE_TYPES.includes(body.spaceType)
         ? body.spaceType
         : "RAW_SPACE";
+    const pricePerSqm = body.pricePerSqm != null ? Number(body.pricePerSqm) : null;
+    const minArea = body.minArea != null ? Number(body.minArea) : null;
+    const computedBase = pricePerSqm != null && minArea != null ? Number(pricePerSqm) * Number(minArea) : 0;
+    const basePrice = body.basePrice != null && Number(body.basePrice) > 0 ? Number(body.basePrice) : computedBase;
+    const currency = typeof body.currency === "string" && body.currency.trim()
+        ? body.currency.trim()
+        : event.currency || "USD";
     const space = await prisma_1.default.exhibitionSpace.create({
         data: {
             eventId,
@@ -1190,12 +1206,13 @@ async function createExhibitionSpace(eventId, body) {
             spaceType,
             description: body.description?.trim() || name,
             dimensions: body.dimensions?.trim() || null,
-            area: Number(body.area) || 100,
-            basePrice: Number(body.basePrice) ?? 0,
+            area: Number(body.area) || minArea || 100,
+            basePrice,
             minArea: body.minArea != null ? Number(body.minArea) : null,
             unit: body.unit || "sqm",
             pricePerSqm: body.pricePerSqm != null ? Number(body.pricePerSqm) : null,
             maxBooths: body.maxBooths != null ? Number(body.maxBooths) : null,
+            currency,
         },
     });
     return {
@@ -1215,9 +1232,10 @@ async function createExhibitionSpace(eventId, body) {
         isAvailable: space.isAvailable,
         maxBooths: space.maxBooths,
         bookedBooths: space.bookedBooths ?? 0,
+        currency: space.currency,
     };
 }
-/** Update an exhibition space (e.g. basePrice, pricePerSqm). */
+/** Update an exhibition space (pricing, hall name, description). */
 async function updateExhibitionSpace(eventId, spaceId, body) {
     const space = await prisma_1.default.exhibitionSpace.findFirst({
         where: { id: spaceId, eventId },
@@ -1225,12 +1243,30 @@ async function updateExhibitionSpace(eventId, spaceId, body) {
     if (!space)
         return null;
     const data = {};
-    if (body.basePrice != null)
-        data.basePrice = Number(body.basePrice);
-    if (body.pricePerSqm != null)
+    if (body.name !== undefined) {
+        const n = String(body.name).trim();
+        if (n)
+            data.name = n;
+    }
+    if (body.description !== undefined)
+        data.description = String(body.description).trim();
+    if (body.currency !== undefined && String(body.currency).trim()) {
+        data.currency = String(body.currency).trim();
+    }
+    if (body.pricePerSqm !== undefined)
         data.pricePerSqm = Number(body.pricePerSqm);
-    if (body.pricePerUnit != null)
+    if (body.minArea !== undefined)
+        data.minArea = Number(body.minArea);
+    if (body.pricePerUnit !== undefined)
         data.pricePerUnit = Number(body.pricePerUnit);
+    const nextPps = body.pricePerSqm !== undefined ? Number(body.pricePerSqm) : (space.pricePerSqm ?? 0);
+    const nextMin = body.minArea !== undefined ? Number(body.minArea) : (space.minArea ?? 0);
+    if (body.pricePerSqm !== undefined || body.minArea !== undefined) {
+        data.basePrice = Number(nextPps) * Number(nextMin);
+    }
+    if (body.basePrice !== undefined && data.basePrice === undefined) {
+        data.basePrice = Number(body.basePrice);
+    }
     if (Object.keys(data).length === 0)
         return space;
     const updated = await prisma_1.default.exhibitionSpace.update({

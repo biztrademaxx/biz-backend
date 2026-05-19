@@ -22,6 +22,7 @@ import networkRouter from "../modules/network/network.routes";
 import conversationsRouter from "../modules/messages/conversations.routes";
 import messagesRouter from "../modules/messages/messages.routes";
 import locationRouter from "../modules/location/location.routes";
+import geoRouter from "../modules/geo/geo.routes";
 import marketingPublicRouter from "../modules/admin/marketing/marketing-public.routes";
 import promotionPackagesRouter from "../modules/promotion-packages/promotion-packages.routes";
 import settingsRouter from "../modules/settings/settings.routes";
@@ -65,6 +66,9 @@ router.use("/events", networkRouter);
 
 // Public location data (countries / cities for browse + venue forms)
 router.use("/location", locationRouter);
+
+// Visitor IP → geo (country/city) for localized home content
+router.use("/geo", geoRouter);
 
 // Cross-dashboard marketing feed (requires logged-in user token)
 router.use("/marketing", marketingPublicRouter);

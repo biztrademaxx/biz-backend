@@ -11,6 +11,6 @@ router.get("/venues/:id/events", auth_middleware_1.optionalUser, venues_controll
 // Reviews for a specific venue (reply routes before generic reviews)
 router.post("/venues/:id/reviews/:reviewId/replies", auth_middleware_1.requireUser, venues_controller_1.createVenueReviewReplyHandler);
 router.delete("/venues/:id/reviews/:reviewId/replies/:replyId", auth_middleware_1.requireUser, venues_controller_1.deleteVenueReviewReplyHandler);
-router.get("/venues/:id/reviews", venues_controller_1.getVenueReviewsHandler);
+router.get("/venues/:id/reviews", auth_middleware_1.optionalUser, venues_controller_1.getVenueReviewsHandler);
 router.post("/venues/:id/reviews", auth_middleware_1.requireUser, venues_controller_1.createVenueReviewHandler);
 exports.default = router;

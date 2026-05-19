@@ -74,6 +74,27 @@ function asBool(v, defaultValue = true) {
         return false;
     return defaultValue;
 }
+/** First non-empty match by exact key, then case-insensitive key match (Excel headers vary). */
+function pickCell(row, ...keys) {
+    for (const key of keys) {
+        if (Object.prototype.hasOwnProperty.call(row, key)) {
+            const v = str(row[key]);
+            if (v)
+                return v;
+        }
+    }
+    const norm = (s) => s.replace(/^\uFEFF/, "").toLowerCase().replace(/\s+/g, " ").trim();
+    const rowNorm = new Map();
+    for (const k of Object.keys(row)) {
+        rowNorm.set(norm(k), row[k]);
+    }
+    for (const key of keys) {
+        const v = str(rowNorm.get(norm(key)));
+        if (v)
+            return v;
+    }
+    return "";
+}
 async function importOrganizersFromFile(params) {
     const rows = parseRows(params.buffer);
     const errors = [];
@@ -82,22 +103,29 @@ async function importOrganizersFromFile(params) {
         const row = rows[index];
         const rowNo = index + 2;
         try {
-            const email = str(row.email);
+            const email = pickCell(row, "email", "Email");
             if (!email)
                 throw new Error("email is required");
-            const country = str(row.country);
-            const state = str(row.state);
-            const city = str(row.city);
-            const headquarters = str(row.headquarters) || [city, state, country].filter(Boolean).join(", ");
+            const organizationName = pickCell(row, "Organization Name", "organizationName", "company", "Company");
+            const country = pickCell(row, "country", "Country");
+            const state = pickCell(row, "state", "State");
+            const city = pickCell(row, "city", "City");
+            const headquarters = pickCell(row, "company headquarters address", "Company Headquarters Address", "headquarters", "Headquarters");
+            const website = pickCell(row, "website", "Website");
+            const phone = pickCell(row, "phone number", "Phone Number", "phone", "Phone");
             const payload = {
                 firstName: str(row.firstName) || "Organizer",
                 lastName: str(row.lastName),
                 email,
-                phone: str(row.phone) || undefined,
-                company: str(row.company || row.organizationName) || undefined,
-                organizationName: str(row.organizationName || row.company) || undefined,
+                phone: phone || undefined,
+                website: website || undefined,
+                company: organizationName || undefined,
+                organizationName: organizationName || undefined,
                 description: str(row.description) || undefined,
                 headquarters: headquarters || undefined,
+                organizerCountry: country || undefined,
+                organizerState: state || undefined,
+                organizerCity: city || undefined,
                 founded: str(row.founded) || undefined,
                 teamSize: str(row.teamSize) || undefined,
                 specialties: splitList(row.specialties),
@@ -152,6 +180,11 @@ async function importVenuesFromFile(params) {
                 firstName: str(row.firstName || row.contactPerson || venueName) || "Venue",
                 lastName: str(row.lastName),
                 phone: str(row.phone || row.mobile) || undefined,
+                avatar: str(row.venueImage || row.logo || row.avatar) || undefined,
+                venueImages: [
+                    str(row.venueImage || row.logo || row.avatar),
+                    ...splitList(row.venueImages),
+                ].filter(Boolean),
                 venueName,
                 venueCity: str(row.venueCity || row.city) || undefined,
                 venueState: str(row.venueState || row.state) || undefined,

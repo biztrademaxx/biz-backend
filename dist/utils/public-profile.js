@@ -24,8 +24,20 @@ function publicPublishedEventWhere() {
     return {
         status: "PUBLISHED",
         isPublic: true,
-        organizer: activePublicProfileUserWhere(),
-        OR: [{ venueId: null }, { venue: activePublicProfileUserWhere() }],
+        organizer: {
+            ...activePublicProfileUserWhere(),
+            isVerified: true,
+        },
+        OR: [
+            { venueId: null },
+            {
+                /** Listed on /venues uses isVerified; venue login is not tied to isActive. */
+                venue: {
+                    NOT: { profileVisibility: "private" },
+                    isVerified: true,
+                },
+            },
+        ],
     };
 }
 function canUserViewOwnPrivateProfile(viewerUserId, profileUserId) {
@@ -49,9 +61,13 @@ function isEventPubliclyVisible(event) {
     const o = event.organizer;
     if (!o || !o.isActive || o.profileVisibility === "private")
         return false;
+    if (o.isVerified === false)
+        return false;
     if (event.venueId) {
         const v = event.venue;
-        if (!v || !v.isActive || v.profileVisibility === "private")
+        if (!v || v.profileVisibility === "private")
+            return false;
+        if ("isVerified" in v && v.isVerified === false)
             return false;
     }
     return true;
