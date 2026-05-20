@@ -1113,3 +1113,227 @@ export async function sendUserAccountAccessEmail(params: {
   });
 }
 
+/** Thank-you after public contact form submit. */
+export async function sendContactInquiryThankYouEmail(params: {
+  to: string;
+  fullName: string;
+  inquiryType: string;
+}): Promise<void> {
+  const name = escapeHtmlText(params.fullName);
+  const type = escapeHtmlText(params.inquiryType);
+  await dispatchMail({
+    from: `"BizTradeFairs" <${getEffectiveFromEmail()}>`,
+    to: params.to,
+    subject: "We received your message — BizTradeFairs",
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #1d4ed8;">Thank you, ${name}!</h2>
+        <p>We've received your inquiry regarding <strong>${type}</strong>.</p>
+        <p>Our team will review your message and get back to you as soon as possible, typically within 1–2 business days.</p>
+        <p style="color:#64748b;font-size:14px;">If your question is urgent, you can also reach us at
+          <a href="mailto:support@biztradefairs.com">support@biztradefairs.com</a>.</p>
+        <br/>
+        <p>Best regards,<br/><strong>The BizTradeFairs Team</strong></p>
+      </div>
+    `,
+  });
+}
+
+/** Optional internal copy — set `CONTACT_NOTIFY_EMAIL` (comma-separated allowed). */
+export async function sendContactInquiryStaffNotify(params: {
+  fullName: string;
+  email: string;
+  phone: string | null;
+  inquiryType: string;
+  message: string;
+  inquiryId: string;
+}): Promise<void> {
+  const raw = process.env.CONTACT_NOTIFY_EMAIL?.trim();
+  if (!raw) return;
+  const recipients = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (recipients.length === 0) return;
+
+  const body = [
+    `New contact inquiry (${params.inquiryId})`,
+    "",
+    `Name: ${params.fullName}`,
+    `Email: ${params.email}`,
+    `Phone: ${params.phone || "—"}`,
+    `Type: ${params.inquiryType}`,
+    "",
+    "Message:",
+    params.message,
+  ].join("\n");
+
+  const html = `<pre style="font-family:monospace;font-size:13px;white-space:pre-wrap;">${escapeHtmlText(body)}</pre>`;
+
+  for (const to of recipients) {
+    // eslint-disable-next-line no-await-in-loop
+    await dispatchMail({
+      from: `"BizTradeFairs" <${getEffectiveFromEmail()}>`,
+      to,
+      subject: `[Contact] ${params.inquiryType} — ${params.fullName}`,
+      text: body,
+      html,
+    });
+  }
+}
+
+// ─── Newsletter (footer subscribers + admin digest) ─────────────────────────
+
+export type NewsletterDigestEvent = {
+  id: string;
+  title: string;
+  shortDescription: string | null;
+  slug: string;
+  startDate: string;
+  endDate: string;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+  venueName: string | null;
+  thumbnailImage: string | null;
+  bannerImage: string | null;
+  isVirtual: boolean;
+};
+
+function newsletterAssetUrl(u: string | null | undefined): string | null {
+  if (!u?.trim()) return null;
+  const t = u.trim();
+  if (/^https?:\/\//i.test(t)) return t;
+  const base = FRONTEND_BASE.replace(/\/$/, "");
+  return `${base}${t.startsWith("/") ? t : `/${t}`}`;
+}
+
+function formatNewsletterDateRange(startIso: string, endIso: string): string {
+  try {
+    const s = new Date(startIso);
+    const e = new Date(endIso);
+    const o: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", year: "numeric" };
+    return `${s.toLocaleDateString("en-GB", o)} – ${e.toLocaleDateString("en-GB", o)}`;
+  } catch {
+    return "";
+  }
+}
+
+function locationLine(ev: NewsletterDigestEvent): string {
+  if (ev.isVirtual) return "Online event";
+  const parts = [ev.venueName, ev.city, ev.state, ev.country].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "Venue TBA";
+}
+
+function buildNewsletterDigestHtml(events: NewsletterDigestEvent[]): string {
+  const base = FRONTEND_BASE.replace(/\/$/, "");
+  const blocks = events
+    .map((ev) => {
+      const title = escapeHtmlText(ev.title);
+      const blurb = escapeHtmlText((ev.shortDescription || "").slice(0, 220));
+      const when = escapeHtmlText(formatNewsletterDateRange(ev.startDate, ev.endDate));
+      const where = escapeHtmlText(locationLine(ev));
+      const eventPath = `/event/${encodeURIComponent(ev.slug || ev.id)}`;
+      const href = escapeHtmlAttr(`${base}${eventPath}`);
+      const imgSrc = newsletterAssetUrl(ev.thumbnailImage || ev.bannerImage);
+      const imgBlock = imgSrc
+        ? `<a href="${href}" style="text-decoration:none;"><img src="${escapeHtmlAttr(imgSrc)}" alt="" width="520" style="display:block;width:100%;max-width:520px;height:180px;object-fit:cover;border:0;" /></a>`
+        : "";
+
+      return `
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 14px 0;background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;">
+        <tr>
+          <td style="padding:0;">
+            ${imgBlock}
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:14px 16px 16px 16px;font-family:Inter,Segoe UI,Arial,sans-serif;">
+            <p style="margin:0 0 6px 0;font-size:12px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#64748b;">Featured event</p>
+            <h2 style="margin:0 0 8px 0;font-size:18px;line-height:1.25;color:#0f172a;">
+              <a href="${href}" style="color:#1d4ed8;text-decoration:none;">${title}</a>
+            </h2>
+            <p style="margin:0 0 6px 0;font-size:13px;color:#475569;line-height:1.45;"><strong>When:</strong> ${when}</p>
+            <p style="margin:0 0 10px 0;font-size:13px;color:#475569;line-height:1.45;"><strong>Where:</strong> ${where}</p>
+            ${blurb ? `<p style="margin:0 0 12px 0;font-size:13px;color:#334155;line-height:1.5;">${blurb}${(ev.shortDescription || "").length > 220 ? "…" : ""}</p>` : ""}
+            <a href="${href}" style="display:inline-block;background:linear-gradient(135deg,#1d4ed8 0%,#2563eb 55%,#0ea5e9 100%);color:#ffffff;text-decoration:none;font-weight:600;font-size:13px;padding:10px 16px;border-radius:9px;">View event details</a>
+          </td>
+        </tr>
+      </table>`;
+    })
+    .join("\n");
+
+  return `
+  <div style="margin:0;padding:0;background:#f1f5f9;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#f1f5f9;padding:18px 10px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="560" style="max-width:560px;width:100%;">
+            <tr>
+              <td style="padding:0 0 10px 0;text-align:center;font-family:Inter,Segoe UI,Arial,sans-serif;">
+                <p style="margin:0;font-size:12px;color:#64748b;">BizTradeFairs.com</p>
+                <h1 style="margin:6px 0 0 0;font-size:19px;line-height:1.25;color:#0f172a;">Events picked for you</h1>
+                <p style="margin:6px 0 0 0;font-size:13px;color:#475569;line-height:1.45;">Here are the latest happenings you can explore on our platform.</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0;">
+                ${blocks}
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:16px 8px 0 8px;text-align:center;font-family:Inter,Segoe UI,Arial,sans-serif;font-size:12px;color:#94a3b8;line-height:1.5;">
+                You are receiving this because you subscribed to updates from BizTradeFairs.<br/>
+                <a href="${escapeHtmlAttr(`${base}/contact`)}" style="color:#2563eb;">Contact us</a>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </div>`;
+}
+
+/** One personalized digest per subscriber (admin broadcast). */
+export async function sendNewsletterDigestEmail(params: {
+  to: string;
+  subject: string;
+  events: NewsletterDigestEvent[];
+}): Promise<void> {
+  const html = buildNewsletterDigestHtml(params.events);
+  const text = params.events
+    .map(
+      (e) =>
+        `${e.title}\n${FRONTEND_BASE.replace(/\/$/, "")}/event/${encodeURIComponent(e.slug || e.id)}\n${formatNewsletterDateRange(e.startDate, e.endDate)} — ${locationLine(e)}\n`,
+    )
+    .join("\n---\n");
+
+  await dispatchMail({
+    from: `"BizTradeFairs" <${getEffectiveFromEmail()}>`,
+    to: params.to,
+    subject: params.subject,
+    html,
+    text,
+  });
+}
+
+/** Optional welcome after footer signup. */
+export async function sendNewsletterWelcomeEmail(to: string): Promise<void> {
+  const base = FRONTEND_BASE.replace(/\/$/, "");
+  await dispatchMail({
+    from: `"BizTradeFairs" <${getEffectiveFromEmail()}>`,
+    to,
+    subject: "You’re subscribed — BizTradeFairs",
+    html: `
+      <div style="font-family:Inter,Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;">
+        <h2 style="color:#1d4ed8;margin-top:0;">Welcome aboard!</h2>
+        <p style="color:#334155;line-height:1.6;">Thanks for subscribing. We’ll occasionally send you curated trade fairs and business events.</p>
+        <p style="margin:20px 0;">
+          <a href="${escapeHtmlAttr(`${base}/event`)}" style="background:#2563eb;color:#fff;padding:12px 20px;text-decoration:none;border-radius:8px;font-weight:600;display:inline-block;">Browse events</a>
+        </p>
+        <p style="font-size:13px;color:#64748b;">BizTradeFairs.com</p>
+      </div>
+    `,
+    text: `Thanks for subscribing to BizTradeFairs updates.\nBrowse events: ${base}/event\n`,
+  });
+}

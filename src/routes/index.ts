@@ -27,6 +27,8 @@ import marketingPublicRouter from "../modules/admin/marketing/marketing-public.r
 import promotionPackagesRouter from "../modules/promotion-packages/promotion-packages.routes";
 import settingsRouter from "../modules/settings/settings.routes";
 import supportUserRouter from "./support-user";
+import contactRouter from "./contact";
+import newsletterPublicRouter from "./newsletter";
 
 const router = Router();
 
@@ -48,6 +50,12 @@ router.use("/settings", settingsRouter);
 
 // Logged-in user: raise & view support tickets (Express API only — not Next.js)
 router.use("/support", supportUserRouter);
+
+// Public contact form (marketing site)
+router.use("/", contactRouter);
+
+// Public newsletter signup (footer)
+router.use("/", newsletterPublicRouter);
 
 // User by id (for Next.js server: visitor dashboard etc.) — secured by INTERNAL_API_SECRET
 router.use("/", userByIdRouter);

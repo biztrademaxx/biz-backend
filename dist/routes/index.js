@@ -27,10 +27,13 @@ const network_routes_1 = __importDefault(require("../modules/network/network.rou
 const conversations_routes_1 = __importDefault(require("../modules/messages/conversations.routes"));
 const messages_routes_1 = __importDefault(require("../modules/messages/messages.routes"));
 const location_routes_1 = __importDefault(require("../modules/location/location.routes"));
+const geo_routes_1 = __importDefault(require("../modules/geo/geo.routes"));
 const marketing_public_routes_1 = __importDefault(require("../modules/admin/marketing/marketing-public.routes"));
 const promotion_packages_routes_1 = __importDefault(require("../modules/promotion-packages/promotion-packages.routes"));
 const settings_routes_1 = __importDefault(require("../modules/settings/settings.routes"));
 const support_user_1 = __importDefault(require("./support-user"));
+const contact_1 = __importDefault(require("./contact"));
+const newsletter_1 = __importDefault(require("./newsletter"));
 const router = (0, express_1.Router)();
 // Placeholder root route for the backend API
 router.get("/", (_req, res) => {
@@ -46,6 +49,10 @@ router.use("/auth", auth_1.default);
 router.use("/settings", settings_routes_1.default);
 // Logged-in user: raise & view support tickets (Express API only — not Next.js)
 router.use("/support", support_user_1.default);
+// Public contact form (marketing site)
+router.use("/", contact_1.default);
+// Public newsletter signup (footer)
+router.use("/", newsletter_1.default);
 // User by id (for Next.js server: visitor dashboard etc.) — secured by INTERNAL_API_SECRET
 router.use("/", user_by_id_1.default);
 // Admin routes (event create, etc.)
@@ -58,6 +65,8 @@ router.use("/", venue_manager_1.default);
 router.use("/events", network_routes_1.default);
 // Public location data (countries / cities for browse + venue forms)
 router.use("/location", location_routes_1.default);
+// Visitor IP → geo (country/city) for localized home content
+router.use("/geo", geo_routes_1.default);
 // Cross-dashboard marketing feed (requires logged-in user token)
 router.use("/marketing", marketing_public_routes_1.default);
 // Promotion packages feed for organizer/exhibitor dashboards
