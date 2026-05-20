@@ -1,0 +1,12 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../../../middleware/auth.middleware");
+const account_deactivation_controller_1 = require("./account-deactivation.controller");
+const router = (0, express_1.Router)();
+router.get("/pending", auth_middleware_1.requireAdmin, account_deactivation_controller_1.getPendingDeactivationsHandler);
+router.get("/", auth_middleware_1.requireAdmin, account_deactivation_controller_1.getDeactivationsHandler);
+router.post("/:id/approve", auth_middleware_1.requireAdmin, account_deactivation_controller_1.postApproveDeactivationHandler);
+router.post("/:id/reject", auth_middleware_1.requireAdmin, account_deactivation_controller_1.postRejectDeactivationHandler);
+router.post("/process-due", auth_middleware_1.requireAdmin, account_deactivation_controller_1.postProcessDueDeactivationsHandler);
+exports.default = router;
