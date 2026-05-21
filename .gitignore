@@ -2,3 +2,13 @@
 .env.local
 .env.production
 node_modules
+dist
+coverage
+.logs
+*.logs
+.tmp
+.cache
+/storage/database-backups
+.DS_Store
+.notes.js
+
