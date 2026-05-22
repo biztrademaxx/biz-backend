@@ -118,7 +118,7 @@ export async function listOrganizers(options?: { requireProfileImage?: boolean }
       company: organizer.organizationName || "",
       image: requireProfileImage
         ? organizer.avatar ?? ""
-        : organizer.avatar || "/city/c4.jpg",
+        : organizer.avatar || null,
       avgRating: organizer.averageRating || 0,
       totalReviews: organizer.totalReviews || 0,
       headquarters:

@@ -124,7 +124,7 @@ async function listOrganizers(options) {
             company: organizer.organizationName || "",
             image: requireProfileImage
                 ? organizer.avatar ?? ""
-                : organizer.avatar || "/city/c4.jpg",
+                : organizer.avatar || null,
             avgRating: organizer.averageRating || 0,
             totalReviews: organizer.totalReviews || 0,
             headquarters: structuredLocation || organizer.headquarters || organizer.location || "Not specified",

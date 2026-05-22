@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.parseDateString = parseDateString;
+exports.parseDateString = void 0;
 exports.cleanPhone = cleanPhone;
 exports.parseArray = parseArray;
 exports.parseWorkbookToRows = parseWorkbookToRows;
@@ -51,63 +51,13 @@ const prisma_1 = __importDefault(require("../../../config/prisma"));
 const youtube_url_1 = require("../../../utils/youtube-url");
 const events_writes_service_1 = require("../../events/events-writes.service");
 const email_service_1 = require("../../../services/email.service");
+const event_import_parse_1 = require("./event-import-parse");
+const event_import_dedupe_1 = require("./event-import-dedupe");
+var event_import_parse_2 = require("./event-import-parse");
+Object.defineProperty(exports, "parseDateString", { enumerable: true, get: function () { return event_import_parse_2.parseDateString; } });
 const BATCH_PAUSE_MS = 5;
 function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
-}
-/** Parse dates from spreadsheet cells (incl. Excel/Vercel odd formats). */
-function parseDateString(dateStr) {
-    if (dateStr === null || dateStr === undefined || String(dateStr).trim() === "") {
-        return new Date();
-    }
-    const str = String(dateStr).trim();
-    if (str.includes("$type") && str.includes("DateTime")) {
-        try {
-            let jsonStr = str;
-            if (!jsonStr.startsWith("{"))
-                jsonStr = `{${jsonStr}`;
-            if (!jsonStr.endsWith("}"))
-                jsonStr = `${jsonStr}}`;
-            jsonStr = jsonStr.replace(/\\"/g, '"');
-            const parsed = JSON.parse(jsonStr);
-            if (parsed.value) {
-                const date = new Date(parsed.value);
-                if (!Number.isNaN(date.getTime()))
-                    return date;
-            }
-        }
-        catch {
-            /* fall through */
-        }
-    }
-    if (str.includes("+0") || str.includes("-0")) {
-        const isoMatch = str.match(/(\d{4}-\d{2}-\d{2})/);
-        if (isoMatch) {
-            const date = new Date(isoMatch[1]);
-            if (!Number.isNaN(date.getTime()))
-                return date;
-        }
-        return new Date();
-    }
-    const parts = str.split("-");
-    if (parts.length === 3) {
-        const day = parseInt(parts[0], 10);
-        const month = parseInt(parts[1], 10);
-        const year = parseInt(parts[2], 10);
-        if (year >= 1900 && year <= 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-            if (day > 12 && day <= 31)
-                return new Date(year, month - 1, day);
-            if (year > 31 && month <= 12 && day <= 31)
-                return new Date(year, month - 1, day);
-        }
-    }
-    const date = new Date(str);
-    if (Number.isNaN(date.getTime()))
-        return new Date();
-    const y = date.getFullYear();
-    if (y < 1900 || y > 2100)
-        return new Date();
-    return date;
 }
 function cleanPhone(phone) {
     if (phone === null || phone === undefined || phone === "")
@@ -268,14 +218,14 @@ async function rowToEventBody(row, organizerId, venueId) {
     const title = String(row.eventTitle ?? "").trim();
     if (!title)
         throw new Error("eventTitle is required");
-    const baseStartDate = parseDateString(row.startDate);
-    const baseEndDate = parseDateString(row.endDate || row.startDate);
+    const baseStartDate = (0, event_import_parse_1.parseDateString)(row.startDate);
+    const baseEndDate = (0, event_import_parse_1.parseDateString)(row.endDate || row.startDate);
     const startTime = parseTimeString(row.startTime, "10:00");
     const endTime = parseTimeString(row.endTime, "18:00");
     const startDate = combineDateAndTime(baseStartDate, startTime);
     const endDate = combineDateAndTime(baseEndDate, endTime);
-    const registrationStart = row.registrationStart ? parseDateString(row.registrationStart) : startDate;
-    const registrationEnd = row.registrationEnd ? parseDateString(row.registrationEnd) : endDate;
+    const registrationStart = row.registrationStart ? (0, event_import_parse_1.parseDateString)(row.registrationStart) : startDate;
+    const registrationEnd = row.registrationEnd ? (0, event_import_parse_1.parseDateString)(row.registrationEnd) : endDate;
     const categories = [
         ...parseArray(row.category),
         ...parseArray(row.eventCategoryNames),
@@ -380,10 +330,22 @@ async function runImportJob(jobId) {
     const importedSummary = [];
     const adminId = job.createdByAdminId || "00000000-0000-0000-0000-000000000000";
     const adminType = job.createdByAdminRole === "SUB_ADMIN" ? "SUB_ADMIN" : "SUPER_ADMIN";
+    const seenDuplicateKeys = new Set();
     for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
         const rowNum = i + 2;
         try {
+            const dupFp = (0, event_import_dedupe_1.buildImportDuplicateFingerprint)(row);
+            if (!dupFp.titleNorm) {
+                throw new Error("eventTitle is required");
+            }
+            const dupKey = (0, event_import_dedupe_1.duplicateKeyFromFingerprint)(dupFp);
+            if (seenDuplicateKeys.has(dupKey)) {
+                throw new Error((0, event_import_dedupe_1.duplicateSkipMessage)(dupFp, "spreadsheet"));
+            }
+            if (await (0, event_import_dedupe_1.findExistingEventDuplicate)(dupFp)) {
+                throw new Error((0, event_import_dedupe_1.duplicateSkipMessage)(dupFp, "database"));
+            }
             const orgEmailRaw = String(row.organizerEmail ?? "").trim().toLowerCase();
             const orgName = String(row.organizerName ?? "").trim();
             let organizer;
@@ -459,6 +421,7 @@ async function runImportJob(jobId) {
                 organizerEmail: organizer.email,
                 organizerWasNew: organizerWasNew,
             });
+            seenDuplicateKeys.add(dupKey);
             await prisma_1.default.eventImportJob.update({
                 where: { id: jobId },
                 data: {
