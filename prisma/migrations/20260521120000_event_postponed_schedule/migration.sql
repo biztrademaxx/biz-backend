@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "events" ADD COLUMN IF NOT EXISTS "previousStartDate" TIMESTAMP(3);
+ALTER TABLE "events" ADD COLUMN IF NOT EXISTS "previousEndDate" TIMESTAMP(3);
+ALTER TABLE "events" ADD COLUMN IF NOT EXISTS "isPostponed" BOOLEAN NOT NULL DEFAULT false;

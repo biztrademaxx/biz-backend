@@ -448,7 +448,7 @@ export async function sendEventImportThankYouEmail(params: {
     to: toEmail,
     subject: `Your events were imported (${eventTitles.length})`,
     html: `
-      <div style="font-family: Inter, Arial, sans-serif; background: #f1f5f9; padding: 24px;">
+      <div style="font-family: Arial, sans-serif; background: #f1f5f9; padding: 24px;">
         <div style="max-width: 620px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden;">
           <div style="background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 55%, #0ea5e9 100%); color: #ffffff; padding: 22px 24px;">
             <h2 style="margin: 0; font-size: 22px; line-height: 1.3;">Events Imported Successfully</h2>
@@ -555,7 +555,7 @@ function buildEventListingThankYouEmailHtml(params: {
       (s) =>
         `<a href="${escapeHtmlAttr(s.href)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeHtmlAttr(
           s.label
-        )}" style="display:inline-block;width:40px;height:40px;line-height:40px;text-align:center;border-radius:999px;background:#4b5563;color:#ffffff;text-decoration:none;font-family:Inter,Arial,sans-serif;font-size:${s.letter === "in" || s.letter === "IG" ? "10px" : "14px"};font-weight:700;margin:0 6px;">${s.letter}</a>`
+        )}" style="display:inline-block;width:40px;height:40px;line-height:40px;text-align:center;border-radius:999px;background:#4b5563;color:#ffffff;text-decoration:none;font-family:Arial,sans-serif;font-size:${s.letter === "in" || s.letter === "IG" ? "10px" : "14px"};font-weight:700;margin:0 6px;">${s.letter}</a>`
     )
     .join("");
 
@@ -602,7 +602,7 @@ function buildEventListingThankYouEmailHtml(params: {
   return `
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0;padding:0;background:#f1f5f9;">
   <tr>
-    <td align="center" style="padding:24px 12px;font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+    <td align="center" style="padding:24px 12px;font-family:Arial,sans-serif;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;width:100%;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e2e8f0;">
         <tr>
           <td style="background:#172554;padding:28px 24px;">
@@ -742,14 +742,14 @@ function buildVenueManagerWelcomeEmailHtml(params: {
       (s) =>
         `<a href="${escapeHtmlAttr(s.href)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeHtmlAttr(
           s.label
-        )}" style="display:inline-block;width:40px;height:40px;line-height:40px;text-align:center;border-radius:999px;background:#374151;color:#ffffff;text-decoration:none;font-family:Inter,Arial,sans-serif;font-size:${s.letter === "in" || s.letter === "IG" ? "10px" : "14px"};font-weight:700;margin:0 6px;">${s.letter}</a>`
+        )}" style="display:inline-block;width:40px;height:40px;line-height:40px;text-align:center;border-radius:999px;background:#374151;color:#ffffff;text-decoration:none;font-family:Arial,sans-serif;font-size:${s.letter === "in" || s.letter === "IG" ? "10px" : "14px"};font-weight:700;margin:0 6px;">${s.letter}</a>`
     )
     .join("");
 
   return `
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0;padding:0;background:#f9f9ff;">
   <tr>
-    <td align="center" style="padding:40px 16px;font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+    <td align="center" style="padding:40px 16px;font-family:Arial,sans-serif;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;width:100%;">
         <!-- Logo -->
         <tr>
@@ -870,7 +870,7 @@ function buildOrganizerAccountWelcomeEmailHtml(params: {
       (s) =>
         `<a href="${escapeHtmlAttr(s.href)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeHtmlAttr(
           s.label
-        )}" style="display:inline-block;width:40px;height:40px;line-height:40px;text-align:center;border-radius:999px;background:#4b5563;color:#ffffff;text-decoration:none;font-family:Inter,Arial,sans-serif;font-size:${s.letter === "in" || s.letter === "IG" ? "10px" : "14px"};font-weight:700;margin:0 6px;">${s.letter}</a>`
+        )}" style="display:inline-block;width:40px;height:40px;line-height:40px;text-align:center;border-radius:999px;background:#4b5563;color:#ffffff;text-decoration:none;font-family:Arial,sans-serif;font-size:${s.letter === "in" || s.letter === "IG" ? "10px" : "14px"};font-weight:700;margin:0 6px;">${s.letter}</a>`
     )
     .join("");
 
@@ -890,7 +890,7 @@ function buildOrganizerAccountWelcomeEmailHtml(params: {
   return `
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0;padding:0;background:#f1f5f9;">
   <tr>
-    <td align="center" style="padding:24px 12px;font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+    <td align="center" style="padding:24px 12px;font-family:Arial,sans-serif;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;width:100%;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e2e8f0;">
         <!-- Header -->
         <tr>
@@ -1076,7 +1076,7 @@ export async function sendUserAccountAccessEmail(params: {
       venueWelcome?.html ??
       organizerWelcome?.html ??
       `
-      <div style="font-family: Inter, Arial, sans-serif; background: #f1f5f9; padding: 24px;">
+      <div style="font-family: Arial, sans-serif; background: #f1f5f9; padding: 24px;">
         <div style="max-width: 620px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden;">
           <div style="background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 55%, #0ea5e9 100%); color: #ffffff; padding: 22px 24px;">
             <h2 style="margin: 0; font-size: 22px; line-height: 1.3;">${roleLabel} Account Update</h2>
@@ -1248,7 +1248,7 @@ function buildNewsletterDigestHtml(events: NewsletterDigestEvent[]): string {
           </td>
         </tr>
         <tr>
-          <td style="padding:14px 16px 16px 16px;font-family:Inter,Segoe UI,Arial,sans-serif;">
+          <td style="padding:14px 16px 16px 16px;font-family:Arial,sans-serif;">
             <p style="margin:0 0 6px 0;font-size:12px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#64748b;">Featured event</p>
             <h2 style="margin:0 0 8px 0;font-size:18px;line-height:1.25;color:#0f172a;">
               <a href="${href}" style="color:#1d4ed8;text-decoration:none;">${title}</a>
@@ -1270,7 +1270,7 @@ function buildNewsletterDigestHtml(events: NewsletterDigestEvent[]): string {
         <td align="center">
           <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="560" style="max-width:560px;width:100%;">
             <tr>
-              <td style="padding:0 0 10px 0;text-align:center;font-family:Inter,Segoe UI,Arial,sans-serif;">
+              <td style="padding:0 0 10px 0;text-align:center;font-family:Arial,sans-serif;">
                 <p style="margin:0;font-size:12px;color:#64748b;">BizTradeFairs.com</p>
                 <h1 style="margin:6px 0 0 0;font-size:19px;line-height:1.25;color:#0f172a;">Events picked for you</h1>
                 <p style="margin:6px 0 0 0;font-size:13px;color:#475569;line-height:1.45;">Here are the latest happenings you can explore on our platform.</p>
@@ -1282,7 +1282,7 @@ function buildNewsletterDigestHtml(events: NewsletterDigestEvent[]): string {
               </td>
             </tr>
             <tr>
-              <td style="padding:16px 8px 0 8px;text-align:center;font-family:Inter,Segoe UI,Arial,sans-serif;font-size:12px;color:#94a3b8;line-height:1.5;">
+              <td style="padding:16px 8px 0 8px;text-align:center;font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;line-height:1.5;">
                 You are receiving this because you subscribed to updates from BizTradeFairs.<br/>
                 <a href="${escapeHtmlAttr(`${base}/contact`)}" style="color:#2563eb;">Contact us</a>
               </td>
@@ -1325,7 +1325,7 @@ export async function sendNewsletterWelcomeEmail(to: string): Promise<void> {
     to,
     subject: "You’re subscribed — BizTradeFairs",
     html: `
-      <div style="font-family:Inter,Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;">
+      <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;">
         <h2 style="color:#1d4ed8;margin-top:0;">Welcome aboard!</h2>
         <p style="color:#334155;line-height:1.6;">Thanks for subscribing. We’ll occasionally send you curated trade fairs and business events.</p>
         <p style="margin:20px 0;">

@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import prisma from "../../config/prisma";
+import { applyPostponedOnOrganizerDateChange } from "./event-schedule";
 import {
   publicPublishedEventWhere,
   activePublicProfileUserWhere,
@@ -1625,6 +1626,10 @@ export async function updateEventByOrganizer(
   const nextSubTitle =
     "subTitle" in body ? trimOrganizerEventText(body.subTitle) : existingEvent.subTitle;
 
+  const nextStart = body.startDate ? new Date(body.startDate as string) : existingEvent.startDate;
+  const nextEnd = body.endDate ? new Date(body.endDate as string) : existingEvent.endDate;
+  const postponePatch = applyPostponedOnOrganizerDateChange(existingEvent, nextStart, nextEnd);
+
   const eventUpdateData: Record<string, unknown> = {
     title: body.title,
     description: body.description,
@@ -1640,8 +1645,9 @@ export async function updateEventByOrganizer(
     status: (body.status as string)?.toUpperCase() ?? existingEvent.status,
     category: (body.category as string[]) || (body.eventType as string[]) || existingEvent.category,
     tags: (body.tags as string[]) || (body.categories as string[]) || existingEvent.tags,
-    startDate: body.startDate ? new Date(body.startDate as string) : existingEvent.startDate,
-    endDate: body.endDate ? new Date(body.endDate as string) : existingEvent.endDate,
+    startDate: nextStart,
+    endDate: nextEnd,
+    ...postponePatch,
     registrationStart: body.registrationStart
       ? new Date(body.registrationStart as string)
       : existingEvent.registrationStart,

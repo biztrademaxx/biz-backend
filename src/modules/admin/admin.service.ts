@@ -1,5 +1,6 @@
 import prisma from "../../config/prisma";
 import { EventStatus } from "@prisma/client";
+import { applyPostponedOnOrganizerDateChange } from "../events/event-schedule";
 import { normalizeYoutubeVideoUrlForStorage } from "../../utils/youtube-url";
 import { uploadImage } from "../../services/cloudinary.service";
 import { randomBytes } from "crypto";
@@ -300,7 +301,13 @@ export async function adminUpdateEvent(
 ) {
   const existing = await prisma.event.findUnique({
     where: { id },
-    select: { id: true },
+    select: {
+      id: true,
+      startDate: true,
+      endDate: true,
+      previousStartDate: true,
+      previousEndDate: true,
+    },
   });
 
   if (!existing) {
@@ -440,6 +447,12 @@ export async function adminUpdateEvent(
     updateData.verifiedAt = null;
     updateData.verifiedBy = null;
     updateData.verifiedBadgeImage = null;
+  }
+
+  if (existing && (updateData.startDate != null || updateData.endDate != null)) {
+    const newStart = (updateData.startDate as Date | undefined) ?? existing.startDate;
+    const newEnd = (updateData.endDate as Date | undefined) ?? existing.endDate;
+    Object.assign(updateData, applyPostponedOnOrganizerDateChange(existing, newStart, newEnd));
   }
 
   const ticketTypesPayload = Array.isArray((data as any).ticketTypes)

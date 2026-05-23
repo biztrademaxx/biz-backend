@@ -21,6 +21,7 @@ exports.adminGetEventMailCandidates = adminGetEventMailCandidates;
 exports.adminSendEventListingEmail = adminSendEventListingEmail;
 const prisma_1 = __importDefault(require("../../config/prisma"));
 const client_1 = require("@prisma/client");
+const event_schedule_1 = require("../events/event-schedule");
 const youtube_url_1 = require("../../utils/youtube-url");
 const cloudinary_service_1 = require("../../services/cloudinary.service");
 const crypto_1 = require("crypto");
@@ -284,7 +285,13 @@ async function adminGetEventById(id) {
 async function adminUpdateEvent(id, data) {
     const existing = await prisma_1.default.event.findUnique({
         where: { id },
-        select: { id: true },
+        select: {
+            id: true,
+            startDate: true,
+            endDate: true,
+            previousStartDate: true,
+            previousEndDate: true,
+        },
     });
     if (!existing) {
         return { error: "NOT_FOUND" };
@@ -425,6 +432,11 @@ async function adminUpdateEvent(id, data) {
         updateData.verifiedAt = null;
         updateData.verifiedBy = null;
         updateData.verifiedBadgeImage = null;
+    }
+    if (existing && (updateData.startDate != null || updateData.endDate != null)) {
+        const newStart = updateData.startDate ?? existing.startDate;
+        const newEnd = updateData.endDate ?? existing.endDate;
+        Object.assign(updateData, (0, event_schedule_1.applyPostponedOnOrganizerDateChange)(existing, newStart, newEnd));
     }
     const ticketTypesPayload = Array.isArray(data.ticketTypes)
         ? data.ticketTypes

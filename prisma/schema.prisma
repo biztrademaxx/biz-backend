@@ -516,6 +516,10 @@ model Event {
 
   startDate         DateTime
   endDate           DateTime
+  /** Original schedule before organizer postponed/rescheduled (first change only). */
+  previousStartDate DateTime?
+  previousEndDate   DateTime?
+  isPostponed       Boolean   @default(false)
   registrationStart DateTime
   registrationEnd   DateTime
   timezone          String

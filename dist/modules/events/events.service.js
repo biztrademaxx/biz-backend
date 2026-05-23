@@ -34,6 +34,7 @@ exports.createPromotion = createPromotion;
 exports.updateEventByOrganizer = updateEventByOrganizer;
 exports.deleteEventByOrganizer = deleteEventByOrganizer;
 const prisma_1 = __importDefault(require("../../config/prisma"));
+const event_schedule_1 = require("./event-schedule");
 const public_profile_1 = require("../../utils/public-profile");
 const profile_slug_1 = require("../../utils/profile-slug");
 const statusMap = {
@@ -1426,6 +1427,9 @@ async function updateEventByOrganizer(organizerId, eventId, body) {
         ? trimOrganizerEventText(body.shortDescription)
         : existingEvent.shortDescription;
     const nextSubTitle = "subTitle" in body ? trimOrganizerEventText(body.subTitle) : existingEvent.subTitle;
+    const nextStart = body.startDate ? new Date(body.startDate) : existingEvent.startDate;
+    const nextEnd = body.endDate ? new Date(body.endDate) : existingEvent.endDate;
+    const postponePatch = (0, event_schedule_1.applyPostponedOnOrganizerDateChange)(existingEvent, nextStart, nextEnd);
     const eventUpdateData = {
         title: body.title,
         description: body.description,
@@ -1439,8 +1443,9 @@ async function updateEventByOrganizer(organizerId, eventId, body) {
         status: body.status?.toUpperCase() ?? existingEvent.status,
         category: body.category || body.eventType || existingEvent.category,
         tags: body.tags || body.categories || existingEvent.tags,
-        startDate: body.startDate ? new Date(body.startDate) : existingEvent.startDate,
-        endDate: body.endDate ? new Date(body.endDate) : existingEvent.endDate,
+        startDate: nextStart,
+        endDate: nextEnd,
+        ...postponePatch,
         registrationStart: body.registrationStart
             ? new Date(body.registrationStart)
             : existingEvent.registrationStart,
