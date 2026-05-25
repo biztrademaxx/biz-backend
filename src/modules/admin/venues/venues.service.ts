@@ -404,13 +404,37 @@ export async function updateVenue(id: string, body: Record<string, unknown>) {
   }
   const allowed = [
     "firstName", "lastName", "phone", "venueName", "venueCity", "venueState",
-    "venueCountry", "venueAddress", "maxCapacity", "isActive", "isVerified",
+    "venueCountry", "venueAddress", "maxCapacity", "totalHalls", "isActive", "isVerified",
+    "venueWebsite", "venueDescription", "amenities",
   ];
   const data: Record<string, unknown> = {};
   for (const k of allowed) {
     if (body[k] !== undefined) data[k] = body[k];
   }
+  if (body.website !== undefined) data.venueWebsite = body.website === "" ? null : String(body.website);
+  if (body.description !== undefined) {
+    data.venueDescription = body.description === "" ? null : String(body.description);
+  }
   if (body.email !== undefined) data.email = String(body.email).trim().toLowerCase();
+  const logoRaw =
+    body.avatar != null
+      ? String(body.avatar).trim()
+      : body.logo != null
+        ? String(body.logo).trim()
+        : undefined;
+  if (logoRaw !== undefined) {
+    data.avatar = logoRaw || null;
+  }
+  if (body.venueImages !== undefined) {
+    const imgs = Array.isArray(body.venueImages)
+      ? (body.venueImages as unknown[]).map((v) => String(v ?? "").trim()).filter(Boolean)
+      : [];
+    const avatar = (data.avatar as string | null | undefined) ?? existing.avatar;
+    if (avatar && !imgs.includes(avatar)) {
+      imgs.unshift(avatar);
+    }
+    data.venueImages = imgs;
+  }
   await prisma.user.update({ where: { id }, data: data as any });
   await syncLocationMasterFromVenue({
     venueCountry: data.venueCountry,
