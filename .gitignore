@@ -10,5 +10,5 @@ coverage
 .cache
 /storage/database-backups
 .DS_Store
-.notes.js
+
 

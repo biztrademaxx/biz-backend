@@ -125,10 +125,7 @@ function exhibitorSelfIdFromStaleSlug(identifier, viewerUserId, viewerRole) {
     const isIdShaped = (0, profile_slug_1.isMongoObjectId)(raw) || (0, profile_slug_1.isUuidLike)(raw) || (0, profile_slug_1.isUuidSegment)(raw);
     const viewer = String(viewerUserId ?? "").trim();
     if (!isIdShaped && viewer && String(viewerRole ?? "").toUpperCase() === "EXHIBITOR") {
-        const vid = (0, profile_slug_1.isUuidSegment)(viewer) ? viewer.toLowerCase() : viewer;
-        if ((0, profile_slug_1.isMongoObjectId)(vid) || (0, profile_slug_1.isUuidLike)(vid) || (0, profile_slug_1.isUuidSegment)(vid)) {
-            return vid;
-        }
+        return (0, profile_slug_1.isUuidSegment)(viewer) ? viewer.toLowerCase() : viewer;
     }
     return null;
 }

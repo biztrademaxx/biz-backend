@@ -144,10 +144,7 @@ function exhibitorSelfIdFromStaleSlug(
   const isIdShaped = isMongoObjectId(raw) || isUuidLike(raw) || isUuidSegment(raw);
   const viewer = String(viewerUserId ?? "").trim();
   if (!isIdShaped && viewer && String(viewerRole ?? "").toUpperCase() === "EXHIBITOR") {
-    const vid = isUuidSegment(viewer) ? viewer.toLowerCase() : viewer;
-    if (isMongoObjectId(vid) || isUuidLike(vid) || isUuidSegment(vid)) {
-      return vid;
-    }
+    return isUuidSegment(viewer) ? viewer.toLowerCase() : viewer;
   }
   return null;
 }
