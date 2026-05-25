@@ -165,16 +165,22 @@ async function importVenuesFromFile(params) {
     const rows = parseRows(params.buffer);
     const errors = [];
     let successCount = 0;
+    const seenVenueNames = new Set();
     for (let index = 0; index < rows.length; index += 1) {
         const row = rows[index];
         const rowNo = index + 2;
         try {
-            const email = str(row.email);
-            const venueName = str(row.venueName);
+            const email = pickCell(row, "email", "Email");
+            const venueName = pickCell(row, "venueName", "Venue Name", "name");
             if (!email)
                 throw new Error("email is required");
             if (!venueName)
                 throw new Error("venueName is required");
+            const venueNorm = (0, venues_service_1.normalizeVenueName)(venueName);
+            if (seenVenueNames.has(venueNorm)) {
+                throw new Error(`Duplicate venue name in file: "${venueName}"`);
+            }
+            seenVenueNames.add(venueNorm);
             const payload = {
                 email,
                 firstName: str(row.firstName || row.contactPerson || venueName) || "Venue",

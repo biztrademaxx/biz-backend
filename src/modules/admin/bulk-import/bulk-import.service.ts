@@ -1,7 +1,7 @@
 import * as XLSX from "xlsx";
 import prisma from "../../../config/prisma";
 import { createOrganizer } from "../organizers/organizers.service";
-import { createVenue } from "../venues/venues.service";
+import { createVenue, normalizeVenueName } from "../venues/venues.service";
 
 type ImportError = { row: number; message: string };
 type ImportResult = { processed: number; successCount: number; errorCount: number; errors: ImportError[] };
@@ -152,15 +152,22 @@ export async function importVenuesFromFile(params: {
   const rows = parseRows(params.buffer);
   const errors: ImportError[] = [];
   let successCount = 0;
+  const seenVenueNames = new Set<string>();
 
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index];
     const rowNo = index + 2;
     try {
-      const email = str(row.email);
-      const venueName = str(row.venueName);
+      const email = pickCell(row, "email", "Email");
+      const venueName = pickCell(row, "venueName", "Venue Name", "name");
       if (!email) throw new Error("email is required");
       if (!venueName) throw new Error("venueName is required");
+
+      const venueNorm = normalizeVenueName(venueName);
+      if (seenVenueNames.has(venueNorm)) {
+        throw new Error(`Duplicate venue name in file: "${venueName}"`);
+      }
+      seenVenueNames.add(venueNorm);
 
       const payload = {
         email,

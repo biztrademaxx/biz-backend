@@ -27,7 +27,7 @@ export async function create(req: Request, res: Response) {
     const item = await service.createVenue(req.body ?? {});
     return res.status(201).json({ success: true, data: item });
   } catch (e: any) {
-    if (e?.message?.includes("already exists")) return sendError(res, 400, e.message);
+    if (isVenueClientError(e?.message)) return sendError(res, 400, e.message);
     return sendError(res, 500, "Failed to create venue", e?.message);
   }
 }
@@ -38,8 +38,19 @@ export async function update(req: Request, res: Response) {
     if (!item) return sendError(res, 404, "Venue not found");
     return sendOne(res, item);
   } catch (e: any) {
+    if (isVenueClientError(e?.message)) return sendError(res, 400, e.message);
     return sendError(res, 500, "Failed to update venue", e?.message);
   }
+}
+
+function isVenueClientError(message: unknown): boolean {
+  const m = String(message ?? "");
+  return (
+    m.includes("already exists") ||
+    m.includes("venueName is required") ||
+    m.includes("venueName cannot be empty") ||
+    m.includes('A venue named "')
+  );
 }
 
 export async function remove(req: Request, res: Response) {
