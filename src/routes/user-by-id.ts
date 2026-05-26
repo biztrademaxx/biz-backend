@@ -8,11 +8,32 @@ import { resolveSpeakerId } from "../modules/speakers/speakers.service";
 
 const router = Router();
 
+function buildLocationPayload(user: {
+  profileCity?: string | null;
+  profileState?: string | null;
+  profileCountry?: string | null;
+  location?: string | null;
+}) {
+  const city = user.profileCity?.trim() ?? "";
+  const state = user.profileState?.trim() ?? "";
+  const country = user.profileCountry?.trim() ?? "";
+  return {
+    city,
+    state,
+    country,
+    address: user.location?.trim() ?? "",
+  };
+}
+
 function serializeUser(user: any) {
   return {
     ...user,
     companyIndustry: user.companyIndustry ?? null,
     interests: user.interests ?? [],
+    profileCity: user.profileCity ?? null,
+    profileState: user.profileState ?? null,
+    profileCountry: user.profileCountry ?? null,
+    location: buildLocationPayload(user),
     createdAt: user.createdAt?.toISOString?.() ?? user.createdAt,
     updatedAt: user.updatedAt?.toISOString?.() ?? user.updatedAt,
     lastLogin: user.lastLogin?.toISOString?.() ?? user.lastLogin ?? null,
@@ -175,6 +196,9 @@ router.get("/users/:id", optionalUser, async (req: Request, res: Response) => {
         companyIndustry: true,
         jobTitle: true,
         location: true,
+        profileCity: true,
+        profileState: true,
+        profileCountry: true,
         interests: true,
         isVerified: true,
         lastLogin: true,
@@ -252,6 +276,13 @@ router.put("/users/:id", requireUser, async (req: Request, res: Response) => {
     twitter,
     instagram,
     interests,
+    profileCity,
+    profileState,
+    profileCountry,
+    city,
+    state,
+    country,
+    location: locationField,
   } = req.body ?? {};
 
   const data: any = {};
@@ -273,13 +304,67 @@ router.put("/users/:id", requireUser, async (req: Request, res: Response) => {
     data.interests = Array.isArray(interests) ? interests : [];
   }
 
-  if (Object.keys(data).length === 0) {
+  const locObj =
+    req.body?.location && typeof req.body.location === "object" && !Array.isArray(req.body.location)
+      ? req.body.location
+      : null;
+  const nextCity =
+    profileCity !== undefined
+      ? String(profileCity ?? "").trim() || null
+      : city !== undefined
+        ? String(city ?? "").trim() || null
+        : locObj?.city !== undefined
+          ? String(locObj.city ?? "").trim() || null
+          : undefined;
+  const nextState =
+    profileState !== undefined
+      ? String(profileState ?? "").trim() || null
+      : state !== undefined
+        ? String(state ?? "").trim() || null
+        : locObj?.state !== undefined
+          ? String(locObj.state ?? "").trim() || null
+          : undefined;
+  const nextCountry =
+    profileCountry !== undefined
+      ? String(profileCountry ?? "").trim() || null
+      : country !== undefined
+        ? String(country ?? "").trim() || null
+        : locObj?.country !== undefined
+          ? String(locObj.country ?? "").trim() || null
+          : undefined;
+
+  const hasProfileLocUpdate =
+    nextCity !== undefined || nextState !== undefined || nextCountry !== undefined;
+
+  if (locationField !== undefined && !hasProfileLocUpdate) {
+    data.location = locationField || null;
+  }
+
+  if (Object.keys(data).length === 0 && !hasProfileLocUpdate) {
     return res
       .status(400)
       .json({ success: false, error: "No fields to update" });
   }
 
   try {
+    if (hasProfileLocUpdate) {
+      const current = await prisma.user.findUnique({
+        where: { id },
+        select: { profileCity: true, profileState: true, profileCountry: true },
+      });
+      const mergedCity =
+        nextCity !== undefined ? nextCity : (current?.profileCity?.trim() || null);
+      const mergedState =
+        nextState !== undefined ? nextState : (current?.profileState?.trim() || null);
+      const mergedCountry =
+        nextCountry !== undefined ? nextCountry : (current?.profileCountry?.trim() || null);
+      data.profileCity = mergedCity;
+      data.profileState = mergedState;
+      data.profileCountry = mergedCountry;
+      const line = [mergedCity, mergedState, mergedCountry].filter(Boolean).join(", ");
+      data.location = line || null;
+    }
+
     const updated = await prisma.user.update({
       where: { id },
       data,
@@ -301,6 +386,9 @@ router.put("/users/:id", requireUser, async (req: Request, res: Response) => {
         companyIndustry: true,
         jobTitle: true,
         location: true,
+        profileCity: true,
+        profileState: true,
+        profileCountry: true,
         interests: true,
         isVerified: true,
         lastLogin: true,

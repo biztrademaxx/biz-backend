@@ -292,6 +292,10 @@ model User {
   companyIndustry String?
   jobTitle        String?
   location        String?
+  /// Profile location (speakers, visitors, exhibitors) — country / state / city names.
+  profileCountry  String?
+  profileState    String?
+  profileCity     String?
   timezone        String?
   language        String   @default("en")
   interests       String[] @default([])
