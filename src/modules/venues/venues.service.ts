@@ -44,8 +44,6 @@ export async function listVenues(params: ListVenuesParams) {
         id: true,
         firstName: true,
         lastName: true,
-        email: true,
-        phone: true,
         organizerIdForVenueManager: true,
         venueName: true,
         venueDescription: true,

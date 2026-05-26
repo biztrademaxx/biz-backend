@@ -123,6 +123,10 @@ router.get("/venue-manager/:id", auth_middleware_1.optionalUser, async (req, res
                 },
             }),
         ]);
+        const canViewContact = req.auth?.domain === "USER" && req.auth.sub === venueManager.id
+            ? true
+            : req.auth?.domain === "ADMIN";
+        const website = venueManager.venueWebsite || venueManager.website || "";
         const data = {
             id: venueManager.id,
             name: venueManager.venueName || venueManager.company || "Unnamed Venue",
@@ -132,8 +136,12 @@ router.get("/venue-manager/:id", auth_middleware_1.optionalUser, async (req, res
             manager: {
                 id: venueManager.id,
                 name: `${venueManager.firstName ?? ""} ${venueManager.lastName ?? ""}`.trim() || "Venue Manager",
-                email: venueManager.email,
-                phone: venueManager.phone ?? "",
+                ...(canViewContact
+                    ? {
+                        email: venueManager.email,
+                        phone: venueManager.phone ?? "",
+                    }
+                    : {}),
                 avatar: venueManager.avatar ?? "/placeholder.svg",
                 isVerified: venueManager.isVerified ?? false,
                 bio: venueManager.bio ?? "",
@@ -154,11 +162,15 @@ router.get("/venue-manager/:id", auth_middleware_1.optionalUser, async (req, res
                     lng: venueManager.longitude ?? 0,
                 },
             },
-            contact: {
-                phone: venueManager.venuePhone || venueManager.phone || "",
-                email: venueManager.venueEmail || venueManager.email,
-                website: venueManager.venueWebsite || venueManager.website || "",
-            },
+            contact: canViewContact
+                ? {
+                    phone: venueManager.venuePhone || venueManager.phone || "",
+                    email: venueManager.venueEmail || venueManager.email,
+                    website,
+                }
+                : website
+                    ? { website }
+                    : {},
             capacity: {
                 total: venueManager.maxCapacity ?? 0,
                 halls: venueManager.totalHalls ?? 0,

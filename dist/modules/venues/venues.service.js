@@ -40,8 +40,6 @@ async function listVenues(params) {
                 id: true,
                 firstName: true,
                 lastName: true,
-                email: true,
-                phone: true,
                 organizerIdForVenueManager: true,
                 venueName: true,
                 venueDescription: true,
