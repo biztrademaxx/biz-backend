@@ -94,24 +94,13 @@ export function parseCalendarParts(raw: unknown): CalendarParts | null {
     if (isValidCalendar(year, month, day)) return { year, month, day };
   }
 
-  const slashed = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const slashed = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
   if (slashed) {
     const a = parseInt(slashed[1], 10);
     const b = parseInt(slashed[2], 10);
     const year = parseInt(slashed[3], 10);
-    let day: number;
-    let month: number;
-    if (a > 12) {
-      day = a;
-      month = b;
-    } else if (b > 12) {
-      month = a;
-      day = b;
-    } else {
-      day = a;
-      month = b;
-    }
-    if (isValidCalendar(year, month, day)) return { year, month, day };
+    const parsed = parseSlashedCalendar(a, b, year);
+    if (parsed) return parsed;
   }
 
   const dotted = trimmed.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
@@ -124,6 +113,31 @@ export function parseCalendarParts(raw: unknown): CalendarParts | null {
 
   // Do not use `new Date("01-08-2026")` — JS may treat it as MM-DD.
   return null;
+}
+
+/** Excel / CSV two-digit years: 26 → 2026, 99 → 2099. */
+function expandTwoDigitYear(year: number): number {
+  if (year >= 100) return year;
+  return year >= 50 ? 1900 + year : 2000 + year;
+}
+
+/** Slashed dates: DD/MM when ambiguous (India), incl. M/D/YY from Excel (e.g. 2/6/26). */
+function parseSlashedCalendar(a: number, b: number, yearRaw: number): CalendarParts | null {
+  const year = expandTwoDigitYear(yearRaw);
+  let day: number;
+  let month: number;
+  if (a > 12) {
+    day = a;
+    month = b;
+  } else if (b > 12) {
+    month = a;
+    day = b;
+  } else {
+    day = a;
+    month = b;
+  }
+  if (!isValidCalendar(year, month, day)) return null;
+  return { year, month, day };
 }
 
 function isValidCalendar(year: number, month: number, day: number): boolean {
@@ -249,7 +263,9 @@ export function parseImportedDateTime(
       dateRaw === undefined || dateRaw === null || String(dateRaw).trim() === ""
         ? "(empty)"
         : String(dateRaw).slice(0, 48);
-    throw new Error(`Invalid ${fieldName}: "${preview}". Use DD-MM-YYYY (e.g. 01-08-2027).`);
+    throw new Error(
+      `Invalid ${fieldName}: "${preview}". Use DD-MM-YYYY (e.g. 02-06-2026), YYYY-MM-DD, or format the column as Text in Excel.`,
+    );
   }
   const time = parseTimeParts(timeRaw, fallbackTime);
   return combineDateAndTimeInTimeZone(date, time, timeZone);

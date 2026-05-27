@@ -34,6 +34,16 @@ describe("event-import-parse", () => {
     expect(parts).toEqual({ year: 2026, month: 8, day: 3 });
   });
 
+  it("parses Excel short slashed dates (2/6/26) as DD/MM", () => {
+    const parts = parseCalendarParts("2/6/26");
+    expect(parts).toEqual({ year: 2026, month: 6, day: 2 });
+  });
+
+  it("parses slashed dates with 4-digit year (02/06/2026)", () => {
+    const parts = parseCalendarParts("02/06/2026");
+    expect(parts).toEqual({ year: 2026, month: 6, day: 2 });
+  });
+
   it("parses Excel serial numbers as strings", () => {
     const parts = parseCalendarParts("45292");
     expect(parts).not.toBeNull();

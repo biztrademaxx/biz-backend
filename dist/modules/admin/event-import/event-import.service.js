@@ -114,10 +114,20 @@ function cellImportValue(cell) {
     if (!cell)
         return "";
     const displayed = cell.w != null ? String(cell.w).trim() : "";
-    if (displayed)
+    if (displayed && !displayed.includes("#"))
         return displayed;
     if (cell.v == null || cell.v === "")
         return "";
+    if (typeof cell.v === "number" && cell.t === "n" && cell.z) {
+        try {
+            const formatted = XLSX.SSF.format(cell.z, cell.v);
+            if (formatted && !formatted.includes("#"))
+                return String(formatted).trim();
+        }
+        catch {
+            /* fall through to raw serial */
+        }
+    }
     return cell.v;
 }
 function normalizeImportHeader(header) {
