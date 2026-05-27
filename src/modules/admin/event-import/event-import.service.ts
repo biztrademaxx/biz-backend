@@ -308,7 +308,7 @@ export async function createImportJob(params: {
   });
 
   void runImportJob(job.id).catch((e) => {
-    // eslint-disable-next-line no-console
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars no-console 
     console.error("[event-import] job failed", job.id, e);
   });
 
