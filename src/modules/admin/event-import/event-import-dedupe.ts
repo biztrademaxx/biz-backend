@@ -4,7 +4,7 @@
  * Same title on different dates or venues is allowed.
  */
 import prisma from "../../../config/prisma";
-import { parseDateString } from "./event-import-parse";
+import { parseImportTimezone, parseImportedDateTime } from "./event-import-parse";
 
 export function normalizeImportLabel(value: unknown): string {
   return String(value ?? "")
@@ -17,46 +17,10 @@ export function startOfUtcDay(date: Date): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 }
 
-export function parseTimeStringForImport(
-  raw: unknown,
-  fallback: string,
-): { hours: number; minutes: number } {
-  const str = String(raw ?? "").trim();
-  if (!str) {
-    const [fh, fm] = fallback.split(":").map((x) => parseInt(x, 10));
-    return { hours: fh, minutes: fm };
-  }
-  const m = str.match(/^(\d{1,2}):(\d{2})(?:\s*([AaPp][Mm]))?$/);
-  if (!m) {
-    const [fh, fm] = fallback.split(":").map((x) => parseInt(x, 10));
-    return { hours: fh, minutes: fm };
-  }
-  let hours = parseInt(m[1], 10);
-  const minutes = parseInt(m[2], 10);
-  const ampm = m[3]?.toUpperCase();
-  if (ampm === "PM" && hours < 12) hours += 12;
-  if (ampm === "AM" && hours === 12) hours = 0;
-  if (hours > 23 || minutes > 59) {
-    const [fh, fm] = fallback.split(":").map((x) => parseInt(x, 10));
-    return { hours: fh, minutes: fm };
-  }
-  return { hours, minutes };
-}
-
-export function combineDateAndTimeForImport(
-  date: Date,
-  time: { hours: number; minutes: number },
-): Date {
-  const d = new Date(date);
-  d.setHours(time.hours, time.minutes, 0, 0);
-  return d;
-}
-
 /** Parsed start instant used for duplicate key (same rules as import body). */
 export function parseRowStartDate(row: Record<string, unknown>): Date {
-  const baseStartDate = parseDateString(row.startDate);
-  const startTime = parseTimeStringForImport(row.startTime, "10:00");
-  return combineDateAndTimeForImport(baseStartDate, startTime);
+  const timeZone = parseImportTimezone(row.timezone);
+  return parseImportedDateTime(row.startDate, row.startTime, "10:00", timeZone);
 }
 
 export type ImportDuplicateFingerprint = {
