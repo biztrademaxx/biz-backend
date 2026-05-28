@@ -549,6 +549,8 @@ model Event {
   documents      String[] @default([])
   bannerImage    String?
   thumbnailImage String?
+  /// Dedicated image for homepage VIP cards only (does not replace normal event images elsewhere).
+  vipImage       String?
 
   isPublic         Boolean @default(true)
   requiresApproval Boolean @default(false)

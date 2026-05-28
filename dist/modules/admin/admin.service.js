@@ -199,6 +199,7 @@ async function adminListEvents(params) {
         eventType: event.eventType ?? [],
         youtubeVideoUrl: event.youtubeVideoUrl ?? null,
         bannerImage: event.bannerImage,
+        vipImage: event.vipImage ?? null,
         thumbnailImage: event.thumbnailImage,
         organizer: event.organizer
             ? {
@@ -333,6 +334,7 @@ async function adminUpdateEvent(id, data) {
         "brochure",
         "layoutPlan",
         "bannerImage",
+        "vipImage",
         "thumbnailImage",
         "isFeatured",
         "isVIP",

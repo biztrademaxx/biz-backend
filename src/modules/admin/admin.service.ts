@@ -208,6 +208,7 @@ export async function adminListEvents(params: AdminListEventsParams) {
     eventType: event.eventType ?? [],
     youtubeVideoUrl: event.youtubeVideoUrl ?? null,
     bannerImage: event.bannerImage,
+    vipImage: event.vipImage ?? null,
     thumbnailImage: event.thumbnailImage,
     organizer: event.organizer
       ? {
@@ -352,6 +353,7 @@ export async function adminUpdateEvent(
     "brochure",
     "layoutPlan",
     "bannerImage",
+    "vipImage",
     "thumbnailImage",
     "isFeatured",
     "isVIP",

@@ -246,6 +246,7 @@ export async function listEvents(params: ListEventsParams) {
       images: event.images,
       videos: event.videos ?? [],
       bannerImage: event.bannerImage,
+      vipImage: event.vipImage ?? null,
       thumbnailImage: event.thumbnailImage,
       youtubeVideoUrl: event.youtubeVideoUrl ?? null,
       organizer: {
