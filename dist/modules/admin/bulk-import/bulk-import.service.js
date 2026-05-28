@@ -40,8 +40,19 @@ exports.importOrganizersFromFile = importOrganizersFromFile;
 exports.importVenuesFromFile = importVenuesFromFile;
 const XLSX = __importStar(require("xlsx"));
 const prisma_1 = __importDefault(require("../../../config/prisma"));
-const organizers_service_1 = require("../organizers/organizers.service");
 const venues_service_1 = require("../venues/venues.service");
+function normKey(v) {
+    return str(v).toLowerCase().replace(/\s+/g, " ").trim();
+}
+function buildOrganizerNameKey(input) {
+    const org = normKey(input.organizationName);
+    if (org)
+        return `org:${org}`;
+    const full = [normKey(input.firstName), normKey(input.lastName)].filter(Boolean).join(" ").trim();
+    if (full)
+        return `person:${full}`;
+    return "";
+}
 function parseRows(buffer) {
     const workbook = XLSX.read(buffer, { type: "buffer", raw: false });
     const firstSheet = workbook.SheetNames[0];
@@ -99,13 +110,24 @@ async function importOrganizersFromFile(params) {
     const rows = parseRows(params.buffer);
     const errors = [];
     let successCount = 0;
+    const prepared = [];
+    const seenEmails = new Set();
+    const seenNameKeys = new Set();
+    const rowByEmail = new Map();
+    const rowByNameKey = new Map();
     for (let index = 0; index < rows.length; index += 1) {
         const row = rows[index];
         const rowNo = index + 2;
         try {
-            const email = pickCell(row, "email", "Email");
+            const email = pickCell(row, "email", "Email").toLowerCase();
             if (!email)
                 throw new Error("email is required");
+            if (seenEmails.has(email)) {
+                errors.push({ row: rowNo, message: `Duplicate email in file: ${email}` });
+                continue;
+            }
+            seenEmails.add(email);
+            rowByEmail.set(email, rowNo);
             const organizationName = pickCell(row, "Organization Name", "organizationName", "company", "Company");
             const country = pickCell(row, "country", "Country");
             const state = pickCell(row, "state", "State");
@@ -113,46 +135,120 @@ async function importOrganizersFromFile(params) {
             const headquarters = pickCell(row, "company headquarters address", "Company Headquarters Address", "headquarters", "Headquarters");
             const website = pickCell(row, "website", "Website");
             const phone = pickCell(row, "phone number", "Phone Number", "phone", "Phone");
-            const payload = {
-                firstName: str(row.firstName) || "Organizer",
-                lastName: str(row.lastName),
-                email,
-                phone: phone || undefined,
-                website: website || undefined,
-                company: organizationName || undefined,
-                organizationName: organizationName || undefined,
-                description: str(row.description) || undefined,
-                headquarters: headquarters || undefined,
-                organizerCountry: country || undefined,
-                organizerState: state || undefined,
-                organizerCity: city || undefined,
-                founded: str(row.founded) || undefined,
-                teamSize: str(row.teamSize) || undefined,
-                specialties: splitList(row.specialties),
-                businessEmail: str(row.businessEmail) || undefined,
-                businessPhone: str(row.businessPhone) || undefined,
-                businessAddress: str(row.businessAddress) || undefined,
-                taxId: str(row.taxId) || undefined,
-                isActive: asBool(row.isActive, true),
-            };
-            const created = await (0, organizers_service_1.createOrganizer)(payload);
-            successCount += 1;
-            if (params.adminId && created?.id) {
-                await prisma_1.default.adminLog.create({
-                    data: {
-                        adminId: params.adminId,
-                        adminType: params.adminType ?? "SUPER_ADMIN",
-                        action: "ADMIN_ORGANIZER_BULK_IMPORTED",
-                        resource: "ORGANIZER",
-                        resourceId: created.id,
-                        details: { email },
-                    },
-                });
+            const firstName = pickCell(row, "firstName", "First Name") || "Organizer";
+            const lastName = pickCell(row, "lastName", "Last Name") || "";
+            const nameKey = buildOrganizerNameKey({ organizationName, firstName, lastName });
+            if (!nameKey)
+                throw new Error("organizer name is required (Organization Name or First/Last Name)");
+            if (seenNameKeys.has(nameKey)) {
+                errors.push({ row: rowNo, message: `Duplicate organizer name in file: ${organizationName || `${firstName} ${lastName}`.trim()}` });
+                continue;
             }
+            seenNameKeys.add(nameKey);
+            rowByNameKey.set(nameKey, rowNo);
+            const locationLine = [city, state, country].filter(Boolean).join(", ");
+            prepared.push({
+                email,
+                role: "ORGANIZER",
+                firstName,
+                lastName,
+                phone: phone || null,
+                website: website || null,
+                company: organizationName || null,
+                organizationName: organizationName || null,
+                __nameKey: nameKey,
+                description: str(row.description) || null,
+                headquarters: headquarters || null,
+                organizerCity: city || null,
+                organizerState: state || null,
+                organizerCountry: country || null,
+                location: locationLine || null,
+                founded: str(row.founded) || null,
+                teamSize: str(row.teamSize) || null,
+                specialties: splitList(row.specialties),
+                businessEmail: str(row.businessEmail) || null,
+                businessPhone: str(row.businessPhone) || null,
+                businessAddress: str(row.businessAddress) || null,
+                taxId: str(row.taxId) || null,
+                isActive: asBool(row.isActive, true),
+                isVerified: asBool(row.isVerified, false),
+            });
         }
         catch (e) {
             errors.push({ row: rowNo, message: e?.message || "Failed to import organizer" });
         }
+    }
+    if (prepared.length > 0) {
+        const candidateEmails = prepared.map((item) => String(item.email));
+        const candidateOrgNames = prepared
+            .map((item) => str(item.organizationName))
+            .filter(Boolean);
+        const candidateFirstNames = prepared.map((item) => str(item.firstName)).filter(Boolean);
+        const candidateLastNames = prepared.map((item) => str(item.lastName)).filter(Boolean);
+        const existingUsers = await prisma_1.default.user.findMany({
+            where: {
+                role: "ORGANIZER",
+                OR: [
+                    { email: { in: candidateEmails } },
+                    { organizationName: { in: candidateOrgNames } },
+                    { AND: [{ firstName: { in: candidateFirstNames } }, { lastName: { in: candidateLastNames } }] },
+                ],
+            },
+            select: { email: true, organizationName: true, firstName: true, lastName: true },
+        });
+        const existingSet = new Set(existingUsers.map((u) => String(u.email).toLowerCase()));
+        const existingNameSet = new Set(existingUsers
+            .map((u) => buildOrganizerNameKey({
+            organizationName: u.organizationName,
+            firstName: u.firstName,
+            lastName: u.lastName,
+        }))
+            .filter(Boolean));
+        const toCreate = [];
+        for (const item of prepared) {
+            const email = String(item.email).toLowerCase();
+            const nameKey = String(item.__nameKey ?? "");
+            if (existingSet.has(email)) {
+                errors.push({
+                    row: rowByEmail.get(email) ?? 0,
+                    message: `Organizer with this email already exists: ${email}`,
+                });
+            }
+            else if (nameKey && existingNameSet.has(nameKey)) {
+                errors.push({
+                    row: rowByNameKey.get(nameKey) ?? 0,
+                    message: `Organizer with this name already exists`,
+                });
+            }
+            else {
+                delete item.__nameKey;
+                toCreate.push(item);
+            }
+        }
+        const CHUNK_SIZE = 200;
+        for (let i = 0; i < toCreate.length; i += CHUNK_SIZE) {
+            const chunk = toCreate.slice(i, i + CHUNK_SIZE);
+            const created = await prisma_1.default.user.createMany({
+                data: chunk,
+                skipDuplicates: true,
+            });
+            successCount += created.count;
+        }
+    }
+    if (params.adminId) {
+        await prisma_1.default.adminLog.create({
+            data: {
+                adminId: params.adminId,
+                adminType: params.adminType ?? "SUPER_ADMIN",
+                action: "ADMIN_ORGANIZER_BULK_IMPORTED",
+                resource: "ORGANIZER",
+                details: {
+                    processed: rows.length,
+                    successCount,
+                    errorCount: errors.length,
+                },
+            },
+        });
     }
     return {
         processed: rows.length,
