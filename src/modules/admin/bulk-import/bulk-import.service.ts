@@ -1,10 +1,25 @@
 import * as XLSX from "xlsx";
 import prisma from "../../../config/prisma";
-import { createOrganizer } from "../organizers/organizers.service";
 import { createVenue, normalizeVenueName } from "../venues/venues.service";
 
 type ImportError = { row: number; message: string };
 type ImportResult = { processed: number; successCount: number; errorCount: number; errors: ImportError[] };
+
+function normKey(v: unknown): string {
+  return str(v).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function buildOrganizerNameKey(input: {
+  organizationName?: unknown;
+  firstName?: unknown;
+  lastName?: unknown;
+}): string {
+  const org = normKey(input.organizationName);
+  if (org) return `org:${org}`;
+  const full = [normKey(input.firstName), normKey(input.lastName)].filter(Boolean).join(" ").trim();
+  if (full) return `person:${full}`;
+  return "";
+}
 
 function parseRows(buffer: Buffer): Record<string, unknown>[] {
   const workbook = XLSX.read(buffer, { type: "buffer", raw: false });
@@ -65,13 +80,24 @@ export async function importOrganizersFromFile(params: {
   const rows = parseRows(params.buffer);
   const errors: ImportError[] = [];
   let successCount = 0;
+  const prepared: Array<Record<string, unknown>> = [];
+  const seenEmails = new Set<string>();
+  const seenNameKeys = new Set<string>();
+  const rowByEmail = new Map<string, number>();
+  const rowByNameKey = new Map<string, number>();
 
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index];
     const rowNo = index + 2;
     try {
-      const email = pickCell(row, "email", "Email");
+      const email = pickCell(row, "email", "Email").toLowerCase();
       if (!email) throw new Error("email is required");
+      if (seenEmails.has(email)) {
+        errors.push({ row: rowNo, message: `Duplicate email in file: ${email}` });
+        continue;
+      }
+      seenEmails.add(email);
+      rowByEmail.set(email, rowNo);
 
       const organizationName = pickCell(
         row,
@@ -92,48 +118,124 @@ export async function importOrganizersFromFile(params: {
       );
       const website = pickCell(row, "website", "Website");
       const phone = pickCell(row, "phone number", "Phone Number", "phone", "Phone");
-
-      const payload = {
-        firstName: str(row.firstName) || "Organizer",
-        lastName: str(row.lastName),
-        email,
-        phone: phone || undefined,
-        website: website || undefined,
-        company: organizationName || undefined,
-        organizationName: organizationName || undefined,
-        description: str(row.description) || undefined,
-        headquarters: headquarters || undefined,
-        organizerCountry: country || undefined,
-        organizerState: state || undefined,
-        organizerCity: city || undefined,
-        founded: str(row.founded) || undefined,
-        teamSize: str(row.teamSize) || undefined,
-        specialties: splitList(row.specialties),
-        businessEmail: str(row.businessEmail) || undefined,
-        businessPhone: str(row.businessPhone) || undefined,
-        businessAddress: str(row.businessAddress) || undefined,
-        taxId: str(row.taxId) || undefined,
-        isActive: asBool(row.isActive, true),
-      };
-
-      const created = await createOrganizer(payload);
-      successCount += 1;
-
-      if (params.adminId && created?.id) {
-        await prisma.adminLog.create({
-          data: {
-            adminId: params.adminId,
-            adminType: params.adminType ?? "SUPER_ADMIN",
-            action: "ADMIN_ORGANIZER_BULK_IMPORTED",
-            resource: "ORGANIZER",
-            resourceId: created.id,
-            details: { email },
-          },
-        });
+      const firstName = pickCell(row, "firstName", "First Name") || "Organizer";
+      const lastName = pickCell(row, "lastName", "Last Name") || "";
+      const nameKey = buildOrganizerNameKey({ organizationName, firstName, lastName });
+      if (!nameKey) throw new Error("organizer name is required (Organization Name or First/Last Name)");
+      if (seenNameKeys.has(nameKey)) {
+        errors.push({ row: rowNo, message: `Duplicate organizer name in file: ${organizationName || `${firstName} ${lastName}`.trim()}` });
+        continue;
       }
+      seenNameKeys.add(nameKey);
+      rowByNameKey.set(nameKey, rowNo);
+      const locationLine = [city, state, country].filter(Boolean).join(", ");
+      prepared.push({
+        email,
+        role: "ORGANIZER",
+        firstName,
+        lastName,
+        phone: phone || null,
+        website: website || null,
+        company: organizationName || null,
+        organizationName: organizationName || null,
+        __nameKey: nameKey,
+        description: str(row.description) || null,
+        headquarters: headquarters || null,
+        organizerCity: city || null,
+        organizerState: state || null,
+        organizerCountry: country || null,
+        location: locationLine || null,
+        founded: str(row.founded) || null,
+        teamSize: str(row.teamSize) || null,
+        specialties: splitList(row.specialties),
+        businessEmail: str(row.businessEmail) || null,
+        businessPhone: str(row.businessPhone) || null,
+        businessAddress: str(row.businessAddress) || null,
+        taxId: str(row.taxId) || null,
+        isActive: asBool(row.isActive, true),
+        isVerified: asBool(row.isVerified, false),
+      });
     } catch (e: any) {
       errors.push({ row: rowNo, message: e?.message || "Failed to import organizer" });
     }
+  }
+
+  if (prepared.length > 0) {
+    const candidateEmails = prepared.map((item) => String(item.email));
+    const candidateOrgNames = prepared
+      .map((item) => str(item.organizationName))
+      .filter(Boolean);
+    const candidateFirstNames = prepared.map((item) => str(item.firstName)).filter(Boolean);
+    const candidateLastNames = prepared.map((item) => str(item.lastName)).filter(Boolean);
+    const existingUsers = await prisma.user.findMany({
+      where: {
+        role: "ORGANIZER",
+        OR: [
+          { email: { in: candidateEmails } },
+          { organizationName: { in: candidateOrgNames } },
+          { AND: [{ firstName: { in: candidateFirstNames } }, { lastName: { in: candidateLastNames } }] },
+        ],
+      },
+      select: { email: true, organizationName: true, firstName: true, lastName: true },
+    });
+    const existingSet = new Set(existingUsers.map((u) => String(u.email).toLowerCase()));
+    const existingNameSet = new Set(
+      existingUsers
+        .map((u) =>
+          buildOrganizerNameKey({
+            organizationName: u.organizationName,
+            firstName: u.firstName,
+            lastName: u.lastName,
+          }),
+        )
+        .filter(Boolean),
+    );
+    const toCreate: Array<Record<string, unknown>> = [];
+
+    for (const item of prepared) {
+      const email = String(item.email).toLowerCase();
+      const nameKey = String(item.__nameKey ?? "");
+      if (existingSet.has(email)) {
+        errors.push({
+          row: rowByEmail.get(email) ?? 0,
+          message: `Organizer with this email already exists: ${email}`,
+        });
+      } else if (nameKey && existingNameSet.has(nameKey)) {
+        errors.push({
+          row: rowByNameKey.get(nameKey) ?? 0,
+          message: `Organizer with this name already exists`,
+        });
+      } else {
+        delete item.__nameKey;
+        toCreate.push(item);
+      }
+    }
+
+    const CHUNK_SIZE = 200;
+    for (let i = 0; i < toCreate.length; i += CHUNK_SIZE) {
+      const chunk = toCreate.slice(i, i + CHUNK_SIZE);
+      const created = await prisma.user.createMany({
+        data: chunk as any[],
+        skipDuplicates: true,
+      });
+      successCount += created.count;
+    }
+  }
+
+  if (params.adminId) {
+    await prisma.adminLog.create({
+      data: {
+        adminId: params.adminId,
+        adminType: params.adminType ?? "SUPER_ADMIN",
+        action: "ADMIN_ORGANIZER_BULK_IMPORTED",
+        resource: "ORGANIZER",
+        details: {
+          processed: rows.length,
+          successCount,
+          errorCount: errors.length,
+        },
+      },
+    });
   }
 
   return {
