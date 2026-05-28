@@ -18,6 +18,18 @@ import {
   deleteExhibitorProduct,
 } from "./exhibitors.service";
 
+/**
+ * JWT `sub` to pass into exhibitor slug resolution (“view my profile by slug”).
+ * - Admin portal tokens (`domain === "ADMIN"`) must not be used (wrong id space).
+ * - Legacy app tokens may omit `domain`; treat like end-user as long as not admin.
+ */
+function exhibitorResolutionViewerId(req: Request): string | undefined {
+  const sub = req.auth?.sub;
+  if (!sub || sub === "internal") return undefined;
+  if (req.auth?.domain === "ADMIN") return undefined;
+  return sub;
+}
+
 export async function getExhibitorsHandler(_req: Request, res: Response) {
   try {
     const exhibitors = await listExhibitors();
@@ -55,8 +67,8 @@ export async function createExhibitorHandler(req: Request, res: Response) {
 export async function getExhibitorHandler(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    const viewerId = req.auth?.domain === "USER" ? req.auth.sub : undefined;
-    const exhibitor = await getExhibitorById(id, viewerId);
+    const viewerId = exhibitorResolutionViewerId(req);
+    const exhibitor = await getExhibitorById(id, viewerId, req.auth?.role);
 
     if (!exhibitor) {
       return res.status(404).json({ success: false, error: "Exhibitor not found" });
@@ -76,7 +88,8 @@ export async function getExhibitorHandler(req: Request, res: Response) {
 export async function updateExhibitorHandler(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    const updated = await updateExhibitorProfile(id, req.body ?? {});
+    const viewerId = exhibitorResolutionViewerId(req);
+    const updated = await updateExhibitorProfile(id, req.body ?? {}, viewerId, req.auth?.role);
 
     if (!updated) {
       return res.status(404).json({ success: false, error: "Exhibitor not found" });
@@ -119,8 +132,8 @@ export async function getExhibitorEventsHandler(req: Request, res: Response) {
       return res.status(400).json({ error: "exhibitorId is required" });
     }
 
-    const viewerId = req.auth?.domain === "USER" ? req.auth.sub : undefined;
-    const events = await getExhibitorEvents(exhibitorId, viewerId);
+    const viewerId = exhibitorResolutionViewerId(req);
+    const events = await getExhibitorEvents(exhibitorId, viewerId, req.auth?.role);
     return res.status(200).json({ success: true, events });
   } catch (error: any) {
     if (error instanceof Error && error.message.includes("exhibitorId is required")) {
@@ -139,7 +152,7 @@ export async function getExhibitorPromotionsMarketingHandler(req: Request, res: 
     if (!exhibitorId) {
       return res.status(400).json({ error: "exhibitorId is required" });
     }
-    const viewerId = req.auth?.domain === "USER" ? req.auth.sub : undefined;
+    const viewerId = exhibitorResolutionViewerId(req);
     if (!viewerId) {
       return res.status(401).json({ error: "Unauthorized" });
     }
@@ -283,7 +296,8 @@ export async function getExhibitorProductsHandler(req: Request, res: Response) {
     if (!exhibitorId) {
       return res.status(400).json({ error: "exhibitorId is required" });
     }
-    const products = await listExhibitorProducts(exhibitorId);
+    const viewerId = exhibitorResolutionViewerId(req);
+    const products = await listExhibitorProducts(exhibitorId, viewerId, req.auth?.role);
     return res.status(200).json({ products });
   } catch (error: any) {
     // eslint-disable-next-line no-console
@@ -298,7 +312,8 @@ export async function createExhibitorProductHandler(req: Request, res: Response)
     if (!exhibitorId) {
       return res.status(400).json({ error: "exhibitorId is required" });
     }
-    const product = await createExhibitorProduct(exhibitorId, req.body ?? {});
+    const viewerId = exhibitorResolutionViewerId(req);
+    const product = await createExhibitorProduct(exhibitorId, req.body ?? {}, viewerId, req.auth?.role);
     return res.status(201).json({ product });
   } catch (error: any) {
     // eslint-disable-next-line no-console
@@ -314,7 +329,8 @@ export async function updateExhibitorProductHandler(req: Request, res: Response)
     if (!exhibitorId || !productId) {
       return res.status(400).json({ error: "exhibitorId and productId are required" });
     }
-    const product = await updateExhibitorProduct(exhibitorId, productId, req.body ?? {});
+    const viewerId = exhibitorResolutionViewerId(req);
+    const product = await updateExhibitorProduct(exhibitorId, productId, req.body ?? {}, viewerId, req.auth?.role);
     if (!product) {
       return res.status(404).json({ error: "Product not found" });
     }
@@ -333,7 +349,8 @@ export async function deleteExhibitorProductHandler(req: Request, res: Response)
     if (!exhibitorId || !productId) {
       return res.status(400).json({ error: "exhibitorId and productId are required" });
     }
-    const deleted = await deleteExhibitorProduct(exhibitorId, productId);
+    const viewerId = exhibitorResolutionViewerId(req);
+    const deleted = await deleteExhibitorProduct(exhibitorId, productId, viewerId, req.auth?.role);
     if (!deleted) {
       return res.status(404).json({ error: "Product not found" });
     }

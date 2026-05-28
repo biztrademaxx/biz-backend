@@ -6,6 +6,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const prisma_1 = __importDefault(require("../config/prisma"));
 const iana_timezones_1 = require("../utils/iana-timezones");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const venue_slug_1 = require("../utils/venue-slug");
 const router = (0, express_1.Router)();
 async function syncLocationMasterFromVenue(input) {
     const countryName = String(input.country ?? "").trim();
@@ -59,8 +61,8 @@ async function syncLocationMasterFromVenue(input) {
         });
     }
 }
-// GET /api/venue-manager/:id – venue manager profile + basic stats
-router.get("/venue-manager/:id", async (req, res) => {
+// GET /api/venue-manager/:id – venue manager profile + basic stats (id = UUID or slug from venue name)
+router.get("/venue-manager/:id", auth_middleware_1.optionalUser, async (req, res) => {
     try {
         const { id } = req.params;
         if (!id) {
@@ -68,14 +70,46 @@ router.get("/venue-manager/:id", async (req, res) => {
                 .status(400)
                 .json({ success: false, error: "Invalid venue manager ID" });
         }
-        const venueManager = await prisma_1.default.user.findUnique({
-            where: { id },
-        });
+        // `id` must be a real UUID for Prisma `findUnique({ where: { id } })`; slug segments would throw.
+        let venueManager = (0, venue_slug_1.isUuidParam)(id)
+            ? await prisma_1.default.user.findUnique({
+                where: { id },
+            })
+            : null;
+        if (!venueManager && !(0, venue_slug_1.isUuidParam)(id)) {
+            const slug = decodeURIComponent(id).trim().toLowerCase();
+            const managers = await prisma_1.default.user.findMany({
+                where: {
+                    role: "VENUE_MANAGER",
+                    venueName: { not: null },
+                },
+                select: { id: true, venueName: true },
+            });
+            const match = managers.find((u) => (0, venue_slug_1.slugifyVenueSegment)(u.venueName || "").length > 0 &&
+                (0, venue_slug_1.slugifyVenueSegment)(u.venueName || "") === slug);
+            if (match) {
+                venueManager = await prisma_1.default.user.findUnique({
+                    where: { id: match.id },
+                });
+            }
+        }
         if (!venueManager) {
             return res.status(404).json({
                 success: false,
                 error: "Venue manager not found",
             });
+        }
+        if (venueManager.role === "VENUE_MANAGER") {
+            const isOwner = req.auth?.domain === "USER" && req.auth.sub === venueManager.id;
+            const isAdmin = req.auth?.domain === "ADMIN";
+            const profilePublic = venueManager.profileVisibility !== "private";
+            const visibleToPublic = venueManager.isVerified && profilePublic;
+            if (!visibleToPublic && !isOwner && !isAdmin) {
+                return res.status(404).json({
+                    success: false,
+                    error: "Venue not found",
+                });
+            }
         }
         const now = new Date();
         const [totalEvents, activeBookings] = await Promise.all([
@@ -89,6 +123,10 @@ router.get("/venue-manager/:id", async (req, res) => {
                 },
             }),
         ]);
+        const canViewContact = req.auth?.domain === "USER" && req.auth.sub === venueManager.id
+            ? true
+            : req.auth?.domain === "ADMIN";
+        const website = venueManager.venueWebsite || venueManager.website || "";
         const data = {
             id: venueManager.id,
             name: venueManager.venueName || venueManager.company || "Unnamed Venue",
@@ -98,8 +136,12 @@ router.get("/venue-manager/:id", async (req, res) => {
             manager: {
                 id: venueManager.id,
                 name: `${venueManager.firstName ?? ""} ${venueManager.lastName ?? ""}`.trim() || "Venue Manager",
-                email: venueManager.email,
-                phone: venueManager.phone ?? "",
+                ...(canViewContact
+                    ? {
+                        email: venueManager.email,
+                        phone: venueManager.phone ?? "",
+                    }
+                    : {}),
                 avatar: venueManager.avatar ?? "/placeholder.svg",
                 isVerified: venueManager.isVerified ?? false,
                 bio: venueManager.bio ?? "",
@@ -120,11 +162,15 @@ router.get("/venue-manager/:id", async (req, res) => {
                     lng: venueManager.longitude ?? 0,
                 },
             },
-            contact: {
-                phone: venueManager.venuePhone || venueManager.phone || "",
-                email: venueManager.venueEmail || venueManager.email,
-                website: venueManager.venueWebsite || venueManager.website || "",
-            },
+            contact: canViewContact
+                ? {
+                    phone: venueManager.venuePhone || venueManager.phone || "",
+                    email: venueManager.venueEmail || venueManager.email,
+                    website,
+                }
+                : website
+                    ? { website }
+                    : {},
             capacity: {
                 total: venueManager.maxCapacity ?? 0,
                 halls: venueManager.totalHalls ?? 0,
@@ -227,6 +273,8 @@ router.post("/venue-manager/:organizerId", async (req, res) => {
                 firstName: managerFirst || venueName || "Venue",
                 lastName: managerLast || "Manager",
                 password: passwordToUse,
+                isVerified: false,
+                isActive: true,
                 venueName,
                 company: venueName || null,
                 avatar: logo || null,

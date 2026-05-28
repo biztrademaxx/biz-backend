@@ -57,9 +57,9 @@ async function getOrganizerHandler(req, res) {
             if (req.hadInvalidAuthToken) {
                 const row = await prisma_1.default.user.findFirst({
                     where: { id, role: "ORGANIZER" },
-                    select: { profileVisibility: true, isActive: true },
+                    select: { profileVisibility: true, isActive: true, isVerified: true },
                 });
-                if (row && (!row.isActive || row.profileVisibility === "private")) {
+                if (row && (!row.isActive || row.profileVisibility === "private" || !row.isVerified)) {
                     return res.status(401).json({ message: "Invalid or expired token" });
                 }
             }

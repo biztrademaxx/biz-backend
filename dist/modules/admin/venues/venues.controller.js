@@ -69,7 +69,7 @@ async function create(req, res) {
         return res.status(201).json({ success: true, data: item });
     }
     catch (e) {
-        if (e?.message?.includes("already exists"))
+        if (isVenueClientError(e?.message))
             return (0, admin_response_1.sendError)(res, 400, e.message);
         return (0, admin_response_1.sendError)(res, 500, "Failed to create venue", e?.message);
     }
@@ -82,8 +82,17 @@ async function update(req, res) {
         return (0, admin_response_1.sendOne)(res, item);
     }
     catch (e) {
+        if (isVenueClientError(e?.message))
+            return (0, admin_response_1.sendError)(res, 400, e.message);
         return (0, admin_response_1.sendError)(res, 500, "Failed to update venue", e?.message);
     }
+}
+function isVenueClientError(message) {
+    const m = String(message ?? "");
+    return (m.includes("already exists") ||
+        m.includes("venueName is required") ||
+        m.includes("venueName cannot be empty") ||
+        m.includes('A venue named "'));
 }
 async function remove(req, res) {
     try {

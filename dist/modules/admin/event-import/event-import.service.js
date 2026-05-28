@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.parseDateString = parseDateString;
+exports.parseDateString = void 0;
 exports.cleanPhone = cleanPhone;
 exports.parseArray = parseArray;
 exports.parseWorkbookToRows = parseWorkbookToRows;
@@ -51,63 +51,14 @@ const prisma_1 = __importDefault(require("../../../config/prisma"));
 const youtube_url_1 = require("../../../utils/youtube-url");
 const events_writes_service_1 = require("../../events/events-writes.service");
 const email_service_1 = require("../../../services/email.service");
+const event_import_parse_1 = require("./event-import-parse");
+const event_import_row_1 = require("./event-import-row");
+const event_import_dedupe_1 = require("./event-import-dedupe");
+var event_import_parse_2 = require("./event-import-parse");
+Object.defineProperty(exports, "parseDateString", { enumerable: true, get: function () { return event_import_parse_2.parseDateString; } });
 const BATCH_PAUSE_MS = 5;
 function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
-}
-/** Parse dates from spreadsheet cells (incl. Excel/Vercel odd formats). */
-function parseDateString(dateStr) {
-    if (dateStr === null || dateStr === undefined || String(dateStr).trim() === "") {
-        return new Date();
-    }
-    const str = String(dateStr).trim();
-    if (str.includes("$type") && str.includes("DateTime")) {
-        try {
-            let jsonStr = str;
-            if (!jsonStr.startsWith("{"))
-                jsonStr = `{${jsonStr}`;
-            if (!jsonStr.endsWith("}"))
-                jsonStr = `${jsonStr}}`;
-            jsonStr = jsonStr.replace(/\\"/g, '"');
-            const parsed = JSON.parse(jsonStr);
-            if (parsed.value) {
-                const date = new Date(parsed.value);
-                if (!Number.isNaN(date.getTime()))
-                    return date;
-            }
-        }
-        catch {
-            /* fall through */
-        }
-    }
-    if (str.includes("+0") || str.includes("-0")) {
-        const isoMatch = str.match(/(\d{4}-\d{2}-\d{2})/);
-        if (isoMatch) {
-            const date = new Date(isoMatch[1]);
-            if (!Number.isNaN(date.getTime()))
-                return date;
-        }
-        return new Date();
-    }
-    const parts = str.split("-");
-    if (parts.length === 3) {
-        const day = parseInt(parts[0], 10);
-        const month = parseInt(parts[1], 10);
-        const year = parseInt(parts[2], 10);
-        if (year >= 1900 && year <= 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-            if (day > 12 && day <= 31)
-                return new Date(year, month - 1, day);
-            if (year > 31 && month <= 12 && day <= 31)
-                return new Date(year, month - 1, day);
-        }
-    }
-    const date = new Date(str);
-    if (Number.isNaN(date.getTime()))
-        return new Date();
-    const y = date.getFullYear();
-    if (y < 1900 || y > 2100)
-        return new Date();
-    return date;
 }
 function cleanPhone(phone) {
     if (phone === null || phone === undefined || phone === "")
@@ -158,49 +109,64 @@ function parseBool(v, defaultTrue = true) {
         return defaultTrue;
     return String(v).toLowerCase() === "true";
 }
-function parseTimeString(raw, fallback) {
-    const str = String(raw ?? "").trim();
-    if (!str) {
-        const [fh, fm] = fallback.split(":").map((x) => parseInt(x, 10));
-        return { hours: fh, minutes: fm };
+/** Prefer Excel display text (`.w`) so `01-08-2026` stays DD-MM, not Excel's internal MM/DD Date. */
+function cellImportValue(cell) {
+    if (!cell)
+        return "";
+    const displayed = cell.w != null ? String(cell.w).trim() : "";
+    if (displayed && !displayed.includes("#"))
+        return displayed;
+    if (cell.v == null || cell.v === "")
+        return "";
+    if (typeof cell.v === "number" && cell.t === "n" && cell.z) {
+        try {
+            const formatted = XLSX.SSF.format(cell.z, cell.v);
+            if (formatted && !formatted.includes("#"))
+                return String(formatted).trim();
+        }
+        catch {
+            /* fall through to raw serial */
+        }
     }
-    const m = str.match(/^(\d{1,2}):(\d{2})(?:\s*([AaPp][Mm]))?$/);
-    if (!m) {
-        const [fh, fm] = fallback.split(":").map((x) => parseInt(x, 10));
-        return { hours: fh, minutes: fm };
-    }
-    let hours = parseInt(m[1], 10);
-    const minutes = parseInt(m[2], 10);
-    const ampm = m[3]?.toUpperCase();
-    if (ampm === "PM" && hours < 12)
-        hours += 12;
-    if (ampm === "AM" && hours === 12)
-        hours = 0;
-    if (hours > 23 || minutes > 59) {
-        const [fh, fm] = fallback.split(":").map((x) => parseInt(x, 10));
-        return { hours: fh, minutes: fm };
-    }
-    return { hours, minutes };
+    return cell.v;
 }
-function combineDateAndTime(date, time) {
-    const d = new Date(date);
-    d.setHours(time.hours, time.minutes, 0, 0);
-    return d;
+function normalizeImportHeader(header) {
+    return header.replace(/^\uFEFF/, "").trim();
 }
 function parseWorkbookToRows(buffer, _fileName) {
     const workbook = XLSX.read(buffer, {
         type: "buffer",
         cellDates: false,
-        cellNF: false,
-        cellText: false,
-        raw: true,
+        cellNF: true,
     });
     const sheetName = workbook.SheetNames[0];
-    return XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
-        raw: false,
-        defval: "",
-        dateNF: "yyyy-mm-dd",
-    });
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet?.["!ref"])
+        return [];
+    const range = XLSX.utils.decode_range(sheet["!ref"]);
+    const headers = [];
+    for (let c = range.s.c; c <= range.e.c; c++) {
+        const addr = XLSX.utils.encode_cell({ r: range.s.r, c });
+        headers.push(normalizeImportHeader(String(cellImportValue(sheet[addr]) || "")));
+    }
+    const rows = [];
+    for (let r = range.s.r + 1; r <= range.e.r; r++) {
+        const row = {};
+        let hasData = false;
+        for (let c = range.s.c; c <= range.e.c; c++) {
+            const header = headers[c - range.s.c];
+            if (!header)
+                continue;
+            const addr = XLSX.utils.encode_cell({ r, c });
+            const value = cellImportValue(sheet[addr]);
+            if (value !== "" && value != null)
+                hasData = true;
+            row[header] = value;
+        }
+        if (hasData)
+            rows.push(row);
+    }
+    return rows;
 }
 async function resolveVenueFromRow(row) {
     const venueIdRaw = row.venueId ? String(row.venueId).trim() : "";
@@ -268,14 +234,15 @@ async function rowToEventBody(row, organizerId, venueId) {
     const title = String(row.eventTitle ?? "").trim();
     if (!title)
         throw new Error("eventTitle is required");
-    const baseStartDate = parseDateString(row.startDate);
-    const baseEndDate = parseDateString(row.endDate || row.startDate);
-    const startTime = parseTimeString(row.startTime, "10:00");
-    const endTime = parseTimeString(row.endTime, "18:00");
-    const startDate = combineDateAndTime(baseStartDate, startTime);
-    const endDate = combineDateAndTime(baseEndDate, endTime);
-    const registrationStart = row.registrationStart ? parseDateString(row.registrationStart) : startDate;
-    const registrationEnd = row.registrationEnd ? parseDateString(row.registrationEnd) : endDate;
+    const timeZone = (0, event_import_parse_1.parseImportTimezone)(row.timezone);
+    const startDate = (0, event_import_parse_1.parseImportedDateTime)(row.startDate, row.startTime, "10:00", timeZone, "startDate");
+    const endDate = (0, event_import_parse_1.parseImportedDateTime)(row.endDate || row.startDate, row.endTime, "18:00", timeZone, "endDate");
+    const registrationStart = row.registrationStart
+        ? (0, event_import_parse_1.parseImportedDateTime)(row.registrationStart, row.startTime, "10:00", timeZone, "registrationStart")
+        : startDate;
+    const registrationEnd = row.registrationEnd
+        ? (0, event_import_parse_1.parseImportedDateTime)(row.registrationEnd, row.endTime, "18:00", timeZone, "registrationEnd")
+        : endDate;
     const categories = [
         ...parseArray(row.category),
         ...parseArray(row.eventCategoryNames),
@@ -311,7 +278,7 @@ async function rowToEventBody(row, organizerId, venueId) {
         endDate: endDate.toISOString(),
         registrationStart: registrationStart.toISOString(),
         registrationEnd: registrationEnd.toISOString(),
-        timezone: row.timezone ? String(row.timezone) : "UTC",
+        timezone: timeZone,
         categories,
         category: categories,
         eventType: eventTypes.length > 0 ? eventTypes : parseArray(row.eventTypes),
@@ -362,7 +329,7 @@ async function createImportJob(params) {
         },
     });
     void runImportJob(job.id).catch((e) => {
-        // eslint-disable-next-line no-console
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars no-console 
         console.error("[event-import] job failed", job.id, e);
     });
     return { jobId: job.id };
@@ -375,15 +342,27 @@ async function runImportJob(jobId) {
         where: { id: jobId },
         data: { status: "PROCESSING", processedRows: 0 },
     });
-    const rows = job.rowsPayload;
+    const rows = job.rowsPayload.map((r) => (0, event_import_row_1.normalizeImportRow)(r));
     const errors = [];
     const importedSummary = [];
     const adminId = job.createdByAdminId || "00000000-0000-0000-0000-000000000000";
     const adminType = job.createdByAdminRole === "SUB_ADMIN" ? "SUB_ADMIN" : "SUPER_ADMIN";
+    const seenDuplicateKeys = new Set();
     for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
         const rowNum = i + 2;
         try {
+            const dupFp = (0, event_import_dedupe_1.buildImportDuplicateFingerprint)(row);
+            if (!dupFp.titleNorm) {
+                throw new Error("eventTitle is required");
+            }
+            const dupKey = (0, event_import_dedupe_1.duplicateKeyFromFingerprint)(dupFp);
+            if (seenDuplicateKeys.has(dupKey)) {
+                throw new Error((0, event_import_dedupe_1.duplicateSkipMessage)(dupFp, "spreadsheet"));
+            }
+            if (await (0, event_import_dedupe_1.findExistingEventDuplicate)(dupFp)) {
+                throw new Error((0, event_import_dedupe_1.duplicateSkipMessage)(dupFp, "database"));
+            }
             const orgEmailRaw = String(row.organizerEmail ?? "").trim().toLowerCase();
             const orgName = String(row.organizerName ?? "").trim();
             let organizer;
@@ -459,6 +438,7 @@ async function runImportJob(jobId) {
                 organizerEmail: organizer.email,
                 organizerWasNew: organizerWasNew,
             });
+            seenDuplicateKeys.add(dupKey);
             await prisma_1.default.eventImportJob.update({
                 where: { id: jobId },
                 data: {

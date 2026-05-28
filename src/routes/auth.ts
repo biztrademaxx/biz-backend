@@ -2,7 +2,7 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import prisma from "../config/prisma";
-import { AuthService } from "../services/auth.service";
+import { AuthService, ORGANIZER_PENDING_APPROVAL } from "../services/auth.service";
 import { isPlaceholderOrInvalidPhone } from "../utils/phone-validation";
 import {
   sendOtpEmail,
@@ -52,6 +52,14 @@ router.post("/login", async (req, res) => {
       refreshToken: result.tokens.refreshToken,
     });
   } catch (err) {
+    const msg = err instanceof Error ? err.message : "";
+    if (msg === ORGANIZER_PENDING_APPROVAL) {
+      return res.status(403).json({
+        message:
+          "Your organizer account is pending admin approval. You can sign in after an administrator approves your account.",
+        code: ORGANIZER_PENDING_APPROVAL,
+      });
+    }
     // eslint-disable-next-line no-console
     console.error("Login error (backend):", err);
     return res.status(500).json({ message: "Login failed" });
@@ -73,6 +81,14 @@ router.post("/refresh", async (req, res) => {
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error("Refresh token error (backend):", err);
+    const msg = err instanceof Error ? err.message : "";
+    if (msg === ORGANIZER_PENDING_APPROVAL) {
+      return res.status(403).json({
+        message:
+          "Your organizer account is pending admin approval. You can sign in after an administrator approves your account.",
+        code: ORGANIZER_PENDING_APPROVAL,
+      });
+    }
     return res.status(401).json({ message: "Invalid or expired refresh token" });
   }
 });
@@ -124,6 +140,13 @@ router.post("/oauth-sync", async (req, res) => {
     const msg = err instanceof Error ? err.message : "OAuth sync failed";
     if (msg === "Account is deactivated") {
       return res.status(403).json({ message: msg });
+    }
+    if (msg === ORGANIZER_PENDING_APPROVAL) {
+      return res.status(403).json({
+        message:
+          "Your organizer account is pending admin approval. You can sign in after an administrator approves your account.",
+        code: ORGANIZER_PENDING_APPROVAL,
+      });
     }
     return res.status(500).json({ message: msg });
   }
@@ -322,6 +345,8 @@ router.post("/register", async (req, res) => {
         company: companyName || undefined,
         jobTitle: designation || undefined,
         website: website || undefined,
+        ...(role === "VENUE_MANAGER" ? { isVerified: false, isActive: true } : {}),
+        ...(role === "ORGANIZER" ? { isVerified: false } : {}),
       },
     });
 

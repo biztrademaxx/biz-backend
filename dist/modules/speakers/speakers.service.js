@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.listSpeakers = listSpeakers;
+exports.resolveSpeakerId = resolveSpeakerId;
 exports.getSpeakerById = getSpeakerById;
 exports.getSpeakerSessions = getSpeakerSessions;
 exports.createSpeaker = createSpeaker;
@@ -34,6 +35,9 @@ async function listSpeakers(options) {
             company: true,
             jobTitle: true,
             location: true,
+            profileCity: true,
+            profileState: true,
+            profileCountry: true,
             website: true,
             linkedin: true,
             twitter: true,
@@ -55,17 +59,27 @@ async function listSpeakers(options) {
     const filtered = requireProfileImage
         ? speakers.filter((s) => (0, profile_image_1.hasPublicProfileImage)(s.avatar))
         : speakers;
-    return filtered.map((s) => ({
-        ...s,
-        publicSlug: (0, profile_slug_1.getPublicProfileSlug)({
-            role: "SPEAKER",
-            firstName: s.firstName,
-            lastName: s.lastName,
-        }, "SPEAKER"),
-        specialties: Array.isArray(s.specialties) ? s.specialties : [],
-        achievements: Array.isArray(s.achievements) ? s.achievements : [],
-        certifications: Array.isArray(s.certifications) ? s.certifications : [],
-    }));
+    return filtered.map((s) => {
+        const city = s.profileCity?.trim() || "";
+        const state = s.profileState?.trim() || "";
+        const country = s.profileCountry?.trim() || "";
+        const structuredLocation = [city, state, country].filter(Boolean).join(", ");
+        return {
+            ...s,
+            city,
+            state,
+            country,
+            location: structuredLocation || s.location || "",
+            publicSlug: (0, profile_slug_1.getPublicProfileSlug)({
+                role: "SPEAKER",
+                firstName: s.firstName,
+                lastName: s.lastName,
+            }, "SPEAKER"),
+            specialties: Array.isArray(s.specialties) ? s.specialties : [],
+            achievements: Array.isArray(s.achievements) ? s.achievements : [],
+            certifications: Array.isArray(s.certifications) ? s.certifications : [],
+        };
+    });
 }
 // Single speaker profile
 async function resolveSpeakerId(identifier) {
@@ -120,6 +134,9 @@ async function getSpeakerById(identifier, viewerUserId) {
             company: true,
             jobTitle: true,
             location: true,
+            profileCity: true,
+            profileState: true,
+            profileCountry: true,
             website: true,
             linkedin: true,
             twitter: true,
@@ -267,6 +284,9 @@ async function createSpeaker(body) {
             company: true,
             jobTitle: true,
             location: true,
+            profileCity: true,
+            profileState: true,
+            profileCountry: true,
             website: true,
             linkedin: true,
             twitter: true,
@@ -331,6 +351,9 @@ async function updateSpeakerProfile(id, body) {
             company: true,
             jobTitle: true,
             location: true,
+            profileCity: true,
+            profileState: true,
+            profileCountry: true,
             website: true,
             linkedin: true,
             speakingExperience: true,

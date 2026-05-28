@@ -1,5 +1,6 @@
 import prisma from "../../config/prisma";
 import { EventStatus } from "@prisma/client";
+import { applyPostponedOnOrganizerDateChange } from "../events/event-schedule";
 import { normalizeYoutubeVideoUrlForStorage } from "../../utils/youtube-url";
 import { uploadImage } from "../../services/cloudinary.service";
 import { randomBytes } from "crypto";
@@ -207,6 +208,7 @@ export async function adminListEvents(params: AdminListEventsParams) {
     eventType: event.eventType ?? [],
     youtubeVideoUrl: event.youtubeVideoUrl ?? null,
     bannerImage: event.bannerImage,
+    vipImage: event.vipImage ?? null,
     thumbnailImage: event.thumbnailImage,
     organizer: event.organizer
       ? {
@@ -300,7 +302,13 @@ export async function adminUpdateEvent(
 ) {
   const existing = await prisma.event.findUnique({
     where: { id },
-    select: { id: true },
+    select: {
+      id: true,
+      startDate: true,
+      endDate: true,
+      previousStartDate: true,
+      previousEndDate: true,
+    },
   });
 
   if (!existing) {
@@ -345,6 +353,7 @@ export async function adminUpdateEvent(
     "brochure",
     "layoutPlan",
     "bannerImage",
+    "vipImage",
     "thumbnailImage",
     "isFeatured",
     "isVIP",
@@ -440,6 +449,12 @@ export async function adminUpdateEvent(
     updateData.verifiedAt = null;
     updateData.verifiedBy = null;
     updateData.verifiedBadgeImage = null;
+  }
+
+  if (existing && (updateData.startDate != null || updateData.endDate != null)) {
+    const newStart = (updateData.startDate as Date | undefined) ?? existing.startDate;
+    const newEnd = (updateData.endDate as Date | undefined) ?? existing.endDate;
+    Object.assign(updateData, applyPostponedOnOrganizerDateChange(existing, newStart, newEnd));
   }
 
   const ticketTypesPayload = Array.isArray((data as any).ticketTypes)
@@ -647,7 +662,80 @@ export async function adminListVisitors() {
   return registrations;
 }
 
+function buildLast30DaysTrend(
+  events: { createdAt: Date; status: EventStatus }[],
+  regs: { registeredAt: Date }[],
+) {
+  const days: {
+    key: string
+    label: string
+    eventsCreated: number
+    publishedEvents: number
+    registrations: number
+  }[] = []
+  const now = new Date()
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(now)
+    d.setDate(d.getDate() - i)
+    d.setHours(0, 0, 0, 0)
+    const key = d.toISOString().slice(0, 10)
+    days.push({
+      key,
+      label: `${d.getDate()} ${d.toLocaleString("en-GB", { month: "short" })}`,
+      eventsCreated: 0,
+      publishedEvents: 0,
+      registrations: 0,
+    })
+  }
+  const dayMap = new Map(days.map((x) => [x.key, x]))
+  for (const e of events) {
+    const k = e.createdAt.toISOString().slice(0, 10)
+    const row = dayMap.get(k)
+    if (row) {
+      row.eventsCreated += 1
+      if (e.status === "PUBLISHED") row.publishedEvents += 1
+    }
+  }
+  for (const r of regs) {
+    const k = r.registeredAt.toISOString().slice(0, 10)
+    const row = dayMap.get(k)
+    if (row) row.registrations += 1
+  }
+  return days
+}
+
+const EVENT_STATUS_DONUT_COLORS: Record<string, string> = {
+  PUBLISHED: "#22c55e",
+  PENDING_APPROVAL: "#f97316",
+  DRAFT: "#94a3b8",
+  REJECTED: "#ef4444",
+  CANCELLED: "#64748b",
+  COMPLETED: "#3b82f6",
+}
+
 export async function adminGetDashboardSummary() {
+  const thirtyDaysAgo = new Date()
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+  thirtyDaysAgo.setHours(0, 0, 0, 0)
+
+  const eventCardSelect = {
+    id: true,
+    title: true,
+    status: true,
+    startDate: true,
+    endDate: true,
+    createdAt: true,
+    slug: true,
+    city: true,
+    country: true,
+    isVirtual: true,
+    bannerImage: true,
+    thumbnailImage: true,
+    images: true,
+    currentAttendees: true,
+    maxAttendees: true,
+  } as const
+
   const [
     totalEvents,
     publishedEvents,
@@ -657,6 +745,12 @@ export async function adminGetDashboardSummary() {
     attendees,
     recentEvents,
     recentRegistrations,
+    eventsForTrend,
+    regsForTrend,
+    statusBreakdown,
+    topEventsByAttendees,
+    revenueSum,
+    upcomingEvents,
   ] = await Promise.all([
     prisma.event.count(),
     prisma.event.count({ where: { status: "PUBLISHED" } }),
@@ -667,13 +761,7 @@ export async function adminGetDashboardSummary() {
     prisma.event.findMany({
       orderBy: { createdAt: "desc" },
       take: 5,
-      select: {
-        id: true,
-        title: true,
-        status: true,
-        startDate: true,
-        createdAt: true,
-      },
+      select: eventCardSelect,
     }),
     prisma.eventRegistration.findMany({
       where: { status: "CONFIRMED" },
@@ -689,15 +777,66 @@ export async function adminGetDashboardSummary() {
           },
         },
         event: {
-          select: {
-            id: true,
-            title: true,
-            startDate: true,
-          },
+          select: eventCardSelect,
         },
       },
     }),
-  ]);
+    prisma.event.findMany({
+      where: { createdAt: { gte: thirtyDaysAgo } },
+      select: { createdAt: true, status: true },
+    }),
+    prisma.eventRegistration.findMany({
+      where: { registeredAt: { gte: thirtyDaysAgo }, status: "CONFIRMED" },
+      select: { registeredAt: true },
+    }),
+    prisma.event.groupBy({
+      by: ["status"],
+      _count: { id: true },
+    }),
+    prisma.event.findMany({
+      orderBy: { currentAttendees: "desc" },
+      take: 5,
+      select: {
+        id: true,
+        title: true,
+        currentAttendees: true,
+        maxAttendees: true,
+      },
+    }),
+    prisma.eventRegistration.aggregate({
+      where: { status: "CONFIRMED" },
+      _sum: { totalAmount: true },
+    }),
+    prisma.event.findMany({
+      where: {
+        startDate: { gte: new Date() },
+        status: { in: ["PUBLISHED", "PENDING_APPROVAL"] },
+      },
+      orderBy: { startDate: "asc" },
+      take: 8,
+      select: eventCardSelect,
+    }),
+  ])
+
+  const trend = buildLast30DaysTrend(eventsForTrend, regsForTrend)
+
+  const registrationsByStatus = statusBreakdown
+    .filter((row) => (row._count.id ?? 0) > 0)
+    .map((row) => ({
+      name: toStatusLabel(row.status),
+      status: row.status,
+      value: row._count.id,
+      color: EVENT_STATUS_DONUT_COLORS[row.status] ?? "#94a3b8",
+    }))
+
+  const topEvents = topEventsByAttendees.map((e) => ({
+    id: e.id,
+    title: e.title,
+    registrations: e.currentAttendees,
+    maxAttendees: e.maxAttendees,
+  }))
+
+  const revenueTotal = revenueSum._sum.totalAmount ?? 0
 
   return {
     totals: {
@@ -710,7 +849,17 @@ export async function adminGetDashboardSummary() {
     },
     recentEvents,
     recentRegistrations,
-  };
+    upcomingEvents,
+    dashboardCharts: {
+      trend,
+    },
+    registrationsByStatus,
+    topEvents,
+    revenue: {
+      total: revenueTotal,
+      currency: "USD",
+    },
+  }
 }
 
 export async function adminListEventCategories(): Promise<{ id: string; name: string; eventCount: number; isActive: boolean }[]> {

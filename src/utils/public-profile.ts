@@ -20,8 +20,20 @@ export function publicPublishedEventWhere(): Prisma.EventWhereInput {
   return {
     status: "PUBLISHED",
     isPublic: true,
-    organizer: activePublicProfileUserWhere(),
-    OR: [{ venueId: null }, { venue: activePublicProfileUserWhere() }],
+    organizer: {
+      ...activePublicProfileUserWhere(),
+      isVerified: true,
+    },
+    OR: [
+      { venueId: null },
+      {
+        /** Listed on /venues uses isVerified; venue login is not tied to isActive. */
+        venue: {
+          NOT: { profileVisibility: "private" },
+          isVerified: true,
+        },
+      },
+    ],
   };
 }
 
@@ -46,14 +58,16 @@ export function canBypassEventPrivacy(
 export function isEventPubliclyVisible(event: {
   organizerId: string;
   venueId: string | null;
-  organizer: { isActive?: boolean; profileVisibility?: string } | null;
-  venue: { isActive?: boolean; profileVisibility?: string } | null;
+  organizer: { isActive?: boolean; profileVisibility?: string; isVerified?: boolean } | null;
+  venue: { isActive?: boolean; profileVisibility?: string; isVerified?: boolean } | null;
 }): boolean {
   const o = event.organizer;
   if (!o || !o.isActive || o.profileVisibility === "private") return false;
+  if (o.isVerified === false) return false;
   if (event.venueId) {
     const v = event.venue;
-    if (!v || !v.isActive || v.profileVisibility === "private") return false;
+    if (!v || v.profileVisibility === "private") return false;
+    if ("isVerified" in v && v.isVerified === false) return false;
   }
   return true;
 }

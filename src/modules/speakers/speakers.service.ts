@@ -31,6 +31,9 @@ export async function listSpeakers(options?: { requireProfileImage?: boolean }) 
       company: true,
       jobTitle: true,
       location: true,
+      profileCity: true,
+      profileState: true,
+      profileCountry: true,
       website: true,
       linkedin: true,
       twitter: true,
@@ -54,24 +57,34 @@ export async function listSpeakers(options?: { requireProfileImage?: boolean }) 
     ? speakers.filter((s) => hasPublicProfileImage(s.avatar))
     : speakers;
 
-  return filtered.map((s) => ({
-    ...s,
-    publicSlug: getPublicProfileSlug(
-      {
-        role: "SPEAKER",
-        firstName: s.firstName,
-        lastName: s.lastName,
-      },
-      "SPEAKER",
-    ),
-    specialties: Array.isArray(s.specialties) ? s.specialties : [],
-    achievements: Array.isArray(s.achievements) ? s.achievements : [],
-    certifications: Array.isArray(s.certifications) ? s.certifications : [],
-  }));
+  return filtered.map((s) => {
+    const city = s.profileCity?.trim() || "";
+    const state = s.profileState?.trim() || "";
+    const country = s.profileCountry?.trim() || "";
+    const structuredLocation = [city, state, country].filter(Boolean).join(", ");
+    return {
+      ...s,
+      city,
+      state,
+      country,
+      location: structuredLocation || s.location || "",
+      publicSlug: getPublicProfileSlug(
+        {
+          role: "SPEAKER",
+          firstName: s.firstName,
+          lastName: s.lastName,
+        },
+        "SPEAKER",
+      ),
+      specialties: Array.isArray(s.specialties) ? s.specialties : [],
+      achievements: Array.isArray(s.achievements) ? s.achievements : [],
+      certifications: Array.isArray(s.certifications) ? s.certifications : [],
+    };
+  });
 }
 
 // Single speaker profile
-async function resolveSpeakerId(identifier: string): Promise<string | null> {
+export async function resolveSpeakerId(identifier: string): Promise<string | null> {
   if (isUuidLike(identifier)) return identifier;
   const targetSlug = String(identifier || "").trim().toLowerCase();
   if (!targetSlug) return null;
@@ -122,6 +135,9 @@ export async function getSpeakerById(identifier: string, viewerUserId?: string |
       company: true,
       jobTitle: true,
       location: true,
+      profileCity: true,
+      profileState: true,
+      profileCountry: true,
       website: true,
       linkedin: true,
       twitter: true,
@@ -315,6 +331,9 @@ export async function createSpeaker(body: Record<string, unknown>) {
       company: true,
       jobTitle: true,
       location: true,
+      profileCity: true,
+      profileState: true,
+      profileCountry: true,
       website: true,
       linkedin: true,
       twitter: true,
@@ -389,6 +408,9 @@ export async function updateSpeakerProfile(
       company: true,
       jobTitle: true,
       location: true,
+      profileCity: true,
+      profileState: true,
+      profileCountry: true,
       website: true,
       linkedin: true,
       speakingExperience: true,

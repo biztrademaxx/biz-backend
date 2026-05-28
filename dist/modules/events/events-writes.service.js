@@ -156,19 +156,25 @@ function parseSpaceCosts(spaceCosts, currency = "USD") {
         let spaceType = SPACE_TYPE_MAP[raw] || "CUSTOM";
         if (!VALID_SPACE_TYPES.includes(spaceType))
             spaceType = "CUSTOM";
+        const pricePerSqm = Number(space.pricePerSqm ?? space.pricePerUnit ?? 0) || 0;
+        const minArea = Number(space.minArea ?? space.area ?? 0) || 0;
+        const computedTotal = pricePerSqm * minArea;
+        const basePrice = space.basePrice != null && Number(space.basePrice) > 0
+            ? Number(space.basePrice)
+            : computedTotal;
         return {
             id: space.id || (0, crypto_1.randomUUID)(),
             spaceType,
             name: space.name || space.type || `Space ${index + 1}`,
             description: space.description ?? "",
-            basePrice: space.basePrice ?? space.pricePerSqm ?? space.pricePerUnit ?? 0,
-            pricePerSqm: space.pricePerSqm ?? 0,
-            minArea: space.minArea ?? space.area ?? 0,
+            basePrice,
+            pricePerSqm: pricePerSqm || null,
+            minArea: minArea || null,
             isFixed: space.isFixed ?? false,
             additionalPowerRate: space.additionalPowerRate ?? 0,
             compressedAirRate: space.compressedAirRate ?? 0,
             unit: space.unit ?? null,
-            area: space.area ?? space.minArea ?? 0,
+            area: space.area ?? minArea ?? 0,
             dimensions: space.dimensions ?? (space.area ? `${space.area} sq.m` : "3x3"),
             location: space.location ?? null,
             isAvailable: true,
@@ -286,6 +292,7 @@ async function findOrCreateUser(userData) {
             password: hashedPassword,
             isActive: true,
             emailVerified: role === "ORGANIZER" || role === "VENUE_MANAGER",
+            ...(role === "VENUE_MANAGER" || role === "ORGANIZER" ? { isVerified: false } : {}),
         },
     });
     return { user, created: true };

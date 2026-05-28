@@ -9,12 +9,28 @@ const auth_middleware_1 = require("../middleware/auth.middleware");
 const public_profile_1 = require("../utils/public-profile");
 const display_name_1 = require("../utils/display-name");
 const profile_slug_1 = require("../utils/profile-slug");
+const speakers_service_1 = require("../modules/speakers/speakers.service");
 const router = (0, express_1.Router)();
+function buildLocationPayload(user) {
+    const city = user.profileCity?.trim() ?? "";
+    const state = user.profileState?.trim() ?? "";
+    const country = user.profileCountry?.trim() ?? "";
+    return {
+        city,
+        state,
+        country,
+        address: user.location?.trim() ?? "",
+    };
+}
 function serializeUser(user) {
     return {
         ...user,
         companyIndustry: user.companyIndustry ?? null,
         interests: user.interests ?? [],
+        profileCity: user.profileCity ?? null,
+        profileState: user.profileState ?? null,
+        profileCountry: user.profileCountry ?? null,
+        location: buildLocationPayload(user),
         createdAt: user.createdAt?.toISOString?.() ?? user.createdAt,
         updatedAt: user.updatedAt?.toISOString?.() ?? user.updatedAt,
         lastLogin: user.lastLogin?.toISOString?.() ?? user.lastLogin ?? null,
@@ -29,6 +45,10 @@ async function resolveUserId(identifier) {
     const targetSlug = String(identifier || "").trim().toLowerCase();
     if (!targetSlug)
         return null;
+    /** Same slug rules as `GET /api/speakers/:id` and public `/speaker/{slug}`. */
+    const speakerId = await (0, speakers_service_1.resolveSpeakerId)(identifier);
+    if (speakerId)
+        return speakerId;
     const users = await prisma_1.default.user.findMany({
         where: { role: "ATTENDEE", isActive: true },
         select: { id: true, firstName: true, lastName: true },
@@ -166,6 +186,9 @@ router.get("/users/:id", auth_middleware_1.optionalUser, async (req, res) => {
                 companyIndustry: true,
                 jobTitle: true,
                 location: true,
+                profileCity: true,
+                profileState: true,
+                profileCountry: true,
                 interests: true,
                 isVerified: true,
                 lastLogin: true,
@@ -219,7 +242,7 @@ router.put("/users/:id", auth_middleware_1.requireUser, async (req, res) => {
     if (!auth || auth.sub !== id) {
         return res.status(403).json({ success: false, error: "Forbidden" });
     }
-    const { email, firstName, lastName, avatar, phone, bio, website, company, companyIndustry, jobTitle, linkedin, twitter, instagram, interests, } = req.body ?? {};
+    const { email, firstName, lastName, avatar, phone, bio, website, company, companyIndustry, jobTitle, linkedin, twitter, instagram, interests, profileCity, profileState, profileCountry, city, state, country, location: locationField, } = req.body ?? {};
     const data = {};
     if (email !== undefined)
         data.email = email;
@@ -250,12 +273,54 @@ router.put("/users/:id", auth_middleware_1.requireUser, async (req, res) => {
     if (interests !== undefined) {
         data.interests = Array.isArray(interests) ? interests : [];
     }
-    if (Object.keys(data).length === 0) {
+    const locObj = req.body?.location && typeof req.body.location === "object" && !Array.isArray(req.body.location)
+        ? req.body.location
+        : null;
+    const nextCity = profileCity !== undefined
+        ? String(profileCity ?? "").trim() || null
+        : city !== undefined
+            ? String(city ?? "").trim() || null
+            : locObj?.city !== undefined
+                ? String(locObj.city ?? "").trim() || null
+                : undefined;
+    const nextState = profileState !== undefined
+        ? String(profileState ?? "").trim() || null
+        : state !== undefined
+            ? String(state ?? "").trim() || null
+            : locObj?.state !== undefined
+                ? String(locObj.state ?? "").trim() || null
+                : undefined;
+    const nextCountry = profileCountry !== undefined
+        ? String(profileCountry ?? "").trim() || null
+        : country !== undefined
+            ? String(country ?? "").trim() || null
+            : locObj?.country !== undefined
+                ? String(locObj.country ?? "").trim() || null
+                : undefined;
+    const hasProfileLocUpdate = nextCity !== undefined || nextState !== undefined || nextCountry !== undefined;
+    if (locationField !== undefined && !hasProfileLocUpdate) {
+        data.location = locationField || null;
+    }
+    if (Object.keys(data).length === 0 && !hasProfileLocUpdate) {
         return res
             .status(400)
             .json({ success: false, error: "No fields to update" });
     }
     try {
+        if (hasProfileLocUpdate) {
+            const current = await prisma_1.default.user.findUnique({
+                where: { id },
+                select: { profileCity: true, profileState: true, profileCountry: true },
+            });
+            const mergedCity = nextCity !== undefined ? nextCity : (current?.profileCity?.trim() || null);
+            const mergedState = nextState !== undefined ? nextState : (current?.profileState?.trim() || null);
+            const mergedCountry = nextCountry !== undefined ? nextCountry : (current?.profileCountry?.trim() || null);
+            data.profileCity = mergedCity;
+            data.profileState = mergedState;
+            data.profileCountry = mergedCountry;
+            const line = [mergedCity, mergedState, mergedCountry].filter(Boolean).join(", ");
+            data.location = line || null;
+        }
         const updated = await prisma_1.default.user.update({
             where: { id },
             data,
@@ -277,6 +342,9 @@ router.put("/users/:id", auth_middleware_1.requireUser, async (req, res) => {
                 companyIndustry: true,
                 jobTitle: true,
                 location: true,
+                profileCity: true,
+                profileState: true,
+                profileCountry: true,
                 interests: true,
                 isVerified: true,
                 lastLogin: true,
@@ -379,11 +447,18 @@ router.get("/users/:id/connections", async (req, res) => {
  * Used by calendar, past-events, and events-section to show a user's saved (interested) events.
  */
 router.get("/users/:id/interested-events", async (req, res) => {
-    const { id } = req.params;
-    if (!id) {
+    const { id: identifier } = req.params;
+    if (!identifier) {
         return res
             .status(400)
             .json({ success: false, error: "User id required" });
+    }
+    const id = (await resolveUserId(identifier)) ||
+        ((0, profile_slug_1.isUuidLike)(identifier) ? identifier : null);
+    if (!id) {
+        return res
+            .status(404)
+            .json({ success: false, error: "User not found" });
     }
     try {
         const saved = await prisma_1.default.savedEvent.findMany({

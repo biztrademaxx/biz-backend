@@ -64,7 +64,8 @@ export async function getVenueReviewsHandler(req: Request, res: Response) {
         .json({ success: false, error: "Invalid venue ID" });
     }
 
-    const reviews = await listVenueReviews(id, { includeReplies });
+    const viewerId = req.auth?.domain === "USER" ? req.auth.sub : undefined;
+    const reviews = await listVenueReviews(id, { includeReplies, viewerUserId: viewerId });
     const payload: { success: true; reviews: any[]; venue?: { id: string; businessName: string } } = {
       success: true,
       reviews,

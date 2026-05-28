@@ -6,6 +6,43 @@ import { resolveFrontendBase, sendUserAccountAccessEmail } from "../../../servic
 
 const ROLE: UserRole = "VENUE_MANAGER";
 
+/** Case-insensitive, collapsed whitespace — used for duplicate venue name checks. */
+export function normalizeVenueName(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+async function findVenueByNormalizedName(
+  norm: string,
+  excludeUserId?: string,
+): Promise<{ id: string; venueName: string | null } | null> {
+  if (!norm) return null;
+  const venues = await prisma.user.findMany({
+    where: {
+      role: ROLE,
+      venueName: { not: null },
+      ...(excludeUserId ? { id: { not: excludeUserId } } : {}),
+    },
+    select: { id: true, venueName: true },
+  });
+  return venues.find((u) => normalizeVenueName(u.venueName) === norm) ?? null;
+}
+
+export async function assertVenueNameIsUnique(
+  venueName: string,
+  excludeUserId?: string,
+): Promise<void> {
+  const trimmed = String(venueName ?? "").trim();
+  const norm = normalizeVenueName(trimmed);
+  if (!norm) throw new Error("venueName is required");
+  const existing = await findVenueByNormalizedName(norm, excludeUserId);
+  if (existing) {
+    throw new Error(`A venue named "${trimmed}" already exists`);
+  }
+}
+
 const venueEventListSelect = {
   id: true,
   title: true,
@@ -307,6 +344,9 @@ export async function getVenueById(id: string) {
 export async function createVenue(body: Record<string, unknown>) {
   const email = String(body.email ?? "").trim().toLowerCase();
   if (!email) throw new Error("Email is required");
+  const venueNameRaw = String(body.venueName ?? "").trim();
+  if (!venueNameRaw) throw new Error("venueName is required");
+  await assertVenueNameIsUnique(venueNameRaw);
   // Prevent duplicate email across any role to avoid unique constraint error
   const existing = await prisma.user.findFirst({ where: { email } });
   if (existing) throw new Error("Venue with this email already exists");
@@ -333,13 +373,15 @@ export async function createVenue(body: Record<string, unknown>) {
       firstName: String(body.firstName ?? body.venueName ?? "").trim() || "Venue",
       lastName: String(body.lastName ?? "").trim() || "",
       phone: body.phone != null ? String(body.phone) : null,
-      venueName: body.venueName != null ? String(body.venueName) : null,
+      venueName: venueNameRaw,
       venueCity: body.venueCity != null ? String(body.venueCity) : null,
       venueState: body.venueState != null ? String(body.venueState) : null,
       venueCountry: body.venueCountry != null ? String(body.venueCountry) : null,
       venueAddress: body.venueAddress != null ? String(body.venueAddress) : null,
       maxCapacity: body.maxCapacity != null ? Number(body.maxCapacity) : null,
+      /** Off /venues until admin sets isVerified; account stays active for login. */
       isActive: body.isActive !== false,
+      isVerified: body.isVerified === true,
       avatar: logo || null,
       venueImages,
     },
@@ -355,15 +397,44 @@ export async function createVenue(body: Record<string, unknown>) {
 export async function updateVenue(id: string, body: Record<string, unknown>) {
   const existing = await prisma.user.findFirst({ where: { id, role: ROLE } });
   if (!existing) return null;
+  if (body.venueName !== undefined) {
+    const venueNameRaw = String(body.venueName).trim();
+    if (!venueNameRaw) throw new Error("venueName cannot be empty");
+    await assertVenueNameIsUnique(venueNameRaw, id);
+  }
   const allowed = [
     "firstName", "lastName", "phone", "venueName", "venueCity", "venueState",
-    "venueCountry", "venueAddress", "maxCapacity", "isActive",
+    "venueCountry", "venueAddress", "maxCapacity", "totalHalls", "isActive", "isVerified",
+    "venueWebsite", "venueDescription", "amenities",
   ];
   const data: Record<string, unknown> = {};
   for (const k of allowed) {
     if (body[k] !== undefined) data[k] = body[k];
   }
+  if (body.website !== undefined) data.venueWebsite = body.website === "" ? null : String(body.website);
+  if (body.description !== undefined) {
+    data.venueDescription = body.description === "" ? null : String(body.description);
+  }
   if (body.email !== undefined) data.email = String(body.email).trim().toLowerCase();
+  const logoRaw =
+    body.avatar != null
+      ? String(body.avatar).trim()
+      : body.logo != null
+        ? String(body.logo).trim()
+        : undefined;
+  if (logoRaw !== undefined) {
+    data.avatar = logoRaw || null;
+  }
+  if (body.venueImages !== undefined) {
+    const imgs = Array.isArray(body.venueImages)
+      ? (body.venueImages as unknown[]).map((v) => String(v ?? "").trim()).filter(Boolean)
+      : [];
+    const avatar = (data.avatar as string | null | undefined) ?? existing.avatar;
+    if (avatar && !imgs.includes(avatar)) {
+      imgs.unshift(avatar);
+    }
+    data.venueImages = imgs;
+  }
   await prisma.user.update({ where: { id }, data: data as any });
   await syncLocationMasterFromVenue({
     venueCountry: data.venueCountry,

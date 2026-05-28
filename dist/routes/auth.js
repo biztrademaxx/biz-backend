@@ -8,6 +8,7 @@ const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const crypto_1 = __importDefault(require("crypto"));
 const prisma_1 = __importDefault(require("../config/prisma"));
 const auth_service_1 = require("../services/auth.service");
+const phone_validation_1 = require("../utils/phone-validation");
 const email_service_1 = require("../services/email.service");
 const router = (0, express_1.Router)();
 const BOOTSTRAP_SECRET = process.env.ADMIN_BOOTSTRAP_SECRET;
@@ -51,6 +52,13 @@ router.post("/login", async (req, res) => {
         });
     }
     catch (err) {
+        const msg = err instanceof Error ? err.message : "";
+        if (msg === auth_service_1.ORGANIZER_PENDING_APPROVAL) {
+            return res.status(403).json({
+                message: "Your organizer account is pending admin approval. You can sign in after an administrator approves your account.",
+                code: auth_service_1.ORGANIZER_PENDING_APPROVAL,
+            });
+        }
         // eslint-disable-next-line no-console
         console.error("Login error (backend):", err);
         return res.status(500).json({ message: "Login failed" });
@@ -72,6 +80,13 @@ router.post("/refresh", async (req, res) => {
     catch (err) {
         // eslint-disable-next-line no-console
         console.error("Refresh token error (backend):", err);
+        const msg = err instanceof Error ? err.message : "";
+        if (msg === auth_service_1.ORGANIZER_PENDING_APPROVAL) {
+            return res.status(403).json({
+                message: "Your organizer account is pending admin approval. You can sign in after an administrator approves your account.",
+                code: auth_service_1.ORGANIZER_PENDING_APPROVAL,
+            });
+        }
         return res.status(401).json({ message: "Invalid or expired refresh token" });
     }
 });
@@ -98,6 +113,7 @@ router.post("/oauth-sync", async (req, res) => {
             email,
             name: body.name,
             image: body.image,
+            intendedRole: body.intendedRole,
         });
         return res.json({
             user: result.user,
@@ -111,6 +127,12 @@ router.post("/oauth-sync", async (req, res) => {
         const msg = err instanceof Error ? err.message : "OAuth sync failed";
         if (msg === "Account is deactivated") {
             return res.status(403).json({ message: msg });
+        }
+        if (msg === auth_service_1.ORGANIZER_PENDING_APPROVAL) {
+            return res.status(403).json({
+                message: "Your organizer account is pending admin approval. You can sign in after an administrator approves your account.",
+                code: auth_service_1.ORGANIZER_PENDING_APPROVAL,
+            });
         }
         return res.status(500).json({ message: msg });
     }
@@ -218,6 +240,12 @@ router.post("/register", async (req, res) => {
                 error: "fullName, email and password are required",
             });
         }
+        const phoneTrimmed = (phone ?? "").trim();
+        if (phoneTrimmed && (0, phone_validation_1.isPlaceholderOrInvalidPhone)(phoneTrimmed)) {
+            return res.status(400).json({
+                error: "Please enter a valid phone number (test or autofill values are not accepted)",
+            });
+        }
         const normalizedEmail = email.trim().toLowerCase();
         // Name parsing (same logic as Next.js route)
         const nameParts = fullName.trim().split(" ");
@@ -258,11 +286,13 @@ router.post("/register", async (req, res) => {
                 lastName,
                 email: normalizedEmail,
                 password: hashedPassword,
-                phone: phone || undefined,
+                phone: phoneTrimmed || undefined,
                 role: role,
                 company: companyName || undefined,
                 jobTitle: designation || undefined,
                 website: website || undefined,
+                ...(role === "VENUE_MANAGER" ? { isVerified: false, isActive: true } : {}),
+                ...(role === "ORGANIZER" ? { isVerified: false } : {}),
             },
         });
         if (userType === "organiser" && selectedPlan) {

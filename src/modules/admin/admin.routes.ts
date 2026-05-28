@@ -16,6 +16,7 @@ import {
 } from "./admin.controller";
 import { createEventAdminHandler } from "../events/events.controller";
 import { getEventImportJobHandler, postEventImportHandler } from "./event-import/event-import.controller";
+import { listContactInquiriesHandler } from "./contact-inquiries.controller";
 
 import organizersRoutes from "./organizers/organizers.routes";
 import exhibitorsRoutes from "./exhibitors/exhibitors.routes";
@@ -43,6 +44,7 @@ import promotionPackageRoutes from "./promotion-package/promotion-package.routes
 import accountDeactivationRoutes from "./account-deactivation/account-deactivation.routes";
 import contentAdminRoutes from "./content/content.routes";
 import roleDefinitionsRoutes from "./role-definitions/role-definitions.routes";
+import newsletterAdminRoutes from "./newsletter/newsletter.routes";
 
 const router = Router();
 
@@ -85,6 +87,9 @@ router.post("/events/reject", requireAdmin, requirePermission("approve_events"),
 // ─── Dashboard ─────────────────────────────────────────────────────────────
 router.get("/dashboard", requireAdmin, adminGetDashboardHandler);
 
+// ─── Public site: contact form submissions ───────────────────────────────────
+router.get("/contact-inquiries", requireAdmin, listContactInquiriesHandler);
+
 // ─── Resource modules ───────────────────────────────────────────────────────
 router.use("/organizers", organizersRoutes);
 router.use("/exhibitors", exhibitorsRoutes);
@@ -112,5 +117,6 @@ router.use("/promotion-package", promotionPackageRoutes);
 router.use("/account-deactivations", accountDeactivationRoutes);
 router.use("/content", contentAdminRoutes);
 router.use("/role-definitions", roleDefinitionsRoutes);
+router.use("/newsletter", newsletterAdminRoutes);
 
 export default router;

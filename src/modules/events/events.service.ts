@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import prisma from "../../config/prisma";
+import { applyPostponedOnOrganizerDateChange } from "./event-schedule";
 import {
   publicPublishedEventWhere,
   activePublicProfileUserWhere,
@@ -245,6 +246,7 @@ export async function listEvents(params: ListEventsParams) {
       images: event.images,
       videos: event.videos ?? [],
       bannerImage: event.bannerImage,
+      vipImage: event.vipImage ?? null,
       thumbnailImage: event.thumbnailImage,
       youtubeVideoUrl: event.youtubeVideoUrl ?? null,
       organizer: {
@@ -350,6 +352,11 @@ export async function getEventByIdentifier(id: string, viewerUserId?: string | n
         avatar: true,
         organizationName: true,
         company: true,
+        headquarters: true,
+        location: true,
+        organizerCountry: true,
+        organizerState: true,
+        organizerCity: true,
         description: true,
         phone: true,
         totalEvents: true,
@@ -357,6 +364,7 @@ export async function getEventByIdentifier(id: string, viewerUserId?: string | n
         totalReviews: true,
         createdAt: true,
         isActive: true,
+        isVerified: true,
         profileVisibility: true,
       },
     },
@@ -752,7 +760,8 @@ export async function searchEntities(query: string, limit = 5) {
       where: {
         role: "VENUE_MANAGER",
         venueName: { contains: trimmed, mode: "insensitive" },
-        ...activePublicProfileUserWhere(),
+        isVerified: true,
+        NOT: { profileVisibility: "private" },
       },
       select: {
         id: true,
@@ -1248,6 +1257,7 @@ export async function listEventSpaceCosts(eventId: string) {
       description: true,
       area: true,
       basePrice: true,
+      minArea: true,
       pricePerSqm: true,
       currency: true,
       additionalPowerRate: true,
@@ -1283,6 +1293,7 @@ export async function listExhibitionSpaces(eventId: string) {
     minArea: s.minArea,
     unit: s.unit,
     pricePerUnit: s.pricePerUnit,
+    currency: s.currency,
     isAvailable: s.isAvailable && (s.bookedBooths ?? 0) < (s.maxBooths ?? 999),
     maxBooths: s.maxBooths,
     bookedBooths: s.bookedBooths ?? 0,
@@ -1315,11 +1326,12 @@ export async function createExhibitionSpace(
     unit?: string;
     pricePerSqm?: number;
     maxBooths?: number;
+    currency?: string;
   }
 ) {
   const event = await prisma.event.findUnique({
     where: { id: eventId },
-    select: { id: true },
+    select: { id: true, currency: true },
   });
   if (!event) return { error: "NOT_FOUND" as const };
 
@@ -1330,6 +1342,17 @@ export async function createExhibitionSpace(
     ? (body.spaceType as (typeof EXHIBITION_SPACE_TYPES)[number])
     : "RAW_SPACE";
 
+  const pricePerSqm = body.pricePerSqm != null ? Number(body.pricePerSqm) : null;
+  const minArea = body.minArea != null ? Number(body.minArea) : null;
+  const computedBase =
+    pricePerSqm != null && minArea != null ? Number(pricePerSqm) * Number(minArea) : 0;
+  const basePrice =
+    body.basePrice != null && Number(body.basePrice) > 0 ? Number(body.basePrice) : computedBase;
+  const currency =
+    typeof body.currency === "string" && body.currency.trim()
+      ? body.currency.trim()
+      : event.currency || "USD";
+
   const space = await prisma.exhibitionSpace.create({
     data: {
       eventId,
@@ -1337,12 +1360,13 @@ export async function createExhibitionSpace(
       spaceType,
       description: (body.description as string)?.trim() || name,
       dimensions: (body.dimensions as string)?.trim() || null,
-      area: Number(body.area) || 100,
-      basePrice: Number(body.basePrice) ?? 0,
+      area: Number(body.area) || minArea || 100,
+      basePrice,
       minArea: body.minArea != null ? Number(body.minArea) : null,
       unit: (body.unit as string) || "sqm",
       pricePerSqm: body.pricePerSqm != null ? Number(body.pricePerSqm) : null,
       maxBooths: body.maxBooths != null ? Number(body.maxBooths) : null,
+      currency,
     },
   });
 
@@ -1363,14 +1387,23 @@ export async function createExhibitionSpace(
     isAvailable: space.isAvailable,
     maxBooths: space.maxBooths,
     bookedBooths: space.bookedBooths ?? 0,
+    currency: space.currency,
   };
 }
 
-/** Update an exhibition space (e.g. basePrice, pricePerSqm). */
+/** Update an exhibition space (pricing, hall name, description). */
 export async function updateExhibitionSpace(
   eventId: string,
   spaceId: string,
-  body: { basePrice?: number; pricePerSqm?: number; pricePerUnit?: number }
+  body: {
+    basePrice?: number;
+    pricePerSqm?: number;
+    pricePerUnit?: number;
+    minArea?: number;
+    name?: string;
+    description?: string;
+    currency?: string;
+  }
 ) {
   const space = await prisma.exhibitionSpace.findFirst({
     where: { id: spaceId, eventId },
@@ -1378,9 +1411,28 @@ export async function updateExhibitionSpace(
   if (!space) return null;
 
   const data: Record<string, unknown> = {};
-  if (body.basePrice != null) data.basePrice = Number(body.basePrice);
-  if (body.pricePerSqm != null) data.pricePerSqm = Number(body.pricePerSqm);
-  if (body.pricePerUnit != null) data.pricePerUnit = Number(body.pricePerUnit);
+  if (body.name !== undefined) {
+    const n = String(body.name).trim();
+    if (n) data.name = n;
+  }
+  if (body.description !== undefined) data.description = String(body.description).trim();
+  if (body.currency !== undefined && String(body.currency).trim()) {
+    data.currency = String(body.currency).trim();
+  }
+  if (body.pricePerSqm !== undefined) data.pricePerSqm = Number(body.pricePerSqm);
+  if (body.minArea !== undefined) data.minArea = Number(body.minArea);
+  if (body.pricePerUnit !== undefined) data.pricePerUnit = Number(body.pricePerUnit);
+
+  const nextPps =
+    body.pricePerSqm !== undefined ? Number(body.pricePerSqm) : (space.pricePerSqm ?? 0);
+  const nextMin = body.minArea !== undefined ? Number(body.minArea) : (space.minArea ?? 0);
+  if (body.pricePerSqm !== undefined || body.minArea !== undefined) {
+    data.basePrice = Number(nextPps) * Number(nextMin);
+  }
+  if (body.basePrice !== undefined && data.basePrice === undefined) {
+    data.basePrice = Number(body.basePrice);
+  }
+
   if (Object.keys(data).length === 0) return space;
 
   const updated = await prisma.exhibitionSpace.update({
@@ -1575,6 +1627,10 @@ export async function updateEventByOrganizer(
   const nextSubTitle =
     "subTitle" in body ? trimOrganizerEventText(body.subTitle) : existingEvent.subTitle;
 
+  const nextStart = body.startDate ? new Date(body.startDate as string) : existingEvent.startDate;
+  const nextEnd = body.endDate ? new Date(body.endDate as string) : existingEvent.endDate;
+  const postponePatch = applyPostponedOnOrganizerDateChange(existingEvent, nextStart, nextEnd);
+
   const eventUpdateData: Record<string, unknown> = {
     title: body.title,
     description: body.description,
@@ -1590,8 +1646,9 @@ export async function updateEventByOrganizer(
     status: (body.status as string)?.toUpperCase() ?? existingEvent.status,
     category: (body.category as string[]) || (body.eventType as string[]) || existingEvent.category,
     tags: (body.tags as string[]) || (body.categories as string[]) || existingEvent.tags,
-    startDate: body.startDate ? new Date(body.startDate as string) : existingEvent.startDate,
-    endDate: body.endDate ? new Date(body.endDate as string) : existingEvent.endDate,
+    startDate: nextStart,
+    endDate: nextEnd,
+    ...postponePatch,
     registrationStart: body.registrationStart
       ? new Date(body.registrationStart as string)
       : existingEvent.registrationStart,

@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.AuthService = void 0;
+exports.AuthService = exports.ORGANIZER_PENDING_APPROVAL = void 0;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const crypto_1 = __importDefault(require("crypto"));
@@ -13,6 +13,8 @@ const JWT_SECRET = process.env.JWT_SECRET || "dev-jwt-secret";
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || "dev-jwt-refresh-secret";
 const ACCESS_TOKEN_TTL_SECONDS = 60 * 15; // 15 minutes
 const REFRESH_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
+/** Thrown when an organizer has not been approved by admin yet (no JWT). */
+exports.ORGANIZER_PENDING_APPROVAL = "ORGANIZER_PENDING_APPROVAL";
 function mapUserRoleToAuthRole(role) {
     const r = (role || "").toUpperCase();
     switch (r) {
@@ -95,7 +97,11 @@ class AuthService {
         if (!validUserPassword) {
             return null;
         }
-        if (!user.isActive) {
+        if (user.role === "ORGANIZER" && !user.isVerified) {
+            throw new Error(exports.ORGANIZER_PENDING_APPROVAL);
+        }
+        // Venue managers may be delisted from /venues (isVerified=false) but must still be able to sign in.
+        if (!user.isActive && user.role !== "VENUE_MANAGER") {
             return null;
         }
         const role = mapUserRoleToAuthRole(user.role);
@@ -129,6 +135,15 @@ class AuthService {
             where: { email: normalizedEmail },
         });
         if (!user) {
+            const allowed = [
+                "ATTENDEE",
+                "ORGANIZER",
+                "EXHIBITOR",
+                "SPEAKER",
+                "VENUE_MANAGER",
+            ];
+            const raw = (input.intendedRole ?? "").trim().toUpperCase();
+            const roleForCreate = raw && allowed.includes(raw) ? raw : "ATTENDEE";
             const hashedPassword = await bcryptjs_1.default.hash(crypto_1.default.randomBytes(32).toString("hex"), 10);
             user = await prisma_1.default.user.create({
                 data: {
@@ -137,9 +152,10 @@ class AuthService {
                     lastName,
                     password: hashedPassword,
                     avatar: input.image || undefined,
-                    role: "ATTENDEE",
-                    isVerified: true,
-                    isActive: true,
+                    role: roleForCreate,
+                    ...(roleForCreate === "VENUE_MANAGER" || roleForCreate === "ORGANIZER"
+                        ? { isVerified: false, isActive: true }
+                        : { isVerified: true, isActive: true }),
                     emailVerified: true,
                     lastLogin: new Date(),
                 },
@@ -161,7 +177,10 @@ class AuthService {
             }
             user = refreshed;
         }
-        if (!user.isActive) {
+        if (user.role === "ORGANIZER" && !user.isVerified) {
+            throw new Error(exports.ORGANIZER_PENDING_APPROVAL);
+        }
+        if (!user.isActive && user.role !== "VENUE_MANAGER") {
             throw new Error("Account is deactivated");
         }
         const role = mapUserRoleToAuthRole(user.role);
@@ -225,7 +244,10 @@ class AuthService {
         if (!user) {
             throw new Error("User not found");
         }
-        if (!user.isActive) {
+        if (user.role === "ORGANIZER" && !user.isVerified) {
+            throw new Error(exports.ORGANIZER_PENDING_APPROVAL);
+        }
+        if (!user.isActive && user.role !== "VENUE_MANAGER") {
             throw new Error("Account is deactivated");
         }
         const role = mapUserRoleToAuthRole(user.role);

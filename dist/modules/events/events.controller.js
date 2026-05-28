@@ -39,6 +39,8 @@ exports.getEventFollowersHandler = getEventFollowersHandler;
 exports.getEventReviewsHandler = getEventReviewsHandler;
 exports.createEventReviewHandler = createEventReviewHandler;
 const events_service_1 = require("./events.service");
+const event_schedule_1 = require("./event-schedule");
+const events_service_2 = require("./events.service");
 const events_writes_service_1 = require("./events-writes.service");
 const prisma_1 = __importDefault(require("../../config/prisma"));
 const event_categories_service_1 = require("../admin/event-categories/event-categories.service");
@@ -131,6 +133,42 @@ async function patchEventByIdHandler(req, res) {
     try {
         const { id } = req.params;
         const body = (req.body ?? {});
+        const hasSchedule = body.startDate != null || body.endDate != null;
+        const auth = req.auth;
+        if (hasSchedule) {
+            if (!auth?.sub) {
+                return res.status(401).json({ success: false, error: "Authentication required to update schedule" });
+            }
+            const scheduleResult = await (0, event_schedule_1.updateEventSchedule)(id, body, auth.sub, auth.role);
+            if (scheduleResult.error === "NOT_FOUND") {
+                return res.status(404).json({ success: false, error: "Event not found" });
+            }
+            if (scheduleResult.error === "FORBIDDEN") {
+                return res.status(403).json({ success: false, error: "Not allowed to update this event schedule" });
+            }
+            if (scheduleResult.error === "INVALID_DATES" || scheduleResult.error === "END_BEFORE_START") {
+                return res.status(400).json({ success: false, error: scheduleResult.error });
+            }
+            const ev = scheduleResult.event;
+            const schedulePayload = {
+                startDate: ev.startDate.toISOString(),
+                endDate: ev.endDate.toISOString(),
+                previousStartDate: ev.previousStartDate?.toISOString() ?? null,
+                previousEndDate: ev.previousEndDate?.toISOString() ?? null,
+                isPostponed: ev.isPostponed,
+                timezone: ev.timezone,
+            };
+            const { startDate: _s, endDate: _e, ...restBody } = body;
+            const hasOtherFields = Object.keys(restBody).some((k) => restBody[k] !== undefined);
+            if (!hasOtherFields) {
+                return res.json({ id: ev.id, ...schedulePayload });
+            }
+            const updated = await (0, events_service_1.updateEventFields)(id, restBody);
+            if (!updated) {
+                return res.status(404).json({ success: false, error: "Event not found" });
+            }
+            return res.json({ ...updated, ...schedulePayload });
+        }
         const updated = await (0, events_service_1.updateEventFields)(id, body);
         if (!updated) {
             return res.status(404).json({ success: false, error: "Event not found" });
@@ -232,7 +270,7 @@ async function createEventLeadHandler(req, res) {
         if (!type) {
             return res.status(400).json({ error: "type is required" });
         }
-        const result = await (0, events_service_1.createEventLead)({ eventId, userId, type });
+        const result = await (0, events_service_2.createEventLead)({ eventId, userId, type });
         if ("error" in result) {
             if (result.error === "EVENT_NOT_FOUND") {
                 return res.status(404).json({ error: "Event not found" });
@@ -313,7 +351,7 @@ async function listSpeakerSessionsHandler(req, res) {
                 error: "eventId or speakerId is required",
             });
         }
-        const sessions = await (0, events_service_1.listSpeakerSessions)({
+        const sessions = await (0, events_service_2.listSpeakerSessions)({
             eventId: eventId ?? null,
             speakerId: speakerId ?? null,
         });
@@ -435,7 +473,7 @@ async function deleteEventLayoutHandler(req, res) {
 async function getEventSpaceCostsHandler(req, res) {
     try {
         const { id } = req.params;
-        const spaces = await (0, events_service_1.listEventSpaceCosts)(id);
+        const spaces = await (0, events_service_2.listEventSpaceCosts)(id);
         return res.json({
             success: true,
             data: {
@@ -456,7 +494,7 @@ async function getEventSpaceCostsHandler(req, res) {
 async function getExhibitionSpacesHandler(req, res) {
     try {
         const { id: eventId } = req.params;
-        const exhibitionSpaces = await (0, events_service_1.listExhibitionSpaces)(eventId);
+        const exhibitionSpaces = await (0, events_service_2.listExhibitionSpaces)(eventId);
         return res.json({ exhibitionSpaces });
     }
     catch (error) {
@@ -472,7 +510,7 @@ async function getExhibitionSpacesHandler(req, res) {
 async function createExhibitionSpaceHandler(req, res) {
     try {
         const { id: eventId } = req.params;
-        const result = await (0, events_service_1.createExhibitionSpace)(eventId, req.body ?? {});
+        const result = await (0, events_service_2.createExhibitionSpace)(eventId, req.body ?? {});
         if ("error" in result) {
             if (result.error === "NOT_FOUND") {
                 return res.status(404).json({ error: "Event not found" });
@@ -497,7 +535,7 @@ async function createExhibitionSpaceHandler(req, res) {
 async function updateExhibitionSpaceHandler(req, res) {
     try {
         const { id: eventId, spaceId } = req.params;
-        const updated = await (0, events_service_1.updateExhibitionSpace)(eventId, spaceId, req.body ?? {});
+        const updated = await (0, events_service_2.updateExhibitionSpace)(eventId, spaceId, req.body ?? {});
         if (!updated) {
             return res.status(404).json({ error: "Exhibition space not found" });
         }
@@ -516,7 +554,7 @@ async function updateExhibitionSpaceHandler(req, res) {
 async function addExhibitorToEventHandler(req, res) {
     try {
         const { id: eventId } = req.params;
-        const result = await (0, events_service_1.addExhibitorToEvent)(eventId, req.body ?? {});
+        const result = await (0, events_service_2.addExhibitorToEvent)(eventId, req.body ?? {});
         if ("error" in result) {
             if (result.error === "EVENT_NOT_FOUND") {
                 return res.status(404).json({ error: "Event not found" });
@@ -550,7 +588,7 @@ async function removeExhibitorFromEventHandler(req, res) {
         if (!exhibitorId) {
             return res.status(400).json({ error: "Exhibitor ID required" });
         }
-        const removed = await (0, events_service_1.removeExhibitorFromEvent)(eventId, exhibitorId);
+        const removed = await (0, events_service_2.removeExhibitorFromEvent)(eventId, exhibitorId);
         if (!removed) {
             return res.status(404).json({ error: "Exhibitor not found for this event" });
         }

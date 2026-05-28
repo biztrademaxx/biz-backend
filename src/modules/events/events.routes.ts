@@ -71,9 +71,8 @@ router.post("/events/:id/reviews", requireUser, createEventReviewHandler);
 
 // Single event by id / slug / title (optional JWT: organizer/venue host can view non-public listings)
 router.get("/events/:id", optionalUser, getEventByIdHandler);
-// Partial update (description, tags, images, brochure, layoutPlan)
-// NOTE: Left unauthenticated so organizer dashboard via Next.js can patch without backend JWT.
-router.patch("/events/:id", patchEventByIdHandler);
+// Partial update (description, tags, images, brochure, layoutPlan; schedule requires auth)
+router.patch("/events/:id", optionalUser, patchEventByIdHandler);
 
 // Event sub-resources (leads, attendees, exhibitors, speakers, brochure, layout, space-costs)
 router.get("/events/:id/leads", getEventLeadsHandler);

@@ -39,6 +39,7 @@ async function listExhibitors() {
             avatar: true,
             bio: true,
             company: true,
+            organizationName: true,
             jobTitle: true,
             location: true,
             website: true,
@@ -56,6 +57,7 @@ async function listExhibitors() {
             role: "EXHIBITOR",
             firstName: e.firstName,
             lastName: e.lastName,
+            organizationName: e.organizationName,
             company: e.company,
         }, "EXHIBITOR"),
     }));
@@ -117,13 +119,27 @@ async function createExhibitor(body) {
     });
     return { exhibitor };
 }
+/** When slug resolution fails, allow an authenticated exhibitor to resolve a non-id segment to their own user id (stale bookmark / token vs DB name mismatch). */
+function exhibitorSelfIdFromStaleSlug(identifier, viewerUserId, viewerRole) {
+    const raw = String(identifier || "").trim();
+    const isIdShaped = (0, profile_slug_1.isMongoObjectId)(raw) || (0, profile_slug_1.isUuidLike)(raw) || (0, profile_slug_1.isUuidSegment)(raw);
+    const viewer = String(viewerUserId ?? "").trim();
+    if (!isIdShaped && viewer && String(viewerRole ?? "").toUpperCase() === "EXHIBITOR") {
+        return (0, profile_slug_1.isUuidSegment)(viewer) ? viewer.toLowerCase() : viewer;
+    }
+    return null;
+}
 /** Update exhibitor profile (User with role EXHIBITOR). Persists to PostgreSQL. */
-async function updateExhibitorProfile(id, body) {
+async function updateExhibitorProfile(id, body, viewerUserId, viewerRole) {
     if (!id || id === "undefined") {
         throw new Error("Invalid exhibitor ID");
     }
+    let resolvedId = (await resolveExhibitorId(id, viewerUserId, viewerRole)) ?? "";
+    if (!resolvedId) {
+        throw new Error("Exhibitor not found");
+    }
     const existing = await prisma_1.default.user.findFirst({
-        where: { id, role: "EXHIBITOR" },
+        where: { id: resolvedId, role: "EXHIBITOR" },
         select: { id: true },
     });
     if (!existing) {
@@ -161,51 +177,84 @@ async function updateExhibitorProfile(id, body) {
     if (body.businessAddress !== undefined)
         data.businessAddress = body.businessAddress === "" ? null : body.businessAddress;
     if (Object.keys(data).length === 0) {
-        return getExhibitorById(id, id);
+        return getExhibitorById(resolvedId, resolvedId);
     }
     await prisma_1.default.user.update({
-        where: { id },
+        where: { id: resolvedId },
         data: data,
     });
-    return getExhibitorById(id, id);
+    return getExhibitorById(resolvedId, resolvedId);
 }
 // Single exhibitor (read-only) – shape for public exhibitor page
-async function resolveExhibitorId(identifier) {
-    if ((0, profile_slug_1.isUuidLike)(identifier))
-        return identifier;
-    const targetSlug = String(identifier || "").trim().toLowerCase();
+async function resolveExhibitorId(identifier, viewerUserId, viewerRole) {
+    const raw = String(identifier || "").trim();
+    if (!raw || raw === "undefined")
+        return null;
+    if ((0, profile_slug_1.isMongoObjectId)(raw)) {
+        return raw;
+    }
+    if ((0, profile_slug_1.isUuidLike)(raw) || (0, profile_slug_1.isUuidSegment)(raw)) {
+        return raw.toLowerCase();
+    }
+    const targetSlug = (0, profile_slug_1.slugifyProfileValue)(raw);
     if (!targetSlug)
         return null;
     const exhibitors = await prisma_1.default.user.findMany({
         where: { role: "EXHIBITOR", isActive: true },
         select: { id: true, firstName: true, lastName: true, organizationName: true, company: true },
     });
-    const withSlug = exhibitors.map((u) => ({
+    const withCandidates = exhibitors.map((u) => ({
         u,
-        slug: (0, profile_slug_1.getPublicProfileSlug)({
+        candidates: (0, profile_slug_1.getExhibitorSlugCandidates)({
             role: "EXHIBITOR",
             firstName: u.firstName,
             lastName: u.lastName,
             organizationName: u.organizationName,
             company: u.company,
-        }, "EXHIBITOR"),
+        }),
     }));
-    const exact = withSlug.filter((x) => x.slug === targetSlug);
-    if (exact.length === 1)
-        return exact[0].u.id;
-    const loose = withSlug.filter((x) => (0, profile_slug_1.publicSlugRequestMatches)(x.slug, targetSlug));
-    if (loose.length === 1)
-        return loose[0].u.id;
-    if (loose.length > 1) {
-        const narrowed = loose.filter((x) => x.slug === targetSlug);
+    const exactHits = withCandidates.filter((x) => x.candidates.some((c) => c === targetSlug));
+    if (exactHits.length === 1)
+        return exactHits[0].u.id;
+    if (exactHits.length > 1) {
+        const narrowed = exactHits.filter((x) => x.candidates[0] === targetSlug);
         if (narrowed.length === 1)
             return narrowed[0].u.id;
         return null;
     }
-    return null;
+    const looseHits = withCandidates.filter((x) => x.candidates.some((c) => (0, profile_slug_1.publicSlugRequestMatches)(c, targetSlug)));
+    if (looseHits.length === 1)
+        return looseHits[0].u.id;
+    if (looseHits.length > 1) {
+        const narrowed = looseHits.filter((x) => x.candidates.some((c) => c === targetSlug));
+        if (narrowed.length === 1)
+            return narrowed[0].u.id;
+        return null;
+    }
+    const viewerRaw = String(viewerUserId ?? "").trim();
+    if (viewerRaw && ((0, profile_slug_1.isMongoObjectId)(viewerRaw) || (0, profile_slug_1.isUuidLike)(viewerRaw) || (0, profile_slug_1.isUuidSegment)(viewerRaw))) {
+        const vid = (0, profile_slug_1.isUuidSegment)(viewerRaw) ? viewerRaw.toLowerCase() : viewerRaw;
+        const self = await prisma_1.default.user.findFirst({
+            where: { id: vid, role: "EXHIBITOR" },
+            select: { id: true, firstName: true, lastName: true, organizationName: true, company: true },
+        });
+        if (self) {
+            const selfCandidates = (0, profile_slug_1.getExhibitorSlugCandidates)({
+                role: "EXHIBITOR",
+                firstName: self.firstName,
+                lastName: self.lastName,
+                organizationName: self.organizationName,
+                company: self.company,
+            });
+            const matchSelf = selfCandidates.some((c) => c === targetSlug || (0, profile_slug_1.publicSlugRequestMatches)(c, targetSlug));
+            if (matchSelf)
+                return self.id;
+        }
+    }
+    return exhibitorSelfIdFromStaleSlug(raw, viewerUserId, viewerRole);
 }
-async function getExhibitorById(identifier, viewerUserId) {
-    const id = await resolveExhibitorId(identifier);
+async function getExhibitorById(identifier, viewerUserId, viewerRole) {
+    const id = await resolveExhibitorId(identifier, viewerUserId, viewerRole);
     if (!id || id === "undefined") {
         throw new Error("Invalid exhibitor ID");
     }
@@ -293,6 +342,7 @@ async function getExhibitorById(identifier, viewerUserId) {
         companyName: user.company ?? user.organizationName ?? undefined,
         companyLogo: user.avatar ?? undefined,
         company: user.company ?? user.organizationName ?? undefined,
+        organizationName: user.organizationName ?? user.company ?? undefined,
         linkedin: user.linkedin ?? undefined,
         location: user.location ?? undefined,
         isVerified: user.isVerified,
@@ -432,8 +482,8 @@ async function getExhibitorAnalytics(_id) {
     return analytics;
 }
 // Exhibitor events (read-only)
-async function getExhibitorEvents(exhibitorId, viewerUserId) {
-    exhibitorId = (await resolveExhibitorId(exhibitorId)) ?? "";
+async function getExhibitorEvents(exhibitorId, viewerUserId, viewerRole) {
+    exhibitorId = (await resolveExhibitorId(exhibitorId, viewerUserId, viewerRole)) ?? "";
     if (!exhibitorId) {
         return [];
     }
@@ -550,11 +600,11 @@ async function getExhibitorEvents(exhibitorId, viewerUserId) {
 }
 /** Logged-in exhibitor only: promotions + event dropdown (same shape as Next `/api/exhibitors/promotions`). */
 async function getExhibitorPromotionsMarketingForSelf(exhibitorId, viewerUserId) {
-    const resolved = (await resolveExhibitorId(exhibitorId)) ?? exhibitorId;
+    const resolved = (await resolveExhibitorId(exhibitorId, viewerUserId, "EXHIBITOR")) ?? "";
     if (!resolved || viewerUserId !== resolved) {
         throw new Error("FORBIDDEN");
     }
-    const eventsFull = await getExhibitorEvents(resolved, viewerUserId);
+    const eventsFull = await getExhibitorEvents(resolved, viewerUserId, "EXHIBITOR");
     const eventsMap = new Map();
     for (const row of eventsFull) {
         const eid = row.eventId;
@@ -717,18 +767,19 @@ async function listExhibitorReviews(exhibitorId) {
 }
 /** Leads count = distinct users who followed this exhibitor OR have a connection (Connect) with them (PENDING or ACCEPTED). */
 async function getExhibitorLeadsCount(exhibitorId) {
-    if (!exhibitorId)
+    const resolved = (await resolveExhibitorId(exhibitorId)) ?? "";
+    if (!resolved)
         return 0;
     const [followerRows, connectionRows] = await Promise.all([
         prisma_1.default.follow.findMany({
-            where: { followingId: exhibitorId },
+            where: { followingId: resolved },
             select: { followerId: true },
         }),
         prisma_1.default.connection.findMany({
             where: {
                 OR: [
-                    { requesterId: exhibitorId, status: { in: ["PENDING", "ACCEPTED"] } },
-                    { receiverId: exhibitorId, status: { in: ["PENDING", "ACCEPTED"] } },
+                    { requesterId: resolved, status: { in: ["PENDING", "ACCEPTED"] } },
+                    { receiverId: resolved, status: { in: ["PENDING", "ACCEPTED"] } },
                 ],
             },
             select: { requesterId: true, receiverId: true },
@@ -740,7 +791,7 @@ async function getExhibitorLeadsCount(exhibitorId) {
         leadIds.add(r.requesterId);
         leadIds.add(r.receiverId);
     });
-    leadIds.delete(exhibitorId);
+    leadIds.delete(resolved);
     return leadIds.size;
 }
 async function addExhibitorReviewReply(exhibitorId, reviewId, body, userId) {
@@ -828,12 +879,13 @@ async function createExhibitorReview(exhibitorId, body, userId) {
     };
 }
 // --- Exhibitor products ---
-async function listExhibitorProducts(exhibitorId) {
-    if (!exhibitorId) {
+async function listExhibitorProducts(exhibitorId, viewerUserId, viewerRole) {
+    const resolved = (await resolveExhibitorId(exhibitorId, viewerUserId, viewerRole)) ?? "";
+    if (!resolved) {
         throw new Error("exhibitorId is required");
     }
     const products = await prisma_1.default.product.findMany({
-        where: { exhibitorId },
+        where: { exhibitorId: resolved },
         orderBy: { createdAt: "desc" },
     });
     return products.map((p) => toProductShape(p));
@@ -851,8 +903,9 @@ function toProductShape(p) {
         youtube: Array.isArray(p.youtube) ? (p.youtube.length > 0 ? String(p.youtube[0]) : "") : "",
     };
 }
-async function createExhibitorProduct(exhibitorId, body) {
-    if (!exhibitorId) {
+async function createExhibitorProduct(exhibitorId, body, viewerUserId, viewerRole) {
+    const resolved = (await resolveExhibitorId(exhibitorId, viewerUserId, viewerRole)) ?? "";
+    if (!resolved) {
         throw new Error("exhibitorId is required");
     }
     const youtubeArr = Array.isArray(body.youtube)
@@ -862,7 +915,7 @@ async function createExhibitorProduct(exhibitorId, body) {
             : [];
     const product = await prisma_1.default.product.create({
         data: {
-            exhibitorId,
+            exhibitorId: resolved,
             name: body.name ?? "",
             category: body.category ?? null,
             description: body.description ?? null,
@@ -875,9 +928,13 @@ async function createExhibitorProduct(exhibitorId, body) {
     });
     return toProductShape(product);
 }
-async function updateExhibitorProduct(exhibitorId, productId, body) {
+async function updateExhibitorProduct(exhibitorId, productId, body, viewerUserId, viewerRole) {
+    const resolved = (await resolveExhibitorId(exhibitorId, viewerUserId, viewerRole)) ?? "";
+    if (!resolved) {
+        return null;
+    }
     const existing = await prisma_1.default.product.findFirst({
-        where: { id: productId, exhibitorId },
+        where: { id: productId, exhibitorId: resolved },
     });
     if (!existing) {
         return null;
@@ -904,9 +961,13 @@ async function updateExhibitorProduct(exhibitorId, productId, body) {
     });
     return toProductShape(product);
 }
-async function deleteExhibitorProduct(exhibitorId, productId) {
+async function deleteExhibitorProduct(exhibitorId, productId, viewerUserId, viewerRole) {
+    const resolved = (await resolveExhibitorId(exhibitorId, viewerUserId, viewerRole)) ?? "";
+    if (!resolved) {
+        return false;
+    }
     const existing = await prisma_1.default.product.findFirst({
-        where: { id: productId, exhibitorId },
+        where: { id: productId, exhibitorId: resolved },
     });
     if (!existing) {
         return false;

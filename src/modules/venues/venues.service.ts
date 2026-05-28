@@ -1,7 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import prisma from "../../config/prisma";
 import {
-  activePublicProfileUserWhere,
   canUserViewOwnPrivateProfile,
   publicPublishedEventWhere,
 } from "../../utils/public-profile";
@@ -19,7 +18,12 @@ export async function listVenues(params: ListVenuesParams) {
   const skip = (page - 1) * limit;
   const requireVenueImage = params.requireVenueImage === true;
 
-  const where: any = { role: "VENUE_MANAGER", ...activePublicProfileUserWhere() };
+  const where: any = {
+    role: "VENUE_MANAGER",
+    NOT: { profileVisibility: "private" },
+    /** Public /venues directory: admin-listed only (not tied to account isActive). */
+    isVerified: true,
+  };
   if (requireVenueImage) {
     where.venueImages = { isEmpty: false };
   }
@@ -40,8 +44,6 @@ export async function listVenues(params: ListVenuesParams) {
         id: true,
         firstName: true,
         lastName: true,
-        email: true,
-        phone: true,
         organizerIdForVenueManager: true,
         venueName: true,
         venueDescription: true,
@@ -117,7 +119,12 @@ export async function getVenueEvents(id: string, viewerUserId?: string | null) {
   const isSelf = canUserViewOwnPrivateProfile(viewerUserId ?? undefined, id);
   if (!isSelf) {
     const visible = await prisma.user.findFirst({
-      where: { id, role: "VENUE_MANAGER", ...activePublicProfileUserWhere() },
+      where: {
+        id,
+        role: "VENUE_MANAGER",
+        NOT: { profileVisibility: "private" },
+        isVerified: true,
+      },
       select: { id: true },
     });
     if (!visible) {
@@ -149,6 +156,7 @@ export async function getVenueEvents(id: string, viewerUserId?: string | null) {
 
   const transformedEvents = events.map((event) => ({
     id: event.id,
+    slug: event.slug,
     title: event.title,
     description: event.description,
     shortDescription: event.shortDescription,
@@ -156,8 +164,13 @@ export async function getVenueEvents(id: string, viewerUserId?: string | null) {
     endDate: event.endDate.toISOString(),
     status: event.status,
     category: event.category,
+    timezone: event.timezone,
+    city: event.city,
+    state: event.state,
+    country: event.country,
     images: event.images,
     bannerImage: event.bannerImage,
+    thumbnailImage: event.thumbnailImage,
     venueId: event.venueId,
     organizerId: event.organizerId,
     maxAttendees: event.maxAttendees,
@@ -184,9 +197,25 @@ export async function getVenueEvents(id: string, viewerUserId?: string | null) {
   };
 }
 
-export async function listVenueReviews(venueId: string, options?: { includeReplies?: boolean }) {
+export async function listVenueReviews(
+  venueId: string,
+  options?: { includeReplies?: boolean; viewerUserId?: string | null }
+) {
   if (!venueId) {
     throw new Error("Invalid venue ID");
+  }
+
+  const venue = await prisma.user.findFirst({
+    where: { id: venueId, role: "VENUE_MANAGER" },
+    select: { id: true, isVerified: true },
+  });
+  if (!venue) {
+    return [];
+  }
+  const isSelf = canUserViewOwnPrivateProfile(options?.viewerUserId ?? undefined, venueId);
+  const publicListing = venue.isVerified;
+  if (!publicListing && !isSelf) {
+    return [];
   }
 
   let reviews: any[] = [];
@@ -273,6 +302,17 @@ export async function createVenueReview(params: {
   }
   if (!rating || rating < 1 || rating > 5) {
     throw new Error("Rating must be between 1 and 5");
+  }
+
+  const venueRow = await prisma.user.findFirst({
+    where: { id: venueId, role: "VENUE_MANAGER" },
+    select: { id: true, isVerified: true },
+  });
+  if (!venueRow) {
+    throw new Error("Venue not found");
+  }
+  if (!venueRow.isVerified) {
+    throw new Error("This venue is not yet approved for public reviews");
   }
 
   const review = await prisma.review.create({

@@ -292,6 +292,10 @@ model User {
   companyIndustry String?
   jobTitle        String?
   location        String?
+  /// Profile location (speakers, visitors, exhibitors) — country / state / city names.
+  profileCountry  String?
+  profileState    String?
+  profileCity     String?
   timezone        String?
   language        String   @default("en")
   interests       String[] @default([])
@@ -307,6 +311,10 @@ model User {
   organizationName String?
   description      String?
   headquarters     String?
+  /// Organizer profile: cascaded location (same semantics as venue country/state/city names).
+  organizerCountry String?
+  organizerState   String?
+  organizerCity    String?
   founded          String?
   teamSize         String?
   specialties      String[] @default([])
@@ -512,6 +520,10 @@ model Event {
 
   startDate         DateTime
   endDate           DateTime
+  /** Original schedule before organizer postponed/rescheduled (first change only). */
+  previousStartDate DateTime?
+  previousEndDate   DateTime?
+  isPostponed       Boolean   @default(false)
   registrationStart DateTime
   registrationEnd   DateTime
   timezone          String
@@ -537,6 +549,8 @@ model Event {
   documents      String[] @default([])
   bannerImage    String?
   thumbnailImage String?
+  /// Dedicated image for homepage VIP cards only (does not replace normal event images elsewhere).
+  vipImage       String?
 
   isPublic         Boolean @default(true)
   requiresApproval Boolean @default(false)
@@ -1364,4 +1378,52 @@ model EventImportJob {
   @@index([status])
   @@index([createdAt])
   @@map("event_import_jobs")
+}
+
+/// Public website contact form submissions (no login required).
+model ContactInquiry {
+  id           String   @id @default(uuid()) @db.Uuid
+  fullName     String
+  email        String
+  phone        String?
+  inquiryType  String
+  message      String   @db.Text
+  thankYouSent Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  @@index([email])
+  @@index([createdAt])
+  @@map("contact_inquiries")
+}
+
+/// Marketing site footer newsletter signups.
+model NewsletterSubscriber {
+  id             String    @id @default(uuid()) @db.Uuid
+  email          String    @unique
+  /// ACTIVE | UNSUBSCRIBED
+  status         String    @default("ACTIVE")
+  source         String    @default("footer")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  unsubscribedAt DateTime?
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("newsletter_subscribers")
+}
+
+/// One admin broadcast to all active subscribers (selected events).
+model NewsletterCampaign {
+  id             String   @id @default(uuid()) @db.Uuid
+  subject        String
+  eventIds       String[] @default([])
+  recipientCount Int
+  sentSucceeded  Int      @default(0)
+  sentFailed     Int      @default(0)
+  sentByUserId   String?
+  sentByEmail    String?
+  createdAt      DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("newsletter_campaigns")
 }

@@ -22,10 +22,13 @@ import networkRouter from "../modules/network/network.routes";
 import conversationsRouter from "../modules/messages/conversations.routes";
 import messagesRouter from "../modules/messages/messages.routes";
 import locationRouter from "../modules/location/location.routes";
+import geoRouter from "../modules/geo/geo.routes";
 import marketingPublicRouter from "../modules/admin/marketing/marketing-public.routes";
 import promotionPackagesRouter from "../modules/promotion-packages/promotion-packages.routes";
 import settingsRouter from "../modules/settings/settings.routes";
 import supportUserRouter from "./support-user";
+import contactRouter from "./contact";
+import newsletterPublicRouter from "./newsletter";
 
 const router = Router();
 
@@ -48,6 +51,12 @@ router.use("/settings", settingsRouter);
 // Logged-in user: raise & view support tickets (Express API only — not Next.js)
 router.use("/support", supportUserRouter);
 
+// Public contact form (marketing site)
+router.use("/", contactRouter);
+
+// Public newsletter signup (footer)
+router.use("/", newsletterPublicRouter);
+
 // User by id (for Next.js server: visitor dashboard etc.) — secured by INTERNAL_API_SECRET
 router.use("/", userByIdRouter);
 
@@ -65,6 +74,9 @@ router.use("/events", networkRouter);
 
 // Public location data (countries / cities for browse + venue forms)
 router.use("/location", locationRouter);
+
+// Visitor IP → geo (country/city) for localized home content
+router.use("/geo", geoRouter);
 
 // Cross-dashboard marketing feed (requires logged-in user token)
 router.use("/marketing", marketingPublicRouter);

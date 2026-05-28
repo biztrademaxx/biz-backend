@@ -21,7 +21,7 @@
   "scripts": {
     "postinstall": "prisma generate",
     "dev": "nodemon --watch src --ext ts,js --exec ts-node src/server.ts",
-    "build": "prisma generate && node --max-old-space-size=512 ./node_modules/typescript/lib/tsc.js -p tsconfig.json",
+    "build": "prisma generate && node --max-old-space-size=2048 ./node_modules/typescript/lib/tsc.js -p tsconfig.json",
     "start": "node dist/server.js",
     "test": "jest --config jest.config.cjs",
     "test:watch": "jest --config jest.config.cjs --watch",

@@ -111,6 +111,7 @@ export async function getOrganizerById(id: string) {
       phone: true,
       company: true,
       isActive: true,
+      isVerified: true,
       createdAt: true,
       updatedAt: true,
       totalEvents: true,
@@ -133,18 +134,29 @@ export async function createOrganizer(body: Record<string, unknown>) {
   if (!email) throw new Error("Email is required");
   const existing = await prisma.user.findFirst({ where: { email, role: ROLE } });
   if (existing) throw new Error("Organizer with this email already exists");
+
+  const organizerCity = body.organizerCity != null ? String(body.organizerCity).trim() : "";
+  const organizerState = body.organizerState != null ? String(body.organizerState).trim() : "";
+  const organizerCountry = body.organizerCountry != null ? String(body.organizerCountry).trim() : "";
+  const locationLine = [organizerCity, organizerState, organizerCountry].filter(Boolean).join(", ");
+
   const user = await prisma.user.create({
     data: {
       email,
       role: ROLE,
       firstName: String(body.firstName ?? "").trim() || "Organizer",
       lastName: String(body.lastName ?? "").trim() || "",
-      phone: body.phone != null ? String(body.phone) : null,
+      phone: body.phone != null && String(body.phone).trim() ? String(body.phone).trim() : null,
+      website: body.website != null && String(body.website).trim() ? String(body.website).trim() : null,
       company: body.company != null ? String(body.company) : null,
       organizationName:
         body.organizationName != null ? String(body.organizationName) : body.company != null ? String(body.company) : null,
       description: body.description != null ? String(body.description) : null,
       headquarters: body.headquarters != null ? String(body.headquarters) : null,
+      organizerCity: organizerCity || null,
+      organizerState: organizerState || null,
+      organizerCountry: organizerCountry || null,
+      location: locationLine || null,
       founded: body.founded != null ? String(body.founded) : null,
       teamSize: body.teamSize != null ? String(body.teamSize) : null,
       specialties: Array.isArray(body.specialties) ? body.specialties.map((s) => String(s)) : [],
@@ -153,6 +165,7 @@ export async function createOrganizer(body: Record<string, unknown>) {
       businessAddress: body.businessAddress != null ? String(body.businessAddress) : null,
       taxId: body.taxId != null ? String(body.taxId) : null,
       isActive: body.isActive !== false,
+      isVerified: body.isVerified === true,
     },
   });
   return getOrganizerById(user.id);

@@ -9,6 +9,7 @@ const auth_middleware_1 = require("../../middleware/auth.middleware");
 const admin_controller_1 = require("./admin.controller");
 const events_controller_1 = require("../events/events.controller");
 const event_import_controller_1 = require("./event-import/event-import.controller");
+const contact_inquiries_controller_1 = require("./contact-inquiries.controller");
 const organizers_routes_1 = __importDefault(require("./organizers/organizers.routes"));
 const exhibitors_routes_1 = __importDefault(require("./exhibitors/exhibitors.routes"));
 const speakers_routes_1 = __importDefault(require("./speakers/speakers.routes"));
@@ -35,6 +36,7 @@ const promotion_package_routes_1 = __importDefault(require("./promotion-package/
 const account_deactivation_routes_1 = __importDefault(require("./account-deactivation/account-deactivation.routes"));
 const content_routes_1 = __importDefault(require("./content/content.routes"));
 const role_definitions_routes_1 = __importDefault(require("./role-definitions/role-definitions.routes"));
+const newsletter_routes_1 = __importDefault(require("./newsletter/newsletter.routes"));
 const router = (0, express_1.Router)();
 const verifyBadgeUpload = (0, multer_1.default)({
     storage: multer_1.default.memoryStorage(),
@@ -61,6 +63,8 @@ router.post("/events/approve", auth_middleware_1.requireAdmin, (0, auth_middlewa
 router.post("/events/reject", auth_middleware_1.requireAdmin, (0, auth_middleware_1.requirePermission)("approve_events"), admin_controller_1.adminRejectEventHandler);
 // ─── Dashboard ─────────────────────────────────────────────────────────────
 router.get("/dashboard", auth_middleware_1.requireAdmin, admin_controller_1.adminGetDashboardHandler);
+// ─── Public site: contact form submissions ───────────────────────────────────
+router.get("/contact-inquiries", auth_middleware_1.requireAdmin, contact_inquiries_controller_1.listContactInquiriesHandler);
 // ─── Resource modules ───────────────────────────────────────────────────────
 router.use("/organizers", organizers_routes_1.default);
 router.use("/exhibitors", exhibitors_routes_1.default);
@@ -88,4 +92,5 @@ router.use("/promotion-package", promotion_package_routes_1.default);
 router.use("/account-deactivations", account_deactivation_routes_1.default);
 router.use("/content", content_routes_1.default);
 router.use("/role-definitions", role_definitions_routes_1.default);
+router.use("/newsletter", newsletter_routes_1.default);
 exports.default = router;

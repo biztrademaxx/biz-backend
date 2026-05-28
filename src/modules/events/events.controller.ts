@@ -20,6 +20,9 @@ import {
   getEventBrochureAndDocuments,
   updateEventLayoutPlan,
   updateEventFields,
+} from "./events.service";
+import { updateEventSchedule } from "./event-schedule";
+import {
   listEventSpaceCosts,
   listSpeakerSessions,
   createEventLead,
@@ -149,7 +152,50 @@ export async function patchEventByIdHandler(req: Request, res: Response) {
       images?: string[];
       brochure?: string | null;
       layoutPlan?: string | null;
+      startDate?: string;
+      endDate?: string;
     };
+
+    const hasSchedule = body.startDate != null || body.endDate != null;
+    const auth = req.auth;
+
+    if (hasSchedule) {
+      if (!auth?.sub) {
+        return res.status(401).json({ success: false, error: "Authentication required to update schedule" });
+      }
+      const scheduleResult = await updateEventSchedule(id, body, auth.sub, auth.role);
+      if (scheduleResult.error === "NOT_FOUND") {
+        return res.status(404).json({ success: false, error: "Event not found" });
+      }
+      if (scheduleResult.error === "FORBIDDEN") {
+        return res.status(403).json({ success: false, error: "Not allowed to update this event schedule" });
+      }
+      if (scheduleResult.error === "INVALID_DATES" || scheduleResult.error === "END_BEFORE_START") {
+        return res.status(400).json({ success: false, error: scheduleResult.error });
+      }
+      const ev = scheduleResult.event!;
+      const schedulePayload = {
+        startDate: ev.startDate.toISOString(),
+        endDate: ev.endDate.toISOString(),
+        previousStartDate: ev.previousStartDate?.toISOString() ?? null,
+        previousEndDate: ev.previousEndDate?.toISOString() ?? null,
+        isPostponed: ev.isPostponed,
+        timezone: ev.timezone,
+      };
+
+      const { startDate: _s, endDate: _e, ...restBody } = body;
+      const hasOtherFields = Object.keys(restBody).some(
+        (k) => restBody[k as keyof typeof restBody] !== undefined,
+      );
+      if (!hasOtherFields) {
+        return res.json({ id: ev.id, ...schedulePayload });
+      }
+      const updated = await updateEventFields(id, restBody);
+      if (!updated) {
+        return res.status(404).json({ success: false, error: "Event not found" });
+      }
+      return res.json({ ...updated, ...schedulePayload });
+    }
 
     const updated = await updateEventFields(id, body);
     if (!updated) {

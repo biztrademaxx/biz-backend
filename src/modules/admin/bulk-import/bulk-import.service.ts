@@ -1,7 +1,7 @@
 import * as XLSX from "xlsx";
 import prisma from "../../../config/prisma";
 import { createOrganizer } from "../organizers/organizers.service";
-import { createVenue } from "../venues/venues.service";
+import { createVenue, normalizeVenueName } from "../venues/venues.service";
 
 type ImportError = { row: number; message: string };
 type ImportResult = { processed: number; successCount: number; errorCount: number; errors: ImportError[] };
@@ -37,6 +37,26 @@ function asBool(v: unknown, defaultValue = true): boolean {
   return defaultValue;
 }
 
+/** First non-empty match by exact key, then case-insensitive key match (Excel headers vary). */
+function pickCell(row: Record<string, unknown>, ...keys: string[]): string {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(row, key)) {
+      const v = str(row[key]);
+      if (v) return v;
+    }
+  }
+  const norm = (s: string) => s.replace(/^\uFEFF/, "").toLowerCase().replace(/\s+/g, " ").trim();
+  const rowNorm = new Map<string, unknown>();
+  for (const k of Object.keys(row)) {
+    rowNorm.set(norm(k), row[k]);
+  }
+  for (const key of keys) {
+    const v = str(rowNorm.get(norm(key)));
+    if (v) return v;
+  }
+  return "";
+}
+
 export async function importOrganizersFromFile(params: {
   buffer: Buffer;
   adminId?: string;
@@ -50,23 +70,42 @@ export async function importOrganizersFromFile(params: {
     const row = rows[index];
     const rowNo = index + 2;
     try {
-      const email = str(row.email);
+      const email = pickCell(row, "email", "Email");
       if (!email) throw new Error("email is required");
 
-      const country = str(row.country);
-      const state = str(row.state);
-      const city = str(row.city);
-      const headquarters = str(row.headquarters) || [city, state, country].filter(Boolean).join(", ");
+      const organizationName = pickCell(
+        row,
+        "Organization Name",
+        "organizationName",
+        "company",
+        "Company",
+      );
+      const country = pickCell(row, "country", "Country");
+      const state = pickCell(row, "state", "State");
+      const city = pickCell(row, "city", "City");
+      const headquarters = pickCell(
+        row,
+        "company headquarters address",
+        "Company Headquarters Address",
+        "headquarters",
+        "Headquarters",
+      );
+      const website = pickCell(row, "website", "Website");
+      const phone = pickCell(row, "phone number", "Phone Number", "phone", "Phone");
 
       const payload = {
         firstName: str(row.firstName) || "Organizer",
         lastName: str(row.lastName),
         email,
-        phone: str(row.phone) || undefined,
-        company: str(row.company || row.organizationName) || undefined,
-        organizationName: str(row.organizationName || row.company) || undefined,
+        phone: phone || undefined,
+        website: website || undefined,
+        company: organizationName || undefined,
+        organizationName: organizationName || undefined,
         description: str(row.description) || undefined,
         headquarters: headquarters || undefined,
+        organizerCountry: country || undefined,
+        organizerState: state || undefined,
+        organizerCity: city || undefined,
         founded: str(row.founded) || undefined,
         teamSize: str(row.teamSize) || undefined,
         specialties: splitList(row.specialties),
@@ -113,15 +152,22 @@ export async function importVenuesFromFile(params: {
   const rows = parseRows(params.buffer);
   const errors: ImportError[] = [];
   let successCount = 0;
+  const seenVenueNames = new Set<string>();
 
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index];
     const rowNo = index + 2;
     try {
-      const email = str(row.email);
-      const venueName = str(row.venueName);
+      const email = pickCell(row, "email", "Email");
+      const venueName = pickCell(row, "venueName", "Venue Name", "name");
       if (!email) throw new Error("email is required");
       if (!venueName) throw new Error("venueName is required");
+
+      const venueNorm = normalizeVenueName(venueName);
+      if (seenVenueNames.has(venueNorm)) {
+        throw new Error(`Duplicate venue name in file: "${venueName}"`);
+      }
+      seenVenueNames.add(venueNorm);
 
       const payload = {
         email,
