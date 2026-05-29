@@ -10,6 +10,7 @@ import {
   adminApproveEventHandler,
   adminRejectEventHandler,
   adminGetDashboardHandler,
+  adminGetEventOverviewHandler,
   adminVerifyEventHandler,
   adminGetEventMailCandidatesHandler,
   adminSendEventListingEmailHandler,
@@ -85,6 +86,7 @@ router.post("/events/approve", requireAdmin, requirePermission("approve_events")
 router.post("/events/reject", requireAdmin, requirePermission("approve_events"), adminRejectEventHandler);
 
 // ─── Dashboard ─────────────────────────────────────────────────────────────
+router.get("/dashboard/event-overview", requireAdmin, adminGetEventOverviewHandler);
 router.get("/dashboard", requireAdmin, adminGetDashboardHandler);
 
 // ─── Public site: contact form submissions ───────────────────────────────────

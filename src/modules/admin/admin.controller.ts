@@ -10,6 +10,8 @@ import {
   adminListVenues,
   adminListVisitors,
   adminGetDashboardSummary,
+  adminGetEventOverviewTrend,
+  parseEventOverviewRange,
   adminListEventCategories,
   adminVerifyEvent,
   adminGetEventMailCandidates,
@@ -334,9 +336,10 @@ export async function adminGetVisitorsHandler(_req: Request, res: Response) {
   }
 }
 
-export async function adminGetDashboardHandler(_req: Request, res: Response) {
+export async function adminGetDashboardHandler(req: Request, res: Response) {
   try {
-    const summary = await adminGetDashboardSummary();
+    const eventRange = parseEventOverviewRange(req.query.eventRange);
+    const summary = await adminGetDashboardSummary(eventRange);
 
     return res.json({
       success: true,
@@ -348,6 +351,25 @@ export async function adminGetDashboardHandler(_req: Request, res: Response) {
     return res.status(500).json({
       success: false,
       error: "Failed to fetch dashboard data",
+      details: error.message,
+    });
+  }
+}
+
+export async function adminGetEventOverviewHandler(req: Request, res: Response) {
+  try {
+    const range = parseEventOverviewRange(req.query.range);
+    const overview = await adminGetEventOverviewTrend(range);
+    return res.json({
+      success: true,
+      data: overview,
+    });
+  } catch (error: any) {
+    // eslint-disable-next-line no-console
+    console.error("Admin get event overview error (backend):", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to fetch event overview",
       details: error.message,
     });
   }

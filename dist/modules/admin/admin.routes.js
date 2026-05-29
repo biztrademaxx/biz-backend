@@ -62,6 +62,7 @@ router.post("/events", auth_middleware_1.requireAdmin, events_controller_1.creat
 router.post("/events/approve", auth_middleware_1.requireAdmin, (0, auth_middleware_1.requirePermission)("approve_events"), admin_controller_1.adminApproveEventHandler);
 router.post("/events/reject", auth_middleware_1.requireAdmin, (0, auth_middleware_1.requirePermission)("approve_events"), admin_controller_1.adminRejectEventHandler);
 // ─── Dashboard ─────────────────────────────────────────────────────────────
+router.get("/dashboard/event-overview", auth_middleware_1.requireAdmin, admin_controller_1.adminGetEventOverviewHandler);
 router.get("/dashboard", auth_middleware_1.requireAdmin, admin_controller_1.adminGetDashboardHandler);
 // ─── Public site: contact form submissions ───────────────────────────────────
 router.get("/contact-inquiries", auth_middleware_1.requireAdmin, contact_inquiries_controller_1.listContactInquiriesHandler);

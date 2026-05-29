@@ -796,46 +796,148 @@ export async function adminListVisitors() {
   return registrations;
 }
 
-function buildLast30DaysTrend(
+export type EventOverviewRange = "1m" | "3m" | "1y";
+
+export function parseEventOverviewRange(raw: unknown): EventOverviewRange {
+  const v = String(raw ?? "1m").toLowerCase().trim();
+  if (v === "3m" || v === "3months" || v === "3-months") return "3m";
+  if (v === "1y" || v === "1year" || v === "12m" || v === "1-year") return "1y";
+  return "1m";
+}
+
+function eventOverviewRangeDays(range: EventOverviewRange): number {
+  switch (range) {
+    case "3m":
+      return 90;
+    case "1y":
+      return 365;
+    default:
+      return 30;
+  }
+}
+
+function startOfWeekMonday(d: Date): Date {
+  const day = d.getDay();
+  const diff = (day + 6) % 7;
+  const out = new Date(d);
+  out.setDate(out.getDate() - diff);
+  out.setHours(0, 0, 0, 0);
+  return out;
+}
+
+function eventTrendBucketKey(d: Date, range: EventOverviewRange): string {
+  if (range === "1y") {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  }
+  if (range === "3m") {
+    return startOfWeekMonday(d).toISOString().slice(0, 10);
+  }
+  return d.toISOString().slice(0, 10);
+}
+
+type EventTrendRow = {
+  key: string;
+  label: string;
+  eventsCreated: number;
+  publishedEvents: number;
+  registrations: number;
+};
+
+function buildEventOverviewTrend(
   events: { createdAt: Date; status: EventStatus }[],
   regs: { registeredAt: Date }[],
-) {
-  const days: {
-    key: string
-    label: string
-    eventsCreated: number
-    publishedEvents: number
-    registrations: number
-  }[] = []
-  const now = new Date()
-  for (let i = 29; i >= 0; i--) {
-    const d = new Date(now)
-    d.setDate(d.getDate() - i)
-    d.setHours(0, 0, 0, 0)
-    const key = d.toISOString().slice(0, 10)
-    days.push({
-      key,
-      label: `${d.getDate()} ${d.toLocaleString("en-GB", { month: "short" })}`,
-      eventsCreated: 0,
-      publishedEvents: 0,
-      registrations: 0,
-    })
+  range: EventOverviewRange,
+): EventTrendRow[] {
+  const now = new Date();
+  const buckets: EventTrendRow[] = [];
+  const bucketMap = new Map<string, EventTrendRow>();
+
+  if (range === "1y") {
+    for (let m = 11; m >= 0; m--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - m, 1);
+      const key = eventTrendBucketKey(d, range);
+      const row: EventTrendRow = {
+        key,
+        label: d.toLocaleString("en-GB", { month: "short", year: "2-digit" }),
+        eventsCreated: 0,
+        publishedEvents: 0,
+        registrations: 0,
+      };
+      buckets.push(row);
+      bucketMap.set(key, row);
+    }
+  } else if (range === "3m") {
+    const endWeek = startOfWeekMonday(now);
+    for (let w = 12; w >= 0; w--) {
+      const d = new Date(endWeek);
+      d.setDate(d.getDate() - w * 7);
+      const key = eventTrendBucketKey(d, range);
+      const row: EventTrendRow = {
+        key,
+        label: `${d.getDate()} ${d.toLocaleString("en-GB", { month: "short" })}`,
+        eventsCreated: 0,
+        publishedEvents: 0,
+        registrations: 0,
+      };
+      buckets.push(row);
+      bucketMap.set(key, row);
+    }
+  } else {
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      d.setHours(0, 0, 0, 0);
+      const key = eventTrendBucketKey(d, range);
+      const row: EventTrendRow = {
+        key,
+        label: `${d.getDate()} ${d.toLocaleString("en-GB", { month: "short" })}`,
+        eventsCreated: 0,
+        publishedEvents: 0,
+        registrations: 0,
+      };
+      buckets.push(row);
+      bucketMap.set(key, row);
+    }
   }
-  const dayMap = new Map(days.map((x) => [x.key, x]))
+
   for (const e of events) {
-    const k = e.createdAt.toISOString().slice(0, 10)
-    const row = dayMap.get(k)
+    const k = eventTrendBucketKey(e.createdAt, range);
+    const row = bucketMap.get(k);
     if (row) {
-      row.eventsCreated += 1
-      if (e.status === "PUBLISHED") row.publishedEvents += 1
+      row.eventsCreated += 1;
+      if (e.status === "PUBLISHED") row.publishedEvents += 1;
     }
   }
   for (const r of regs) {
-    const k = r.registeredAt.toISOString().slice(0, 10)
-    const row = dayMap.get(k)
-    if (row) row.registrations += 1
+    const k = eventTrendBucketKey(r.registeredAt, range);
+    const row = bucketMap.get(k);
+    if (row) row.registrations += 1;
   }
-  return days
+  return buckets;
+}
+
+export async function adminGetEventOverviewTrend(range: EventOverviewRange = "1m") {
+  const start = new Date();
+  start.setDate(start.getDate() - eventOverviewRangeDays(range));
+  start.setHours(0, 0, 0, 0);
+
+  const [eventsForTrend, regsForTrend] = await Promise.all([
+    prisma.event.findMany({
+      where: { createdAt: { gte: start } },
+      select: { createdAt: true, status: true },
+    }),
+    prisma.eventRegistration.findMany({
+      where: { registeredAt: { gte: start }, status: "CONFIRMED" },
+      select: { registeredAt: true },
+    }),
+  ]);
+
+  return {
+    range,
+    trend: buildEventOverviewTrend(eventsForTrend, regsForTrend, range),
+    periodStart: start.toISOString(),
+    periodEnd: new Date().toISOString(),
+  };
 }
 
 const EVENT_STATUS_DONUT_COLORS: Record<string, string> = {
@@ -847,10 +949,10 @@ const EVENT_STATUS_DONUT_COLORS: Record<string, string> = {
   COMPLETED: "#3b82f6",
 }
 
-export async function adminGetDashboardSummary() {
-  const thirtyDaysAgo = new Date()
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
-  thirtyDaysAgo.setHours(0, 0, 0, 0)
+export async function adminGetDashboardSummary(eventRange: EventOverviewRange = "1m") {
+  const rangeStart = new Date()
+  rangeStart.setDate(rangeStart.getDate() - eventOverviewRangeDays(eventRange))
+  rangeStart.setHours(0, 0, 0, 0)
 
   const eventCardSelect = {
     id: true,
@@ -916,11 +1018,11 @@ export async function adminGetDashboardSummary() {
       },
     }),
     prisma.event.findMany({
-      where: { createdAt: { gte: thirtyDaysAgo } },
+      where: { createdAt: { gte: rangeStart } },
       select: { createdAt: true, status: true },
     }),
     prisma.eventRegistration.findMany({
-      where: { registeredAt: { gte: thirtyDaysAgo }, status: "CONFIRMED" },
+      where: { registeredAt: { gte: rangeStart }, status: "CONFIRMED" },
       select: { registeredAt: true },
     }),
     prisma.event.groupBy({
@@ -952,7 +1054,7 @@ export async function adminGetDashboardSummary() {
     }),
   ])
 
-  const trend = buildLast30DaysTrend(eventsForTrend, regsForTrend)
+  const trend = buildEventOverviewTrend(eventsForTrend, regsForTrend, eventRange)
 
   const registrationsByStatus = statusBreakdown
     .filter((row) => (row._count.id ?? 0) > 0)
@@ -986,6 +1088,7 @@ export async function adminGetDashboardSummary() {
     upcomingEvents,
     dashboardCharts: {
       trend,
+      eventRange,
     },
     registrationsByStatus,
     topEvents,
