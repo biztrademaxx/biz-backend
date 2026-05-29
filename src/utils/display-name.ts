@@ -29,7 +29,8 @@ export function getDisplayName(user: DisplayNameUserInput): string {
 
   switch (role) {
     case "ORGANIZER": {
-      const org = normalizeWhitespace(user.organizationName);
+      const org =
+        normalizeWhitespace(user.organizationName) || normalizeWhitespace(user.company);
       if (org) return org;
       const fn = normalizeWhitespace(user.firstName);
       if (fn) return fn;
