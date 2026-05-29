@@ -100,16 +100,25 @@ async function listOrganizers(options) {
         }
         const foundedYear = organizer.founded ? parseInt(organizer.founded) : new Date().getFullYear();
         const yearsOfExperience = Number.isNaN(foundedYear) ? 0 : new Date().getFullYear() - foundedYear;
-        const structuredLocation = [organizer.organizerCity, organizer.organizerState, organizer.organizerCountry]
-            .map((x) => String(x ?? "").trim())
-            .filter(Boolean)
-            .join(", ");
+        const city = String(organizer.organizerCity ?? "").trim();
+        const state = String(organizer.organizerState ?? "").trim();
+        const country = String(organizer.organizerCountry ?? "").trim();
+        const structuredLocation = [city, state, country].filter(Boolean).join(", ");
         const displayName = (0, display_name_1.getDisplayName)({
             role: "ORGANIZER",
             firstName: organizer.firstName,
             lastName: organizer.lastName,
             organizationName: organizer.organizationName,
+            company: organizer.company,
         });
+        const companyLabel = String(organizer.organizationName ?? "").trim() ||
+            String(organizer.company ?? "").trim() ||
+            displayName;
+        const hqRaw = String(organizer.headquarters ?? "").trim();
+        const locRaw = String(organizer.location ?? "").trim();
+        const locationLine = structuredLocation ||
+            (hqRaw && !/^not specified$/i.test(hqRaw) ? hqRaw : "") ||
+            (locRaw && !/^not specified$/i.test(locRaw) ? locRaw : "");
         return {
             id: organizer.id,
             name: displayName,
@@ -121,16 +130,18 @@ async function listOrganizers(options) {
                 organizationName: organizer.organizationName,
                 company: organizer.company,
             }, "ORGANIZER"),
-            company: organizer.organizationName || "",
+            company: companyLabel,
+            city,
+            state,
+            country,
             image: requireProfileImage
                 ? organizer.avatar ?? ""
                 : organizer.avatar || null,
             avgRating: organizer.averageRating || 0,
             totalReviews: organizer.totalReviews || 0,
-            headquarters: structuredLocation || organizer.headquarters || organizer.location || "Not specified",
+            headquarters: locationLine || "Location not specified",
             reviewCount: organizer.totalReviews || 0,
-            location: organizer.location || "Not specified",
-            country: organizer.organizerCountry?.trim() || "India",
+            location: locationLine || locRaw || "Location not specified",
             category: organizer.specialties?.[0] || "General Events",
             eventsOrganized: organizer.organizedEvents.length,
             yearsOfExperience,
