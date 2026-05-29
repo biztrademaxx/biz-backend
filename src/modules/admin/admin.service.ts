@@ -96,22 +96,110 @@ export async function updateAdminEvent(params: UpdateAdminEventParams) {
   return event;
 }
 
+function adminEventDayBounds() {
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const endOfToday = new Date();
+  endOfToday.setHours(23, 59, 59, 999);
+  return { startOfToday, endOfToday };
+}
+
+function mapAdminStatusFilter(status: string): EventStatus | undefined {
+  const key = status.trim().toLowerCase();
+  if (!key || key === "all") return undefined;
+  switch (key) {
+    case "approved":
+    case "published":
+      return EventStatus.PUBLISHED;
+    case "pending":
+    case "pendingreview":
+    case "pending_review":
+      return EventStatus.PENDING_APPROVAL;
+    case "rejected":
+      return EventStatus.REJECTED;
+    case "draft":
+      return EventStatus.DRAFT;
+    case "flagged":
+    case "cancelled":
+      return EventStatus.CANCELLED;
+    default: {
+      const upper = status.trim().toUpperCase();
+      if (Object.values(EventStatus).includes(upper as EventStatus)) {
+        return upper as EventStatus;
+      }
+      return undefined;
+    }
+  }
+}
+
+function applyAdminEventTabFilter(where: Record<string, unknown>, tab?: string) {
+  const key = (tab || "all").trim().toLowerCase();
+  if (!key || key === "all" || key === "send-email") return;
+
+  const { startOfToday, endOfToday } = adminEventDayBounds();
+
+  switch (key) {
+    case "featured":
+      where.isFeatured = true;
+      break;
+    case "pending":
+      where.status = EventStatus.PENDING_APPROVAL;
+      break;
+    case "approved":
+      where.status = EventStatus.PUBLISHED;
+      break;
+    case "ended":
+      where.endDate = { lt: startOfToday };
+      break;
+    case "live":
+      where.startDate = { lte: endOfToday };
+      where.endDate = { gte: startOfToday };
+      break;
+    case "upcoming":
+      where.startDate = { gt: endOfToday };
+      break;
+    case "flagged":
+      where.status = EventStatus.CANCELLED;
+      break;
+    case "vip":
+      where.isVIP = true;
+      break;
+    case "verified":
+      where.isVerified = true;
+      break;
+    default:
+      break;
+  }
+}
+
 export interface AdminListEventsParams {
   page?: number;
   limit?: number;
   status?: string;
   search?: string;
+  tab?: string;
+  category?: string;
 }
 
 export async function adminListEvents(params: AdminListEventsParams) {
   const page = params.page && params.page > 0 ? params.page : 1;
-  const limit = params.limit && params.limit > 0 ? params.limit : 20;
+  const limit = params.limit && params.limit > 0 ? params.limit : 15;
   const skip = (page - 1) * limit;
 
-  const where: any = {};
-  if (params.status) {
-    where.status = params.status.toUpperCase();
+  const where: Record<string, unknown> = {};
+
+  applyAdminEventTabFilter(where, params.tab);
+
+  const mappedStatus = params.status ? mapAdminStatusFilter(params.status) : undefined;
+  if (mappedStatus) {
+    where.status = mappedStatus;
   }
+
+  const category = (params.category || "").trim();
+  if (category && category.toLowerCase() !== "all") {
+    where.category = { has: category };
+  }
+
   const search = (params.search || "").trim();
   if (search) {
     where.OR = [
@@ -252,13 +340,20 @@ export async function adminListEvents(params: AdminListEventsParams) {
 }
 
 export async function adminGetEventStats() {
-  const [total, approved, rejected, pending] = await Promise.all([
+  const { startOfToday, endOfToday } = adminEventDayBounds();
+  const [total, approved, rejected, pending, featured, live, upcoming, ended] = await Promise.all([
     prisma.event.count(),
     prisma.event.count({ where: { status: "PUBLISHED" } }),
     prisma.event.count({ where: { status: "REJECTED" } }),
     prisma.event.count({ where: { status: "PENDING_APPROVAL" } }),
+    prisma.event.count({ where: { isFeatured: true } }),
+    prisma.event.count({
+      where: { startDate: { lte: endOfToday }, endDate: { gte: startOfToday } },
+    }),
+    prisma.event.count({ where: { startDate: { gt: endOfToday } } }),
+    prisma.event.count({ where: { endDate: { lt: startOfToday } } }),
   ]);
-  return { total, approved, rejected, pending };
+  return { total, approved, rejected, pending, featured, live, upcoming, ended };
 }
 
 export async function adminGetEventById(id: string) {

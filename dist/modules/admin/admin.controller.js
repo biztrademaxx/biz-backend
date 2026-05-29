@@ -21,7 +21,9 @@ async function adminGetEventsHandler(req, res) {
         const limit = req.query.limit ? Number(req.query.limit) : undefined;
         const status = req.query.status ?? undefined;
         const search = req.query.search ?? undefined;
-        const result = await (0, admin_service_1.adminListEvents)({ page, limit, status, search });
+        const tab = req.query.tab ?? undefined;
+        const category = req.query.category ?? undefined;
+        const result = await (0, admin_service_1.adminListEvents)({ page, limit, status, search, tab, category });
         return res.json({
             success: true,
             events: result.events,
@@ -48,6 +50,10 @@ async function adminGetEventStatsHandler(_req, res) {
                 approved: stats.approved,
                 rejected: stats.rejected,
                 pending: stats.pending,
+                featured: stats.featured,
+                live: stats.live,
+                upcoming: stats.upcoming,
+                ended: stats.ended,
             },
         });
     }

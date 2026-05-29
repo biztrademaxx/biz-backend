@@ -22,8 +22,10 @@ export async function adminGetEventsHandler(req: Request, res: Response) {
     const limit = req.query.limit ? Number(req.query.limit) : undefined;
     const status = (req.query.status as string | undefined) ?? undefined;
     const search = (req.query.search as string | undefined) ?? undefined;
+    const tab = (req.query.tab as string | undefined) ?? undefined;
+    const category = (req.query.category as string | undefined) ?? undefined;
 
-    const result = await adminListEvents({ page, limit, status, search });
+    const result = await adminListEvents({ page, limit, status, search, tab, category });
 
     return res.json({
       success: true,
@@ -51,6 +53,10 @@ export async function adminGetEventStatsHandler(_req: Request, res: Response) {
         approved: stats.approved,
         rejected: stats.rejected,
         pending: stats.pending,
+        featured: stats.featured,
+        live: stats.live,
+        upcoming: stats.upcoming,
+        ended: stats.ended,
       },
     });
   } catch (error: any) {
