@@ -207,10 +207,16 @@ async function importBulk(req, res) {
             adminId: auth.sub,
             adminType: auth.role === "SUB_ADMIN" ? "SUB_ADMIN" : "SUPER_ADMIN",
         });
+        const parts = [];
+        if (result.createdCount > 0)
+            parts.push(`${result.createdCount} created`);
+        if (result.updatedCount > 0)
+            parts.push(`${result.updatedCount} updated`);
+        const summary = parts.length > 0 ? parts.join(", ") : "0 rows applied";
         return res.status(200).json({
             success: true,
             ...result,
-            message: `Imported ${result.successCount} organizer(s) with ${result.errorCount} error(s).`,
+            message: `${summary} (${result.errorCount} error(s)). Re-uploading the same file updates country, state, and city by email.`,
         });
     }
     catch (e) {

@@ -40,6 +40,11 @@ export async function listOrganizers(query: Record<string, unknown>) {
         organizationName: true,
         description: true,
         headquarters: true,
+        location: true,
+        organizerCountry: true,
+        organizerState: true,
+        organizerCity: true,
+        website: true,
         founded: true,
         teamSize: true,
         specialties: true,
@@ -81,6 +86,11 @@ export async function listOrganizers(query: Record<string, unknown>) {
     organizationName: u.organizationName,
     description: u.description,
     headquarters: u.headquarters,
+    location: u.location,
+    organizerCountry: u.organizerCountry,
+    organizerState: u.organizerState,
+    organizerCity: u.organizerCity,
+    website: u.website,
     founded: u.founded,
     teamSize: u.teamSize,
     specialties: u.specialties,
@@ -120,6 +130,12 @@ export async function getOrganizerById(id: string) {
       activeEvents: true,
       description: true,
       website: true,
+      headquarters: true,
+      location: true,
+      organizerCountry: true,
+      organizerState: true,
+      organizerCity: true,
+      organizationName: true,
     },
   });
   if (!user) return null;
@@ -185,6 +201,10 @@ export async function updateOrganizer(id: string, body: Record<string, unknown>)
     "organizationName",
     "description",
     "headquarters",
+    "organizerCountry",
+    "organizerState",
+    "organizerCity",
+    "location",
     "founded",
     "teamSize",
     "businessEmail",
@@ -198,6 +218,26 @@ export async function updateOrganizer(id: string, body: Record<string, unknown>)
   const data: Record<string, unknown> = {};
   for (const k of allowed) {
     if (body[k] !== undefined) data[k] = body[k];
+  }
+  if (
+    body.organizerCountry !== undefined ||
+    body.organizerState !== undefined ||
+    body.organizerCity !== undefined
+  ) {
+    const city =
+      body.organizerCity !== undefined
+        ? String(body.organizerCity).trim()
+        : (existing.organizerCity ?? "");
+    const state =
+      body.organizerState !== undefined
+        ? String(body.organizerState).trim()
+        : (existing.organizerState ?? "");
+    const country =
+      body.organizerCountry !== undefined
+        ? String(body.organizerCountry).trim()
+        : (existing.organizerCountry ?? "");
+    const locationLine = [city, state, country].filter(Boolean).join(", ");
+    data.location = locationLine || null;
   }
   if (body.specialties !== undefined) {
     data.specialties = Array.isArray(body.specialties) ? body.specialties.map((s) => String(s)) : [];
