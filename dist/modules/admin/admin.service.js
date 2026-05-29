@@ -171,6 +171,30 @@ function applyAdminEventTabFilter(where, tab) {
             break;
     }
 }
+function applyAdminCountryFilter(where, country) {
+    const name = (country || "").trim();
+    if (!name || name.toLowerCase() === "all")
+        return;
+    const countryClause = {
+        OR: [
+            { country: { equals: name, mode: "insensitive" } },
+            { venue: { is: { venueCountry: { equals: name, mode: "insensitive" } } } },
+        ],
+    };
+    if (Array.isArray(where.AND)) {
+        where.AND.push(countryClause);
+    }
+    else if (Object.keys(where).length > 0) {
+        const existing = { ...where };
+        where.AND = [existing, countryClause];
+        for (const key of Object.keys(existing)) {
+            delete where[key];
+        }
+    }
+    else {
+        Object.assign(where, countryClause);
+    }
+}
 async function adminListEvents(params) {
     const page = params.page && params.page > 0 ? params.page : 1;
     const limit = params.limit && params.limit > 0 ? params.limit : 15;
@@ -185,22 +209,38 @@ async function adminListEvents(params) {
     if (category && category.toLowerCase() !== "all") {
         where.category = { has: category };
     }
+    applyAdminCountryFilter(where, params.country);
     const search = (params.search || "").trim();
     if (search) {
-        where.OR = [
-            { title: { contains: search, mode: "insensitive" } },
-            { description: { contains: search, mode: "insensitive" } },
-            { rejectionReason: { contains: search, mode: "insensitive" } },
-            {
-                organizer: {
-                    OR: [
-                        { firstName: { contains: search, mode: "insensitive" } },
-                        { lastName: { contains: search, mode: "insensitive" } },
-                        { email: { contains: search, mode: "insensitive" } },
-                    ],
+        const searchClause = {
+            OR: [
+                { title: { contains: search, mode: "insensitive" } },
+                { description: { contains: search, mode: "insensitive" } },
+                { rejectionReason: { contains: search, mode: "insensitive" } },
+                {
+                    organizer: {
+                        OR: [
+                            { firstName: { contains: search, mode: "insensitive" } },
+                            { lastName: { contains: search, mode: "insensitive" } },
+                            { email: { contains: search, mode: "insensitive" } },
+                        ],
+                    },
                 },
-            },
-        ];
+            ],
+        };
+        if (Array.isArray(where.AND)) {
+            where.AND.push(searchClause);
+        }
+        else if (Object.keys(where).length > 0) {
+            const existing = { ...where };
+            where.AND = [existing, searchClause];
+            for (const key of Object.keys(existing)) {
+                delete where[key];
+            }
+        }
+        else {
+            Object.assign(where, searchClause);
+        }
     }
     const [rawEvents, total] = await Promise.all([
         prisma_1.default.event.findMany({
@@ -259,7 +299,7 @@ async function adminListEvents(params) {
             "Not specified",
         city: event.venue?.venueCity ?? "Not specified",
         state: event.venue?.venueState ?? "",
-        country: event.venue?.venueCountry ?? "",
+        country: event.country || event.venue?.venueCountry || "",
         status: toStatusLabel(event.status),
         statusRaw: event.status,
         category: Array.isArray(event.category) ? event.category : [],
@@ -321,19 +361,20 @@ async function adminListEvents(params) {
 }
 async function adminGetEventStats() {
     const { startOfToday, endOfToday } = adminEventDayBounds();
-    const [total, approved, rejected, pending, featured, live, upcoming, ended] = await Promise.all([
+    const [total, approved, rejected, pending, featured, vip, live, upcoming, ended] = await Promise.all([
         prisma_1.default.event.count(),
         prisma_1.default.event.count({ where: { status: "PUBLISHED" } }),
         prisma_1.default.event.count({ where: { status: "REJECTED" } }),
         prisma_1.default.event.count({ where: { status: "PENDING_APPROVAL" } }),
         prisma_1.default.event.count({ where: { isFeatured: true } }),
+        prisma_1.default.event.count({ where: { isVIP: true } }),
         prisma_1.default.event.count({
             where: { startDate: { lte: endOfToday }, endDate: { gte: startOfToday } },
         }),
         prisma_1.default.event.count({ where: { startDate: { gt: endOfToday } } }),
         prisma_1.default.event.count({ where: { endDate: { lt: startOfToday } } }),
     ]);
-    return { total, approved, rejected, pending, featured, live, upcoming, ended };
+    return { total, approved, rejected, pending, featured, vip, live, upcoming, ended };
 }
 async function adminGetEventById(id) {
     const event = await prisma_1.default.event.findUnique({

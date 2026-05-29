@@ -172,6 +172,28 @@ function applyAdminEventTabFilter(where: Record<string, unknown>, tab?: string) 
   }
 }
 
+function applyAdminCountryFilter(where: Record<string, unknown>, country?: string) {
+  const name = (country || "").trim();
+  if (!name || name.toLowerCase() === "all") return;
+  const countryClause = {
+    OR: [
+      { country: { equals: name, mode: "insensitive" } },
+      { venue: { is: { venueCountry: { equals: name, mode: "insensitive" } } } },
+    ],
+  };
+  if (Array.isArray(where.AND)) {
+    (where.AND as Record<string, unknown>[]).push(countryClause);
+  } else if (Object.keys(where).length > 0) {
+    const existing = { ...where };
+    where.AND = [existing, countryClause];
+    for (const key of Object.keys(existing)) {
+      delete where[key];
+    }
+  } else {
+    Object.assign(where, countryClause);
+  }
+}
+
 export interface AdminListEventsParams {
   page?: number;
   limit?: number;
@@ -179,6 +201,7 @@ export interface AdminListEventsParams {
   search?: string;
   tab?: string;
   category?: string;
+  country?: string;
 }
 
 export async function adminListEvents(params: AdminListEventsParams) {
@@ -200,9 +223,12 @@ export async function adminListEvents(params: AdminListEventsParams) {
     where.category = { has: category };
   }
 
+  applyAdminCountryFilter(where, params.country);
+
   const search = (params.search || "").trim();
   if (search) {
-    where.OR = [
+    const searchClause = {
+      OR: [
       { title: { contains: search, mode: "insensitive" } },
       { description: { contains: search, mode: "insensitive" } },
       { rejectionReason: { contains: search, mode: "insensitive" } },
@@ -215,7 +241,19 @@ export async function adminListEvents(params: AdminListEventsParams) {
           ],
         },
       },
-    ];
+      ],
+    };
+    if (Array.isArray(where.AND)) {
+      (where.AND as Record<string, unknown>[]).push(searchClause);
+    } else if (Object.keys(where).length > 0) {
+      const existing = { ...where };
+      where.AND = [existing, searchClause];
+      for (const key of Object.keys(existing)) {
+        delete where[key];
+      }
+    } else {
+      Object.assign(where, searchClause);
+    }
   }
 
   const [rawEvents, total] = await Promise.all([
@@ -277,7 +315,7 @@ export async function adminListEvents(params: AdminListEventsParams) {
       "Not specified",
     city: event.venue?.venueCity ?? "Not specified",
     state: event.venue?.venueState ?? "",
-    country: event.venue?.venueCountry ?? "",
+    country: event.country || event.venue?.venueCountry || "",
     status: toStatusLabel(event.status),
     statusRaw: event.status,
     category: Array.isArray(event.category) ? event.category : [],
@@ -341,19 +379,20 @@ export async function adminListEvents(params: AdminListEventsParams) {
 
 export async function adminGetEventStats() {
   const { startOfToday, endOfToday } = adminEventDayBounds();
-  const [total, approved, rejected, pending, featured, live, upcoming, ended] = await Promise.all([
+  const [total, approved, rejected, pending, featured, vip, live, upcoming, ended] = await Promise.all([
     prisma.event.count(),
     prisma.event.count({ where: { status: "PUBLISHED" } }),
     prisma.event.count({ where: { status: "REJECTED" } }),
     prisma.event.count({ where: { status: "PENDING_APPROVAL" } }),
     prisma.event.count({ where: { isFeatured: true } }),
+    prisma.event.count({ where: { isVIP: true } }),
     prisma.event.count({
       where: { startDate: { lte: endOfToday }, endDate: { gte: startOfToday } },
     }),
     prisma.event.count({ where: { startDate: { gt: endOfToday } } }),
     prisma.event.count({ where: { endDate: { lt: startOfToday } } }),
   ]);
-  return { total, approved, rejected, pending, featured, live, upcoming, ended };
+  return { total, approved, rejected, pending, featured, vip, live, upcoming, ended };
 }
 
 export async function adminGetEventById(id: string) {

@@ -24,8 +24,9 @@ export async function adminGetEventsHandler(req: Request, res: Response) {
     const search = (req.query.search as string | undefined) ?? undefined;
     const tab = (req.query.tab as string | undefined) ?? undefined;
     const category = (req.query.category as string | undefined) ?? undefined;
+    const country = (req.query.country as string | undefined) ?? undefined;
 
-    const result = await adminListEvents({ page, limit, status, search, tab, category });
+    const result = await adminListEvents({ page, limit, status, search, tab, category, country });
 
     return res.json({
       success: true,
@@ -54,6 +55,7 @@ export async function adminGetEventStatsHandler(_req: Request, res: Response) {
         rejected: stats.rejected,
         pending: stats.pending,
         featured: stats.featured,
+        vip: stats.vip,
         live: stats.live,
         upcoming: stats.upcoming,
         ended: stats.ended,
