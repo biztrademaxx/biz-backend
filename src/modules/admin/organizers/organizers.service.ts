@@ -8,14 +8,35 @@ const ROLE: UserRole = "ORGANIZER";
 
 export async function listOrganizers(query: Record<string, unknown>) {
   const { page, limit, search, skip, sort, order } = parseListQuery(query);
+  const country = String(query.country ?? "").trim();
   const where: any = { role: ROLE };
+  const filters: Record<string, unknown>[] = [];
+
   if (search) {
-    where.OR = [
-      { firstName: { contains: search, mode: "insensitive" } },
-      { lastName: { contains: search, mode: "insensitive" } },
-      { email: { contains: search, mode: "insensitive" } },
-      { company: { contains: search, mode: "insensitive" } },
-    ];
+    filters.push({
+      OR: [
+        { firstName: { contains: search, mode: "insensitive" } },
+        { lastName: { contains: search, mode: "insensitive" } },
+        { email: { contains: search, mode: "insensitive" } },
+        { company: { contains: search, mode: "insensitive" } },
+        { organizationName: { contains: search, mode: "insensitive" } },
+      ],
+    });
+  }
+
+  if (country && country.toLowerCase() !== "all") {
+    filters.push({
+      OR: [
+        { organizerCountry: { equals: country, mode: "insensitive" } },
+        { location: { contains: country, mode: "insensitive" } },
+        { headquarters: { contains: country, mode: "insensitive" } },
+        { businessAddress: { contains: country, mode: "insensitive" } },
+      ],
+    });
+  }
+
+  if (filters.length > 0) {
+    where.AND = filters;
   }
   const [items, total] = await Promise.all([
     prisma.user.findMany({

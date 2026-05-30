@@ -19,14 +19,32 @@ const email_service_1 = require("../../../services/email.service");
 const ROLE = "ORGANIZER";
 async function listOrganizers(query) {
     const { page, limit, search, skip, sort, order } = (0, admin_response_1.parseListQuery)(query);
+    const country = String(query.country ?? "").trim();
     const where = { role: ROLE };
+    const filters = [];
     if (search) {
-        where.OR = [
-            { firstName: { contains: search, mode: "insensitive" } },
-            { lastName: { contains: search, mode: "insensitive" } },
-            { email: { contains: search, mode: "insensitive" } },
-            { company: { contains: search, mode: "insensitive" } },
-        ];
+        filters.push({
+            OR: [
+                { firstName: { contains: search, mode: "insensitive" } },
+                { lastName: { contains: search, mode: "insensitive" } },
+                { email: { contains: search, mode: "insensitive" } },
+                { company: { contains: search, mode: "insensitive" } },
+                { organizationName: { contains: search, mode: "insensitive" } },
+            ],
+        });
+    }
+    if (country && country.toLowerCase() !== "all") {
+        filters.push({
+            OR: [
+                { organizerCountry: { equals: country, mode: "insensitive" } },
+                { location: { contains: country, mode: "insensitive" } },
+                { headquarters: { contains: country, mode: "insensitive" } },
+                { businessAddress: { contains: country, mode: "insensitive" } },
+            ],
+        });
+    }
+    if (filters.length > 0) {
+        where.AND = filters;
     }
     const [items, total] = await Promise.all([
         prisma_1.default.user.findMany({
