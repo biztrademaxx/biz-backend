@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import {
   listOrganizers,
+  listOrganizerFilterFacets,
   getOrganizerById,
   getOrganizerAnalytics,
   getOrganizerTotalAttendees,
@@ -23,14 +24,48 @@ import prisma from "../../config/prisma";
 import { updateEventByOrganizer, deleteEventByOrganizer } from "../events/events.service";
 import { createEventAdmin } from "../events/events-writes.service";
 
+export async function getOrganizerFacetsHandler(_req: Request, res: Response) {
+  try {
+    const facets = await listOrganizerFilterFacets();
+    return res.json(facets);
+  } catch (error: any) {
+    // eslint-disable-next-line no-console
+    console.error("Error fetching organizer facets (backend):", error);
+    return res.status(500).json({
+      error: "Internal server error",
+      details: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
 export async function getOrganizersHandler(req: Request, res: Response) {
   try {
     const requireProfileImage =
       req.query.requireProfileImage === "1" || req.query.requireProfileImage === "true";
-    const organizers = await listOrganizers({ requireProfileImage });
+    const paginate = req.query.page != null || req.query.limit != null;
+    const page = req.query.page ? parseInt(req.query.page as string, 10) : undefined;
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+    const search = typeof req.query.search === "string" ? req.query.search : undefined;
+    const country = typeof req.query.country === "string" ? req.query.country : undefined;
+    const city = typeof req.query.city === "string" ? req.query.city : undefined;
+    const category = typeof req.query.category === "string" ? req.query.category : undefined;
+
+    const result = await listOrganizers({
+      requireProfileImage,
+      paginate,
+      page,
+      limit,
+      search,
+      country,
+      city,
+      category,
+    });
     return res.json({
-      organizers,
-      total: organizers.length,
+      organizers: result.organizers,
+      total: result.total,
+      page: result.page,
+      limit: result.limit,
+      totalPages: result.totalPages,
     });
   } catch (error: any) {
     // eslint-disable-next-line no-console

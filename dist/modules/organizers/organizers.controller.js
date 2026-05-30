@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.getOrganizerFacetsHandler = getOrganizerFacetsHandler;
 exports.getOrganizersHandler = getOrganizersHandler;
 exports.getOrganizerHandler = getOrganizerHandler;
 exports.updateOrganizerProfileHandler = updateOrganizerProfileHandler;
@@ -29,13 +30,46 @@ const organizers_service_1 = require("./organizers.service");
 const prisma_1 = __importDefault(require("../../config/prisma"));
 const events_service_1 = require("../events/events.service");
 const events_writes_service_1 = require("../events/events-writes.service");
+async function getOrganizerFacetsHandler(_req, res) {
+    try {
+        const facets = await (0, organizers_service_1.listOrganizerFilterFacets)();
+        return res.json(facets);
+    }
+    catch (error) {
+        // eslint-disable-next-line no-console
+        console.error("Error fetching organizer facets (backend):", error);
+        return res.status(500).json({
+            error: "Internal server error",
+            details: error instanceof Error ? error.message : "Unknown error",
+        });
+    }
+}
 async function getOrganizersHandler(req, res) {
     try {
         const requireProfileImage = req.query.requireProfileImage === "1" || req.query.requireProfileImage === "true";
-        const organizers = await (0, organizers_service_1.listOrganizers)({ requireProfileImage });
+        const paginate = req.query.page != null || req.query.limit != null;
+        const page = req.query.page ? parseInt(req.query.page, 10) : undefined;
+        const limit = req.query.limit ? parseInt(req.query.limit, 10) : undefined;
+        const search = typeof req.query.search === "string" ? req.query.search : undefined;
+        const country = typeof req.query.country === "string" ? req.query.country : undefined;
+        const city = typeof req.query.city === "string" ? req.query.city : undefined;
+        const category = typeof req.query.category === "string" ? req.query.category : undefined;
+        const result = await (0, organizers_service_1.listOrganizers)({
+            requireProfileImage,
+            paginate,
+            page,
+            limit,
+            search,
+            country,
+            city,
+            category,
+        });
         return res.json({
-            organizers,
-            total: organizers.length,
+            organizers: result.organizers,
+            total: result.total,
+            page: result.page,
+            limit: result.limit,
+            totalPages: result.totalPages,
         });
     }
     catch (error) {

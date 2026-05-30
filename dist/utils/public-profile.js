@@ -1,6 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.activePublicProfileUserWhere = activePublicProfileUserWhere;
+exports.publicOrganizerListingWhere = publicOrganizerListingWhere;
+exports.organizerHasPublicDirectoryLocation = organizerHasPublicDirectoryLocation;
 exports.publicPublishedEventWhere = publicPublishedEventWhere;
 exports.canUserViewOwnPrivateProfile = canUserViewOwnPrivateProfile;
 exports.canBypassEventPrivacy = canBypassEventPrivacy;
@@ -15,6 +17,22 @@ function activePublicProfileUserWhere() {
         isActive: true,
         NOT: { profileVisibility: "private" },
     };
+}
+/** Public /organizers directory: verified accounts plus bulk-imported rows with a country on file. */
+function publicOrganizerListingWhere() {
+    return {
+        role: "ORGANIZER",
+        ...activePublicProfileUserWhere(),
+        OR: [
+            { isVerified: true },
+            {
+                AND: [{ organizerCountry: { not: null } }, { NOT: { organizerCountry: "" } }],
+            },
+        ],
+    };
+}
+function organizerHasPublicDirectoryLocation(organizer) {
+    return Boolean(String(organizer.organizerCountry ?? "").trim());
 }
 /**
  * Published events visible on the public site: organizer (and venue, if any)

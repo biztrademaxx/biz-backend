@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   getOrganizersHandler,
+  getOrganizerFacetsHandler,
   getOrganizerHandler,
   getOrganizerAnalyticsHandler,
   getOrganizerTotalAttendeesHandler,
@@ -24,11 +25,16 @@ import {
   getOrganizerConnectionsHandler,
 } from "./organizers.controller";
 import { requireUser, optionalUser } from "../../middleware/auth.middleware";
+import {
+  publicOrganizersFacetsLimiter,
+  publicOrganizersListLimiter,
+} from "../../middleware/public-directory-rate-limit";
 
 const router = Router();
 
 // List organizers
-router.get("/organizers", getOrganizersHandler);
+router.get("/organizers/facets", publicOrganizersFacetsLimiter, getOrganizerFacetsHandler);
+router.get("/organizers", publicOrganizersListLimiter, getOrganizersHandler);
 
 // Single organizer details (optional JWT so the organizer can view their own private profile)
 router.get("/organizers/:id", optionalUser, getOrganizerHandler);
