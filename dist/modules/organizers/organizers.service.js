@@ -241,7 +241,8 @@ async function listOrganizers(options = {}) {
     const limit = options.limit && options.limit > 0 ? Math.min(options.limit, 30) : 20;
     const where = buildPublicOrganizerListWhere(options);
     const skip = paginate ? (page - 1) * limit : 0;
-    const take = paginate ? limit : 50;
+    /** Featured-home scan must not stop at the first alphabetical page before image filtering. */
+    const take = paginate ? limit : requireProfileImage ? 5000 : 50;
     const [organizers, total] = await Promise.all([
         prisma_1.default.user.findMany({
             where,
