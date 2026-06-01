@@ -3,9 +3,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const organizers_controller_1 = require("./organizers.controller");
 const auth_middleware_1 = require("../../middleware/auth.middleware");
+const public_directory_rate_limit_1 = require("../../middleware/public-directory-rate-limit");
 const router = (0, express_1.Router)();
 // List organizers
-router.get("/organizers", organizers_controller_1.getOrganizersHandler);
+router.get("/organizers/facets", public_directory_rate_limit_1.publicOrganizersFacetsLimiter, organizers_controller_1.getOrganizerFacetsHandler);
+router.get("/organizers", public_directory_rate_limit_1.publicOrganizersListLimiter, organizers_controller_1.getOrganizersHandler);
 // Single organizer details (optional JWT so the organizer can view their own private profile)
 router.get("/organizers/:id", auth_middleware_1.optionalUser, organizers_controller_1.getOrganizerHandler);
 // Organizer updates their own profile

@@ -3,6 +3,8 @@ import type { Prisma } from "@prisma/client";
 import {
   activePublicProfileUserWhere,
   canUserViewOwnPrivateProfile,
+  organizerHasPublicDirectoryLocation,
+  publicOrganizerListingWhere,
   publicPublishedEventWhere,
 } from "../../utils/public-profile";
 import { hasPublicProfileImage } from "../../utils/profile-image";
@@ -11,51 +13,158 @@ import { getPublicProfileSlug, isUuidLike, publicSlugRequestMatches } from "../.
 
 // ---------- List organizers ----------
 
-export async function listOrganizers(options?: { requireProfileImage?: boolean }) {
-  const requireProfileImage = options?.requireProfileImage ?? false;
+export interface ListOrganizersOptions {
+  requireProfileImage?: boolean;
+  paginate?: boolean;
+  page?: number;
+  limit?: number;
+  search?: string;
+  country?: string;
+  city?: string;
+  category?: string;
+}
 
-  const organizers = await prisma.user.findMany({
-    where: { role: "ORGANIZER", ...activePublicProfileUserWhere(), isVerified: true },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      email: true,
-      phone: true,
-      avatar: true,
-      bio: true,
-      website: true,
-      location: true,
-      organizationName: true,
-      company: true,
-      description: true,
-      headquarters: true,
-      organizerCountry: true,
-      organizerState: true,
-      organizerCity: true,
-      totalReviews: true,
-      averageRating: true,
-      founded: true,
-      teamSize: true,
-      specialties: true,
-      isVerified: true,
-      isActive: true,
-      profileVisibility: true,
-      createdAt: true,
-      updatedAt: true,
-      organizedEvents: {
-        where: { status: "PUBLISHED" },
-        select: { id: true },
-      },
-    },
-  });
+/** Card/list payload only — omit contact fields and internal metrics scrapers could harvest. */
+export function sanitizePublicOrganizerListItem(
+  item: Awaited<ReturnType<typeof mapOrganizerListRows>>[number],
+) {
+  return {
+    id: item.id,
+    name: item.name,
+    displayName: item.displayName,
+    publicSlug: item.publicSlug,
+    company: item.company,
+    city: item.city,
+    country: item.country,
+    image: item.image,
+    avgRating: item.avgRating,
+    totalReviews: item.totalReviews,
+    category: item.category,
+    eventsOrganized: item.eventsOrganized,
+    yearsOfExperience: item.yearsOfExperience,
+    specialties: item.specialties,
+    verified: item.verified,
+    featured: item.featured,
+  };
+}
 
-  const rows = requireProfileImage
-    ? organizers.filter((o) => hasPublicProfileImage(o.avatar))
-    : organizers;
+export type PublicOrganizerListItem = ReturnType<typeof sanitizePublicOrganizerListItem>;
+
+export interface ListOrganizersResult {
+  organizers: PublicOrganizerListItem[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+function buildPublicOrganizerListWhere(options: ListOrganizersOptions): Prisma.UserWhereInput {
+  const filters: Prisma.UserWhereInput[] = [publicOrganizerListingWhere()];
+
+  const search = String(options.search ?? "").trim();
+  if (search) {
+    filters.push({
+      OR: [
+        { firstName: { contains: search, mode: "insensitive" } },
+        { lastName: { contains: search, mode: "insensitive" } },
+        { organizationName: { contains: search, mode: "insensitive" } },
+        { company: { contains: search, mode: "insensitive" } },
+        { description: { contains: search, mode: "insensitive" } },
+        { bio: { contains: search, mode: "insensitive" } },
+        { website: { contains: search, mode: "insensitive" } },
+        { specialties: { has: search } },
+      ],
+    });
+  }
+
+  const countryRaw = String(options.country ?? "").trim();
+  const countries = countryRaw
+    ? countryRaw.split(",").map((s) => s.trim()).filter((s) => s && s.toLowerCase() !== "all")
+    : [];
+  if (countries.length > 0) {
+    filters.push({
+      OR: countries.flatMap((country) => [
+        { organizerCountry: { equals: country, mode: "insensitive" } },
+        { location: { contains: country, mode: "insensitive" } },
+        { headquarters: { contains: country, mode: "insensitive" } },
+      ]),
+    });
+  }
+
+  const cityRaw = String(options.city ?? "").trim();
+  const cities = cityRaw
+    ? cityRaw.split(",").map((s) => s.trim()).filter((s) => s && s.toLowerCase() !== "all")
+    : [];
+  if (cities.length > 0) {
+    filters.push({
+      OR: cities.flatMap((city) => [
+        { organizerCity: { equals: city, mode: "insensitive" } },
+        { location: { contains: city, mode: "insensitive" } },
+        { headquarters: { contains: city, mode: "insensitive" } },
+      ]),
+    });
+  }
+
+  const categoryRaw = String(options.category ?? "").trim();
+  const categories = categoryRaw
+    ? categoryRaw.split(",").map((s) => s.trim()).filter(Boolean)
+    : [];
+  if (categories.length > 0) {
+    filters.push({
+      OR: categories.map((category) => ({ specialties: { has: category } })),
+    });
+  }
+
+  return filters.length === 1 ? filters[0]! : { AND: filters };
+}
+
+const organizerListSelect = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  email: true,
+  phone: true,
+  avatar: true,
+  bio: true,
+  website: true,
+  location: true,
+  organizationName: true,
+  company: true,
+  description: true,
+  headquarters: true,
+  organizerCountry: true,
+  organizerState: true,
+  organizerCity: true,
+  totalReviews: true,
+  averageRating: true,
+  founded: true,
+  teamSize: true,
+  specialties: true,
+  isVerified: true,
+  isActive: true,
+  profileVisibility: true,
+  createdAt: true,
+  updatedAt: true,
+  organizedEvents: {
+    where: { status: "PUBLISHED" },
+    select: { id: true },
+  },
+} as const;
+
+async function mapOrganizerListRows(
+  rows: Array<
+    Prisma.UserGetPayload<{
+      select: typeof organizerListSelect;
+    }>
+  >,
+  requireProfileImage: boolean,
+) {
+  const filteredRows = requireProfileImage
+    ? rows.filter((o) => hasPublicProfileImage(o.avatar))
+    : rows;
 
   /** One grouped query instead of 2×N concurrent queries (avoids exhausting the DB pool on small VPS). */
-  const allEventIds = [...new Set(rows.flatMap((o) => o.organizedEvents.map((e) => e.id)))];
+  const allEventIds = [...new Set(filteredRows.flatMap((o) => o.organizedEvents.map((e) => e.id)))];
   const statsByEventId = new Map<string, { registrations: number; revenue: number }>();
   if (allEventIds.length > 0) {
     const grouped = await prisma.eventRegistration.groupBy({
@@ -75,7 +184,7 @@ export async function listOrganizers(options?: { requireProfileImage?: boolean }
     }
   }
 
-  const organizersWithStats = rows.map((organizer) => {
+  return filteredRows.map((organizer) => {
     const eventIds = organizer.organizedEvents.map((e) => e.id);
     let attendeeCount = 0;
     let totalRevenue = 0;
@@ -90,17 +199,30 @@ export async function listOrganizers(options?: { requireProfileImage?: boolean }
     const foundedYear = organizer.founded ? parseInt(organizer.founded) : new Date().getFullYear();
     const yearsOfExperience = Number.isNaN(foundedYear) ? 0 : new Date().getFullYear() - foundedYear;
 
-    const structuredLocation = [organizer.organizerCity, organizer.organizerState, organizer.organizerCountry]
-      .map((x) => String(x ?? "").trim())
-      .filter(Boolean)
-      .join(", ");
+    const city = String(organizer.organizerCity ?? "").trim();
+    const state = String(organizer.organizerState ?? "").trim();
+    const country = String(organizer.organizerCountry ?? "").trim();
+    const structuredLocation = [city, state, country].filter(Boolean).join(", ");
 
     const displayName = getDisplayName({
       role: "ORGANIZER",
       firstName: organizer.firstName,
       lastName: organizer.lastName,
       organizationName: organizer.organizationName,
+      company: organizer.company,
     });
+    const companyLabel =
+      String(organizer.organizationName ?? "").trim() ||
+      String(organizer.company ?? "").trim() ||
+      displayName;
+
+    const hqRaw = String(organizer.headquarters ?? "").trim();
+    const locRaw = String(organizer.location ?? "").trim();
+    const locationLine =
+      structuredLocation ||
+      (hqRaw && !/^not specified$/i.test(hqRaw) ? hqRaw : "") ||
+      (locRaw && !/^not specified$/i.test(locRaw) ? locRaw : "");
+
     return {
       id: organizer.id,
       name: displayName,
@@ -115,17 +237,18 @@ export async function listOrganizers(options?: { requireProfileImage?: boolean }
         },
         "ORGANIZER",
       ),
-      company: organizer.organizationName || "",
+      company: companyLabel,
+      city,
+      state,
+      country,
       image: requireProfileImage
         ? organizer.avatar ?? ""
         : organizer.avatar || null,
       avgRating: organizer.averageRating || 0,
       totalReviews: organizer.totalReviews || 0,
-      headquarters:
-        structuredLocation || organizer.headquarters || organizer.location || "Not specified",
+      headquarters: locationLine || "Location not specified",
       reviewCount: organizer.totalReviews || 0,
-      location: organizer.location || "Not specified",
-      country: organizer.organizerCountry?.trim() || "India",
+      location: locationLine || locRaw || "Location not specified",
       category: organizer.specialties?.[0] || "General Events",
       eventsOrganized: organizer.organizedEvents.length,
       yearsOfExperience,
@@ -144,8 +267,76 @@ export async function listOrganizers(options?: { requireProfileImage?: boolean }
       lastActive: organizer.updatedAt.toISOString().split("T")[0],
     };
   });
+}
 
-  return organizersWithStats;
+export async function listOrganizers(options: ListOrganizersOptions = {}): Promise<ListOrganizersResult> {
+  const requireProfileImage = options.requireProfileImage ?? false;
+  /** Directory listing is always paginated unless this is the small featured-home subset. */
+  const paginate =
+    options.paginate ?? (options.page != null || options.limit != null || !requireProfileImage);
+  const page = options.page && options.page > 0 ? options.page : 1;
+  const limit = options.limit && options.limit > 0 ? Math.min(options.limit, 30) : 20;
+  const where = buildPublicOrganizerListWhere(options);
+
+  const skip = paginate ? (page - 1) * limit : 0;
+  /** Featured-home scan must not stop at the first alphabetical page before image filtering. */
+  const take = paginate ? limit : requireProfileImage ? 5000 : 50;
+
+  const [organizers, total] = await Promise.all([
+    prisma.user.findMany({
+      where,
+      select: organizerListSelect,
+      skip,
+      take,
+      orderBy: [{ organizationName: "asc" }, { company: "asc" }, { createdAt: "desc" }],
+    }),
+    prisma.user.count({ where }),
+  ]);
+
+  const mapped = await mapOrganizerListRows(organizers, requireProfileImage);
+  const sanitized = mapped.map(sanitizePublicOrganizerListItem);
+  const effectiveLimit = paginate ? limit : Math.max(sanitized.length, 1);
+  const totalPages = paginate ? Math.max(1, Math.ceil(total / limit)) : 1;
+
+  return {
+    organizers: sanitized,
+    total,
+    page: paginate ? page : 1,
+    limit: effectiveLimit,
+    totalPages,
+  };
+}
+
+export async function listOrganizerFilterFacets() {
+  const rows = await prisma.user.findMany({
+    where: publicOrganizerListingWhere(),
+    select: {
+      organizerCity: true,
+      organizerCountry: true,
+      specialties: true,
+    },
+  });
+
+  const cities = new Set<string>();
+  const countries = new Set<string>();
+  const categories = new Set<string>();
+
+  for (const row of rows) {
+    const city = String(row.organizerCity ?? "").trim();
+    const country = String(row.organizerCountry ?? "").trim();
+    if (city) cities.add(city);
+    if (country) countries.add(country);
+    for (const specialty of row.specialties ?? []) {
+      const s = String(specialty ?? "").trim();
+      if (s) categories.add(s);
+    }
+  }
+
+  return {
+    cities: [...cities].sort((a, b) => a.localeCompare(b)).slice(0, 60),
+    countries: [...countries].sort((a, b) => a.localeCompare(b)),
+    categories: [...categories].sort((a, b) => a.localeCompare(b)).slice(0, 48),
+  };
 }
 
 // ---------- Single organizer ----------
@@ -252,7 +443,8 @@ export async function getOrganizerById(identifier: string, viewerUserId?: string
   }
 
   const isSelf = canUserViewOwnPrivateProfile(viewerUserId ?? undefined, id);
-  if (!organizer.isVerified && !isSelf) {
+  const isDirectoryEntry = organizerHasPublicDirectoryLocation(organizer);
+  if (!organizer.isVerified && !isSelf && !isDirectoryEntry) {
     return null;
   }
 

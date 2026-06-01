@@ -20,7 +20,7 @@ function getDisplayName(user) {
     const role = String(user.role ?? "").toUpperCase();
     switch (role) {
         case "ORGANIZER": {
-            const org = normalizeWhitespace(user.organizationName);
+            const org = normalizeWhitespace(user.organizationName) || normalizeWhitespace(user.company);
             if (org)
                 return org;
             const fn = normalizeWhitespace(user.firstName);

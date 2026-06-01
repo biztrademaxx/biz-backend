@@ -11,6 +11,7 @@ exports.adminRejectEventHandler = adminRejectEventHandler;
 exports.adminGetVenuesHandler = adminGetVenuesHandler;
 exports.adminGetVisitorsHandler = adminGetVisitorsHandler;
 exports.adminGetDashboardHandler = adminGetDashboardHandler;
+exports.adminGetEventOverviewHandler = adminGetEventOverviewHandler;
 exports.adminGetEventCategoriesHandler = adminGetEventCategoriesHandler;
 exports.adminGetEventMailCandidatesHandler = adminGetEventMailCandidatesHandler;
 exports.adminSendEventListingEmailHandler = adminSendEventListingEmailHandler;
@@ -21,7 +22,10 @@ async function adminGetEventsHandler(req, res) {
         const limit = req.query.limit ? Number(req.query.limit) : undefined;
         const status = req.query.status ?? undefined;
         const search = req.query.search ?? undefined;
-        const result = await (0, admin_service_1.adminListEvents)({ page, limit, status, search });
+        const tab = req.query.tab ?? undefined;
+        const category = req.query.category ?? undefined;
+        const country = req.query.country ?? undefined;
+        const result = await (0, admin_service_1.adminListEvents)({ page, limit, status, search, tab, category, country });
         return res.json({
             success: true,
             events: result.events,
@@ -48,6 +52,11 @@ async function adminGetEventStatsHandler(_req, res) {
                 approved: stats.approved,
                 rejected: stats.rejected,
                 pending: stats.pending,
+                featured: stats.featured,
+                vip: stats.vip,
+                live: stats.live,
+                upcoming: stats.upcoming,
+                ended: stats.ended,
             },
         });
     }
@@ -300,9 +309,10 @@ async function adminGetVisitorsHandler(_req, res) {
         });
     }
 }
-async function adminGetDashboardHandler(_req, res) {
+async function adminGetDashboardHandler(req, res) {
     try {
-        const summary = await (0, admin_service_1.adminGetDashboardSummary)();
+        const eventRange = (0, admin_service_1.parseEventOverviewRange)(req.query.eventRange);
+        const summary = await (0, admin_service_1.adminGetDashboardSummary)(eventRange);
         return res.json({
             success: true,
             data: summary,
@@ -314,6 +324,25 @@ async function adminGetDashboardHandler(_req, res) {
         return res.status(500).json({
             success: false,
             error: "Failed to fetch dashboard data",
+            details: error.message,
+        });
+    }
+}
+async function adminGetEventOverviewHandler(req, res) {
+    try {
+        const range = (0, admin_service_1.parseEventOverviewRange)(req.query.range);
+        const overview = await (0, admin_service_1.adminGetEventOverviewTrend)(range);
+        return res.json({
+            success: true,
+            data: overview,
+        });
+    }
+    catch (error) {
+        // eslint-disable-next-line no-console
+        console.error("Admin get event overview error (backend):", error);
+        return res.status(500).json({
+            success: false,
+            error: "Failed to fetch event overview",
             details: error.message,
         });
     }

@@ -15,6 +15,8 @@ exports.adminApproveEvent = adminApproveEvent;
 exports.adminRejectEvent = adminRejectEvent;
 exports.adminListVenues = adminListVenues;
 exports.adminListVisitors = adminListVisitors;
+exports.parseEventOverviewRange = parseEventOverviewRange;
+exports.adminGetEventOverviewTrend = adminGetEventOverviewTrend;
 exports.adminGetDashboardSummary = adminGetDashboardSummary;
 exports.adminListEventCategories = adminListEventCategories;
 exports.adminGetEventMailCandidates = adminGetEventMailCandidates;
@@ -98,30 +100,149 @@ async function updateAdminEvent(params) {
     });
     return event;
 }
+function adminEventDayBounds() {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+    return { startOfToday, endOfToday };
+}
+function mapAdminStatusFilter(status) {
+    const key = status.trim().toLowerCase();
+    if (!key || key === "all")
+        return undefined;
+    switch (key) {
+        case "approved":
+        case "published":
+            return client_1.EventStatus.PUBLISHED;
+        case "pending":
+        case "pendingreview":
+        case "pending_review":
+            return client_1.EventStatus.PENDING_APPROVAL;
+        case "rejected":
+            return client_1.EventStatus.REJECTED;
+        case "draft":
+            return client_1.EventStatus.DRAFT;
+        case "flagged":
+        case "cancelled":
+            return client_1.EventStatus.CANCELLED;
+        default: {
+            const upper = status.trim().toUpperCase();
+            if (Object.values(client_1.EventStatus).includes(upper)) {
+                return upper;
+            }
+            return undefined;
+        }
+    }
+}
+function applyAdminEventTabFilter(where, tab) {
+    const key = (tab || "all").trim().toLowerCase();
+    if (!key || key === "all" || key === "send-email")
+        return;
+    const { startOfToday, endOfToday } = adminEventDayBounds();
+    switch (key) {
+        case "featured":
+            where.isFeatured = true;
+            break;
+        case "pending":
+            where.status = client_1.EventStatus.PENDING_APPROVAL;
+            break;
+        case "approved":
+            where.status = client_1.EventStatus.PUBLISHED;
+            break;
+        case "ended":
+            where.endDate = { lt: startOfToday };
+            break;
+        case "live":
+            where.startDate = { lte: endOfToday };
+            where.endDate = { gte: startOfToday };
+            break;
+        case "upcoming":
+            where.startDate = { gt: endOfToday };
+            break;
+        case "flagged":
+            where.status = client_1.EventStatus.CANCELLED;
+            break;
+        case "vip":
+            where.isVIP = true;
+            break;
+        case "verified":
+            where.isVerified = true;
+            break;
+        default:
+            break;
+    }
+}
+function applyAdminCountryFilter(where, country) {
+    const name = (country || "").trim();
+    if (!name || name.toLowerCase() === "all")
+        return;
+    const countryClause = {
+        OR: [
+            { country: { equals: name, mode: "insensitive" } },
+            { venue: { is: { venueCountry: { equals: name, mode: "insensitive" } } } },
+        ],
+    };
+    if (Array.isArray(where.AND)) {
+        where.AND.push(countryClause);
+    }
+    else if (Object.keys(where).length > 0) {
+        const existing = { ...where };
+        where.AND = [existing, countryClause];
+        for (const key of Object.keys(existing)) {
+            delete where[key];
+        }
+    }
+    else {
+        Object.assign(where, countryClause);
+    }
+}
 async function adminListEvents(params) {
     const page = params.page && params.page > 0 ? params.page : 1;
-    const limit = params.limit && params.limit > 0 ? params.limit : 20;
+    const limit = params.limit && params.limit > 0 ? params.limit : 15;
     const skip = (page - 1) * limit;
     const where = {};
-    if (params.status) {
-        where.status = params.status.toUpperCase();
+    applyAdminEventTabFilter(where, params.tab);
+    const mappedStatus = params.status ? mapAdminStatusFilter(params.status) : undefined;
+    if (mappedStatus) {
+        where.status = mappedStatus;
     }
+    const category = (params.category || "").trim();
+    if (category && category.toLowerCase() !== "all") {
+        where.category = { has: category };
+    }
+    applyAdminCountryFilter(where, params.country);
     const search = (params.search || "").trim();
     if (search) {
-        where.OR = [
-            { title: { contains: search, mode: "insensitive" } },
-            { description: { contains: search, mode: "insensitive" } },
-            { rejectionReason: { contains: search, mode: "insensitive" } },
-            {
-                organizer: {
-                    OR: [
-                        { firstName: { contains: search, mode: "insensitive" } },
-                        { lastName: { contains: search, mode: "insensitive" } },
-                        { email: { contains: search, mode: "insensitive" } },
-                    ],
+        const searchClause = {
+            OR: [
+                { title: { contains: search, mode: "insensitive" } },
+                { description: { contains: search, mode: "insensitive" } },
+                { rejectionReason: { contains: search, mode: "insensitive" } },
+                {
+                    organizer: {
+                        OR: [
+                            { firstName: { contains: search, mode: "insensitive" } },
+                            { lastName: { contains: search, mode: "insensitive" } },
+                            { email: { contains: search, mode: "insensitive" } },
+                        ],
+                    },
                 },
-            },
-        ];
+            ],
+        };
+        if (Array.isArray(where.AND)) {
+            where.AND.push(searchClause);
+        }
+        else if (Object.keys(where).length > 0) {
+            const existing = { ...where };
+            where.AND = [existing, searchClause];
+            for (const key of Object.keys(existing)) {
+                delete where[key];
+            }
+        }
+        else {
+            Object.assign(where, searchClause);
+        }
     }
     const [rawEvents, total] = await Promise.all([
         prisma_1.default.event.findMany({
@@ -180,7 +301,7 @@ async function adminListEvents(params) {
             "Not specified",
         city: event.venue?.venueCity ?? "Not specified",
         state: event.venue?.venueState ?? "",
-        country: event.venue?.venueCountry ?? "",
+        country: event.country || event.venue?.venueCountry || "",
         status: toStatusLabel(event.status),
         statusRaw: event.status,
         category: Array.isArray(event.category) ? event.category : [],
@@ -241,13 +362,21 @@ async function adminListEvents(params) {
     };
 }
 async function adminGetEventStats() {
-    const [total, approved, rejected, pending] = await Promise.all([
+    const { startOfToday, endOfToday } = adminEventDayBounds();
+    const [total, approved, rejected, pending, featured, vip, live, upcoming, ended] = await Promise.all([
         prisma_1.default.event.count(),
         prisma_1.default.event.count({ where: { status: "PUBLISHED" } }),
         prisma_1.default.event.count({ where: { status: "REJECTED" } }),
         prisma_1.default.event.count({ where: { status: "PENDING_APPROVAL" } }),
+        prisma_1.default.event.count({ where: { isFeatured: true } }),
+        prisma_1.default.event.count({ where: { isVIP: true } }),
+        prisma_1.default.event.count({
+            where: { startDate: { lte: endOfToday }, endDate: { gte: startOfToday } },
+        }),
+        prisma_1.default.event.count({ where: { startDate: { gt: endOfToday } } }),
+        prisma_1.default.event.count({ where: { endDate: { lt: startOfToday } } }),
     ]);
-    return { total, approved, rejected, pending };
+    return { total, approved, rejected, pending, featured, vip, live, upcoming, ended };
 }
 async function adminGetEventById(id) {
     const event = await prisma_1.default.event.findUnique({
@@ -611,26 +740,97 @@ async function adminListVisitors() {
     });
     return registrations;
 }
-function buildLast30DaysTrend(events, regs) {
-    const days = [];
-    const now = new Date();
-    for (let i = 29; i >= 0; i--) {
-        const d = new Date(now);
-        d.setDate(d.getDate() - i);
-        d.setHours(0, 0, 0, 0);
-        const key = d.toISOString().slice(0, 10);
-        days.push({
-            key,
-            label: `${d.getDate()} ${d.toLocaleString("en-GB", { month: "short" })}`,
-            eventsCreated: 0,
-            publishedEvents: 0,
-            registrations: 0,
-        });
+function parseEventOverviewRange(raw) {
+    const v = String(raw ?? "1m").toLowerCase().trim();
+    if (v === "3m" || v === "3months" || v === "3-months")
+        return "3m";
+    if (v === "1y" || v === "1year" || v === "12m" || v === "1-year")
+        return "1y";
+    return "1m";
+}
+function eventOverviewRangeDays(range) {
+    switch (range) {
+        case "3m":
+            return 90;
+        case "1y":
+            return 365;
+        default:
+            return 30;
     }
-    const dayMap = new Map(days.map((x) => [x.key, x]));
+}
+function startOfWeekMonday(d) {
+    const day = d.getDay();
+    const diff = (day + 6) % 7;
+    const out = new Date(d);
+    out.setDate(out.getDate() - diff);
+    out.setHours(0, 0, 0, 0);
+    return out;
+}
+function eventTrendBucketKey(d, range) {
+    if (range === "1y") {
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    }
+    if (range === "3m") {
+        return startOfWeekMonday(d).toISOString().slice(0, 10);
+    }
+    return d.toISOString().slice(0, 10);
+}
+function buildEventOverviewTrend(events, regs, range) {
+    const now = new Date();
+    const buckets = [];
+    const bucketMap = new Map();
+    if (range === "1y") {
+        for (let m = 11; m >= 0; m--) {
+            const d = new Date(now.getFullYear(), now.getMonth() - m, 1);
+            const key = eventTrendBucketKey(d, range);
+            const row = {
+                key,
+                label: d.toLocaleString("en-GB", { month: "short", year: "2-digit" }),
+                eventsCreated: 0,
+                publishedEvents: 0,
+                registrations: 0,
+            };
+            buckets.push(row);
+            bucketMap.set(key, row);
+        }
+    }
+    else if (range === "3m") {
+        const endWeek = startOfWeekMonday(now);
+        for (let w = 12; w >= 0; w--) {
+            const d = new Date(endWeek);
+            d.setDate(d.getDate() - w * 7);
+            const key = eventTrendBucketKey(d, range);
+            const row = {
+                key,
+                label: `${d.getDate()} ${d.toLocaleString("en-GB", { month: "short" })}`,
+                eventsCreated: 0,
+                publishedEvents: 0,
+                registrations: 0,
+            };
+            buckets.push(row);
+            bucketMap.set(key, row);
+        }
+    }
+    else {
+        for (let i = 29; i >= 0; i--) {
+            const d = new Date(now);
+            d.setDate(d.getDate() - i);
+            d.setHours(0, 0, 0, 0);
+            const key = eventTrendBucketKey(d, range);
+            const row = {
+                key,
+                label: `${d.getDate()} ${d.toLocaleString("en-GB", { month: "short" })}`,
+                eventsCreated: 0,
+                publishedEvents: 0,
+                registrations: 0,
+            };
+            buckets.push(row);
+            bucketMap.set(key, row);
+        }
+    }
     for (const e of events) {
-        const k = e.createdAt.toISOString().slice(0, 10);
-        const row = dayMap.get(k);
+        const k = eventTrendBucketKey(e.createdAt, range);
+        const row = bucketMap.get(k);
         if (row) {
             row.eventsCreated += 1;
             if (e.status === "PUBLISHED")
@@ -638,12 +838,33 @@ function buildLast30DaysTrend(events, regs) {
         }
     }
     for (const r of regs) {
-        const k = r.registeredAt.toISOString().slice(0, 10);
-        const row = dayMap.get(k);
+        const k = eventTrendBucketKey(r.registeredAt, range);
+        const row = bucketMap.get(k);
         if (row)
             row.registrations += 1;
     }
-    return days;
+    return buckets;
+}
+async function adminGetEventOverviewTrend(range = "1m") {
+    const start = new Date();
+    start.setDate(start.getDate() - eventOverviewRangeDays(range));
+    start.setHours(0, 0, 0, 0);
+    const [eventsForTrend, regsForTrend] = await Promise.all([
+        prisma_1.default.event.findMany({
+            where: { createdAt: { gte: start } },
+            select: { createdAt: true, status: true },
+        }),
+        prisma_1.default.eventRegistration.findMany({
+            where: { registeredAt: { gte: start }, status: "CONFIRMED" },
+            select: { registeredAt: true },
+        }),
+    ]);
+    return {
+        range,
+        trend: buildEventOverviewTrend(eventsForTrend, regsForTrend, range),
+        periodStart: start.toISOString(),
+        periodEnd: new Date().toISOString(),
+    };
 }
 const EVENT_STATUS_DONUT_COLORS = {
     PUBLISHED: "#22c55e",
@@ -653,10 +874,10 @@ const EVENT_STATUS_DONUT_COLORS = {
     CANCELLED: "#64748b",
     COMPLETED: "#3b82f6",
 };
-async function adminGetDashboardSummary() {
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    thirtyDaysAgo.setHours(0, 0, 0, 0);
+async function adminGetDashboardSummary(eventRange = "1m") {
+    const rangeStart = new Date();
+    rangeStart.setDate(rangeStart.getDate() - eventOverviewRangeDays(eventRange));
+    rangeStart.setHours(0, 0, 0, 0);
     const eventCardSelect = {
         id: true,
         title: true,
@@ -705,11 +926,11 @@ async function adminGetDashboardSummary() {
             },
         }),
         prisma_1.default.event.findMany({
-            where: { createdAt: { gte: thirtyDaysAgo } },
+            where: { createdAt: { gte: rangeStart } },
             select: { createdAt: true, status: true },
         }),
         prisma_1.default.eventRegistration.findMany({
-            where: { registeredAt: { gte: thirtyDaysAgo }, status: "CONFIRMED" },
+            where: { registeredAt: { gte: rangeStart }, status: "CONFIRMED" },
             select: { registeredAt: true },
         }),
         prisma_1.default.event.groupBy({
@@ -740,7 +961,7 @@ async function adminGetDashboardSummary() {
             select: eventCardSelect,
         }),
     ]);
-    const trend = buildLast30DaysTrend(eventsForTrend, regsForTrend);
+    const trend = buildEventOverviewTrend(eventsForTrend, regsForTrend, eventRange);
     const registrationsByStatus = statusBreakdown
         .filter((row) => (row._count.id ?? 0) > 0)
         .map((row) => ({
@@ -770,6 +991,7 @@ async function adminGetDashboardSummary() {
         upcomingEvents,
         dashboardCharts: {
             trend,
+            eventRange,
         },
         registrationsByStatus,
         topEvents,

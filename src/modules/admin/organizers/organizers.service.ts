@@ -8,14 +8,35 @@ const ROLE: UserRole = "ORGANIZER";
 
 export async function listOrganizers(query: Record<string, unknown>) {
   const { page, limit, search, skip, sort, order } = parseListQuery(query);
+  const country = String(query.country ?? "").trim();
   const where: any = { role: ROLE };
+  const filters: Record<string, unknown>[] = [];
+
   if (search) {
-    where.OR = [
-      { firstName: { contains: search, mode: "insensitive" } },
-      { lastName: { contains: search, mode: "insensitive" } },
-      { email: { contains: search, mode: "insensitive" } },
-      { company: { contains: search, mode: "insensitive" } },
-    ];
+    filters.push({
+      OR: [
+        { firstName: { contains: search, mode: "insensitive" } },
+        { lastName: { contains: search, mode: "insensitive" } },
+        { email: { contains: search, mode: "insensitive" } },
+        { company: { contains: search, mode: "insensitive" } },
+        { organizationName: { contains: search, mode: "insensitive" } },
+      ],
+    });
+  }
+
+  if (country && country.toLowerCase() !== "all") {
+    filters.push({
+      OR: [
+        { organizerCountry: { equals: country, mode: "insensitive" } },
+        { location: { contains: country, mode: "insensitive" } },
+        { headquarters: { contains: country, mode: "insensitive" } },
+        { businessAddress: { contains: country, mode: "insensitive" } },
+      ],
+    });
+  }
+
+  if (filters.length > 0) {
+    where.AND = filters;
   }
   const [items, total] = await Promise.all([
     prisma.user.findMany({
@@ -29,6 +50,7 @@ export async function listOrganizers(query: Record<string, unknown>) {
         lastName: true,
         email: true,
         phone: true,
+        company: true,
         avatar: true,
         role: true,
         isActive: true,
@@ -39,6 +61,11 @@ export async function listOrganizers(query: Record<string, unknown>) {
         organizationName: true,
         description: true,
         headquarters: true,
+        location: true,
+        organizerCountry: true,
+        organizerState: true,
+        organizerCity: true,
+        website: true,
         founded: true,
         teamSize: true,
         specialties: true,
@@ -69,6 +96,7 @@ export async function listOrganizers(query: Record<string, unknown>) {
     lastName: u.lastName,
     email: u.email,
     phone: u.phone,
+    company: u.company,
     avatar: u.avatar,
     role: u.role,
     isActive: u.isActive,
@@ -79,6 +107,11 @@ export async function listOrganizers(query: Record<string, unknown>) {
     organizationName: u.organizationName,
     description: u.description,
     headquarters: u.headquarters,
+    location: u.location,
+    organizerCountry: u.organizerCountry,
+    organizerState: u.organizerState,
+    organizerCity: u.organizerCity,
+    website: u.website,
     founded: u.founded,
     teamSize: u.teamSize,
     specialties: u.specialties,
@@ -118,6 +151,12 @@ export async function getOrganizerById(id: string) {
       activeEvents: true,
       description: true,
       website: true,
+      headquarters: true,
+      location: true,
+      organizerCountry: true,
+      organizerState: true,
+      organizerCity: true,
+      organizationName: true,
     },
   });
   if (!user) return null;
@@ -178,10 +217,15 @@ export async function updateOrganizer(id: string, body: Record<string, unknown>)
     "firstName",
     "lastName",
     "phone",
+    "avatar",
     "company",
     "organizationName",
     "description",
     "headquarters",
+    "organizerCountry",
+    "organizerState",
+    "organizerCity",
+    "location",
     "founded",
     "teamSize",
     "businessEmail",
@@ -195,6 +239,26 @@ export async function updateOrganizer(id: string, body: Record<string, unknown>)
   const data: Record<string, unknown> = {};
   for (const k of allowed) {
     if (body[k] !== undefined) data[k] = body[k];
+  }
+  if (
+    body.organizerCountry !== undefined ||
+    body.organizerState !== undefined ||
+    body.organizerCity !== undefined
+  ) {
+    const city =
+      body.organizerCity !== undefined
+        ? String(body.organizerCity).trim()
+        : (existing.organizerCity ?? "");
+    const state =
+      body.organizerState !== undefined
+        ? String(body.organizerState).trim()
+        : (existing.organizerState ?? "");
+    const country =
+      body.organizerCountry !== undefined
+        ? String(body.organizerCountry).trim()
+        : (existing.organizerCountry ?? "");
+    const locationLine = [city, state, country].filter(Boolean).join(", ");
+    data.location = locationLine || null;
   }
   if (body.specialties !== undefined) {
     data.specialties = Array.isArray(body.specialties) ? body.specialties.map((s) => String(s)) : [];

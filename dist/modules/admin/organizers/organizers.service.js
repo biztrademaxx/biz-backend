@@ -19,14 +19,32 @@ const email_service_1 = require("../../../services/email.service");
 const ROLE = "ORGANIZER";
 async function listOrganizers(query) {
     const { page, limit, search, skip, sort, order } = (0, admin_response_1.parseListQuery)(query);
+    const country = String(query.country ?? "").trim();
     const where = { role: ROLE };
+    const filters = [];
     if (search) {
-        where.OR = [
-            { firstName: { contains: search, mode: "insensitive" } },
-            { lastName: { contains: search, mode: "insensitive" } },
-            { email: { contains: search, mode: "insensitive" } },
-            { company: { contains: search, mode: "insensitive" } },
-        ];
+        filters.push({
+            OR: [
+                { firstName: { contains: search, mode: "insensitive" } },
+                { lastName: { contains: search, mode: "insensitive" } },
+                { email: { contains: search, mode: "insensitive" } },
+                { company: { contains: search, mode: "insensitive" } },
+                { organizationName: { contains: search, mode: "insensitive" } },
+            ],
+        });
+    }
+    if (country && country.toLowerCase() !== "all") {
+        filters.push({
+            OR: [
+                { organizerCountry: { equals: country, mode: "insensitive" } },
+                { location: { contains: country, mode: "insensitive" } },
+                { headquarters: { contains: country, mode: "insensitive" } },
+                { businessAddress: { contains: country, mode: "insensitive" } },
+            ],
+        });
+    }
+    if (filters.length > 0) {
+        where.AND = filters;
     }
     const [items, total] = await Promise.all([
         prisma_1.default.user.findMany({
@@ -40,6 +58,7 @@ async function listOrganizers(query) {
                 lastName: true,
                 email: true,
                 phone: true,
+                company: true,
                 avatar: true,
                 role: true,
                 isActive: true,
@@ -50,6 +69,11 @@ async function listOrganizers(query) {
                 organizationName: true,
                 description: true,
                 headquarters: true,
+                location: true,
+                organizerCountry: true,
+                organizerState: true,
+                organizerCity: true,
+                website: true,
                 founded: true,
                 teamSize: true,
                 specialties: true,
@@ -80,6 +104,7 @@ async function listOrganizers(query) {
         lastName: u.lastName,
         email: u.email,
         phone: u.phone,
+        company: u.company,
         avatar: u.avatar,
         role: u.role,
         isActive: u.isActive,
@@ -90,6 +115,11 @@ async function listOrganizers(query) {
         organizationName: u.organizationName,
         description: u.description,
         headquarters: u.headquarters,
+        location: u.location,
+        organizerCountry: u.organizerCountry,
+        organizerState: u.organizerState,
+        organizerCity: u.organizerCity,
+        website: u.website,
         founded: u.founded,
         teamSize: u.teamSize,
         specialties: u.specialties,
@@ -128,6 +158,12 @@ async function getOrganizerById(id) {
             activeEvents: true,
             description: true,
             website: true,
+            headquarters: true,
+            location: true,
+            organizerCountry: true,
+            organizerState: true,
+            organizerCity: true,
+            organizationName: true,
         },
     });
     if (!user)
@@ -187,10 +223,15 @@ async function updateOrganizer(id, body) {
         "firstName",
         "lastName",
         "phone",
+        "avatar",
         "company",
         "organizationName",
         "description",
         "headquarters",
+        "organizerCountry",
+        "organizerState",
+        "organizerCity",
+        "location",
         "founded",
         "teamSize",
         "businessEmail",
@@ -205,6 +246,21 @@ async function updateOrganizer(id, body) {
     for (const k of allowed) {
         if (body[k] !== undefined)
             data[k] = body[k];
+    }
+    if (body.organizerCountry !== undefined ||
+        body.organizerState !== undefined ||
+        body.organizerCity !== undefined) {
+        const city = body.organizerCity !== undefined
+            ? String(body.organizerCity).trim()
+            : (existing.organizerCity ?? "");
+        const state = body.organizerState !== undefined
+            ? String(body.organizerState).trim()
+            : (existing.organizerState ?? "");
+        const country = body.organizerCountry !== undefined
+            ? String(body.organizerCountry).trim()
+            : (existing.organizerCountry ?? "");
+        const locationLine = [city, state, country].filter(Boolean).join(", ");
+        data.location = locationLine || null;
     }
     if (body.specialties !== undefined) {
         data.specialties = Array.isArray(body.specialties) ? body.specialties.map((s) => String(s)) : [];

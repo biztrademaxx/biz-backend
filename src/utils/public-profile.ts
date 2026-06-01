@@ -12,6 +12,26 @@ export function activePublicProfileUserWhere(): Prisma.UserWhereInput {
   };
 }
 
+/** Public /organizers directory: verified accounts plus bulk-imported rows with a country on file. */
+export function publicOrganizerListingWhere(): Prisma.UserWhereInput {
+  return {
+    role: "ORGANIZER",
+    ...activePublicProfileUserWhere(),
+    OR: [
+      { isVerified: true },
+      {
+        AND: [{ organizerCountry: { not: null } }, { NOT: { organizerCountry: "" } }],
+      },
+    ],
+  };
+}
+
+export function organizerHasPublicDirectoryLocation(organizer: {
+  organizerCountry?: string | null;
+}): boolean {
+  return Boolean(String(organizer.organizerCountry ?? "").trim());
+}
+
 /**
  * Published events visible on the public site: organizer (and venue, if any)
  * must have a public, active profile.
