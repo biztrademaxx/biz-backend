@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.ORGANIZER_FOLLOWER_BUCKETS = exports.ORGANIZER_EVENT_BUCKETS = void 0;
 exports.sanitizePublicOrganizerListItem = sanitizePublicOrganizerListItem;
 exports.listOrganizers = listOrganizers;
 exports.listOrganizerFilterFacets = listOrganizerFilterFacets;
@@ -24,10 +25,48 @@ exports.listOrganizerMessages = listOrganizerMessages;
 exports.createOrganizerMessage = createOrganizerMessage;
 exports.deleteOrganizerMessage = deleteOrganizerMessage;
 const prisma_1 = __importDefault(require("../../config/prisma"));
+const client_1 = require("@prisma/client");
 const public_profile_1 = require("../../utils/public-profile");
 const profile_image_1 = require("../../utils/profile-image");
 const display_name_1 = require("../../utils/display-name");
 const profile_slug_1 = require("../../utils/profile-slug");
+const organizer_country_priority_1 = require("../../utils/organizer-country-priority");
+/** Mutually exclusive ranges so facet counts do not double-count organizers. */
+exports.ORGANIZER_EVENT_BUCKETS = [
+    { id: "lt10", label: "less than 10", min: 0, max: 9 },
+    { id: "10-30", label: "10-30", min: 10, max: 29 },
+    { id: "30-50", label: "30-50", min: 30, max: 49 },
+    { id: "50-100", label: "50-100", min: 50, max: 99 },
+    { id: "100+", label: "100+", min: 100, max: null },
+];
+exports.ORGANIZER_FOLLOWER_BUCKETS = [
+    { id: "1-5", label: "1-5", min: 1, max: 5 },
+    { id: "5-10", label: "5-10", min: 6, max: 10 },
+    { id: "10-50", label: "10-50", min: 11, max: 49 },
+    { id: "50+", label: "50+", min: 50, max: null },
+];
+function eventCountMatchesBucket(count, bucketId) {
+    const bucket = exports.ORGANIZER_EVENT_BUCKETS.find((b) => b.id === bucketId);
+    if (!bucket)
+        return true;
+    if (bucket.max == null)
+        return count >= bucket.min;
+    return count >= bucket.min && count <= bucket.max;
+}
+function followerCountMatchesBucket(count, bucketId) {
+    const bucket = exports.ORGANIZER_FOLLOWER_BUCKETS.find((b) => b.id === bucketId);
+    if (!bucket)
+        return true;
+    if (bucket.max == null)
+        return count >= bucket.min;
+    return count >= bucket.min && count <= bucket.max;
+}
+function toSortedFacetCounts(map, limit) {
+    const sorted = [...map.entries()]
+        .map(([value, count]) => ({ value, label: value, count }))
+        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+    return limit ? sorted.slice(0, limit) : sorted;
+}
 /** Card/list payload only — omit contact fields and internal metrics scrapers could harvest. */
 function sanitizePublicOrganizerListItem(item) {
     return {
@@ -102,6 +141,70 @@ function buildPublicOrganizerListWhere(options) {
         });
     }
     return filters.length === 1 ? filters[0] : { AND: filters };
+}
+/** Prisma cannot filter parent rows by relation count in `where`; use SQL for bucket filters. */
+async function resolveBucketFilteredOrganizerIds(options) {
+    const eventBucketIds = String(options.eventsBucket ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    const followerBucketIds = String(options.followersBucket ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    if (eventBucketIds.length === 0 && followerBucketIds.length === 0)
+        return null;
+    const bucketClauses = [];
+    for (const bucketId of eventBucketIds) {
+        const bucket = exports.ORGANIZER_EVENT_BUCKETS.find((b) => b.id === bucketId);
+        if (!bucket)
+            continue;
+        if (bucket.max == null) {
+            bucketClauses.push(client_1.Prisma.sql `(
+        SELECT COUNT(*)::int FROM events e
+        WHERE e."organizerId" = u.id AND e.status = 'PUBLISHED'
+      ) >= ${bucket.min}`);
+        }
+        else {
+            bucketClauses.push(client_1.Prisma.sql `(
+        SELECT COUNT(*)::int FROM events e
+        WHERE e."organizerId" = u.id AND e.status = 'PUBLISHED'
+      ) BETWEEN ${bucket.min} AND ${bucket.max}`);
+        }
+    }
+    for (const bucketId of followerBucketIds) {
+        const bucket = exports.ORGANIZER_FOLLOWER_BUCKETS.find((b) => b.id === bucketId);
+        if (!bucket)
+            continue;
+        if (bucket.max == null) {
+            bucketClauses.push(client_1.Prisma.sql `(
+        SELECT COUNT(*)::int FROM follows f WHERE f."followingId" = u.id
+      ) >= ${bucket.min}`);
+        }
+        else {
+            bucketClauses.push(client_1.Prisma.sql `(
+        SELECT COUNT(*)::int FROM follows f WHERE f."followingId" = u.id
+      ) BETWEEN ${bucket.min} AND ${bucket.max}`);
+        }
+    }
+    if (bucketClauses.length === 0)
+        return null;
+    const orBuckets = bucketClauses.length === 1
+        ? bucketClauses[0]
+        : client_1.Prisma.sql `(${client_1.Prisma.join(bucketClauses.map((c) => client_1.Prisma.sql `(${c})`), " OR ")})`;
+    const rows = await prisma_1.default.$queryRaw `
+    SELECT u.id::text AS id
+    FROM users u
+    WHERE u.role = 'ORGANIZER'
+      AND u."isActive" = true
+      AND (u."profileVisibility" IS NULL OR u."profileVisibility" <> 'private')
+      AND (
+        u."isVerified" = true
+        OR (u."organizerCountry" IS NOT NULL AND btrim(u."organizerCountry") <> '')
+      )
+      AND (${orBuckets})
+  `;
+    return new Set(rows.map((r) => r.id));
 }
 const organizerListSelect = {
     id: true,
@@ -239,20 +342,67 @@ async function listOrganizers(options = {}) {
     const paginate = options.paginate ?? (options.page != null || options.limit != null || !requireProfileImage);
     const page = options.page && options.page > 0 ? options.page : 1;
     const limit = options.limit && options.limit > 0 ? Math.min(options.limit, 30) : 20;
-    const where = buildPublicOrganizerListWhere(options);
+    let where = buildPublicOrganizerListWhere(options);
+    const bucketIds = await resolveBucketFilteredOrganizerIds(options);
+    if (bucketIds !== null) {
+        where = {
+            AND: [
+                where,
+                bucketIds.size > 0 ? { id: { in: [...bucketIds] } } : { id: { in: [] } },
+            ],
+        };
+    }
     const skip = paginate ? (page - 1) * limit : 0;
     /** Featured-home scan must not stop at the first alphabetical page before image filtering. */
     const take = paginate ? limit : requireProfileImage ? 5000 : 50;
-    const [organizers, total] = await Promise.all([
-        prisma_1.default.user.findMany({
+    const priorityInput = {
+        countryName: String(options.prioritizeCountry ?? "").trim() || undefined,
+        countryCode: String(options.prioritizeCountryCode ?? "").trim() || undefined,
+        city: String(options.prioritizeCity ?? "").trim() || undefined,
+    };
+    const useCountryPriority = paginate &&
+        Boolean(priorityInput.countryName || priorityInput.countryCode);
+    let organizers;
+    let total;
+    if (useCountryPriority) {
+        const sortRows = await prisma_1.default.user.findMany({
             where,
-            select: organizerListSelect,
-            skip,
-            take,
-            orderBy: [{ organizationName: "asc" }, { company: "asc" }, { createdAt: "desc" }],
-        }),
-        prisma_1.default.user.count({ where }),
-    ]);
+            select: {
+                id: true,
+                organizerCountry: true,
+                organizerCity: true,
+                location: true,
+                headquarters: true,
+                organizationName: true,
+                company: true,
+            },
+        });
+        const sorted = (0, organizer_country_priority_1.sortOrganizerRowsByCountryPriority)(sortRows, priorityInput, (r) => String(r.organizationName ?? "").trim() ||
+            String(r.company ?? "").trim() ||
+            r.id);
+        total = sorted.length;
+        const pageIds = sorted.slice(skip, skip + limit).map((r) => r.id);
+        const fetched = pageIds.length > 0
+            ? await prisma_1.default.user.findMany({
+                where: { id: { in: pageIds } },
+                select: organizerListSelect,
+            })
+            : [];
+        const byId = new Map(fetched.map((row) => [row.id, row]));
+        organizers = pageIds.map((id) => byId.get(id)).filter((row) => !!row);
+    }
+    else {
+        [organizers, total] = await Promise.all([
+            prisma_1.default.user.findMany({
+                where,
+                select: organizerListSelect,
+                skip,
+                take,
+                orderBy: [{ organizationName: "asc" }, { company: "asc" }, { createdAt: "desc" }],
+            }),
+            prisma_1.default.user.count({ where }),
+        ]);
+    }
     const mapped = await mapOrganizerListRows(organizers, requireProfileImage);
     const sanitized = mapped.map(sanitizePublicOrganizerListItem);
     const effectiveLimit = paginate ? limit : Math.max(sanitized.length, 1);
@@ -272,28 +422,57 @@ async function listOrganizerFilterFacets() {
             organizerCity: true,
             organizerCountry: true,
             specialties: true,
+            organizedEvents: {
+                where: (0, public_profile_1.publicPublishedEventWhere)(),
+                select: { id: true },
+            },
+            followersAsFollowed: { select: { id: true } },
         },
     });
-    const cities = new Set();
-    const countries = new Set();
-    const categories = new Set();
+    const cityCounts = new Map();
+    const countryCounts = new Map();
+    const categoryCounts = new Map();
+    const eventBucketCounts = new Map(exports.ORGANIZER_EVENT_BUCKETS.map((b) => [b.id, 0]));
+    const followerBucketCounts = new Map(exports.ORGANIZER_FOLLOWER_BUCKETS.map((b) => [b.id, 0]));
     for (const row of rows) {
         const city = String(row.organizerCity ?? "").trim();
         const country = String(row.organizerCountry ?? "").trim();
         if (city)
-            cities.add(city);
+            cityCounts.set(city, (cityCounts.get(city) ?? 0) + 1);
         if (country)
-            countries.add(country);
+            countryCounts.set(country, (countryCounts.get(country) ?? 0) + 1);
         for (const specialty of row.specialties ?? []) {
             const s = String(specialty ?? "").trim();
             if (s)
-                categories.add(s);
+                categoryCounts.set(s, (categoryCounts.get(s) ?? 0) + 1);
+        }
+        const eventCount = row.organizedEvents.length;
+        for (const bucket of exports.ORGANIZER_EVENT_BUCKETS) {
+            if (eventCountMatchesBucket(eventCount, bucket.id)) {
+                eventBucketCounts.set(bucket.id, (eventBucketCounts.get(bucket.id) ?? 0) + 1);
+            }
+        }
+        const followerCount = row.followersAsFollowed.length;
+        for (const bucket of exports.ORGANIZER_FOLLOWER_BUCKETS) {
+            if (followerCountMatchesBucket(followerCount, bucket.id)) {
+                followerBucketCounts.set(bucket.id, (followerBucketCounts.get(bucket.id) ?? 0) + 1);
+            }
         }
     }
     return {
-        cities: [...cities].sort((a, b) => a.localeCompare(b)).slice(0, 60),
-        countries: [...countries].sort((a, b) => a.localeCompare(b)),
-        categories: [...categories].sort((a, b) => a.localeCompare(b)).slice(0, 48),
+        cities: toSortedFacetCounts(cityCounts, 80),
+        countries: toSortedFacetCounts(countryCounts),
+        categories: toSortedFacetCounts(categoryCounts, 48),
+        eventBuckets: exports.ORGANIZER_EVENT_BUCKETS.map((b) => ({
+            id: b.id,
+            label: b.label,
+            count: eventBucketCounts.get(b.id) ?? 0,
+        })),
+        followerBuckets: exports.ORGANIZER_FOLLOWER_BUCKETS.map((b) => ({
+            id: b.id,
+            label: b.label,
+            count: followerBucketCounts.get(b.id) ?? 0,
+        })),
     };
 }
 // ---------- Single organizer ----------
