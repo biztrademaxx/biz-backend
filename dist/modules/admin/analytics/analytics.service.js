@@ -41,11 +41,15 @@ const UPDATED_ACTIONS = [
     "ADMIN_SPEAKER_UPDATED",
     "ADMIN_ORGANIZER_BULK_UPDATED",
 ];
-function startOfDay(d) {
-    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-}
+/** Calendar bucketing timezone (en-CA yields YYYY-MM-DD). */
+const ANALYTICS_TIMEZONE = process.env.ADMIN_ANALYTICS_TIMEZONE ?? "Asia/Kolkata";
 function formatDay(d) {
-    return d.toISOString().slice(0, 10);
+    return new Intl.DateTimeFormat("en-CA", {
+        timeZone: ANALYTICS_TIMEZONE,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).format(d);
 }
 function startOfWeek(d) {
     const day = d.getDay();
@@ -56,10 +60,10 @@ function startOfWeek(d) {
     return out;
 }
 function formatWeek(d) {
-    return `${formatDay(startOfWeek(d))}`;
+    return formatDay(startOfWeek(d));
 }
 function formatMonth(d) {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    return formatDay(d).slice(0, 7);
 }
 function emptyCounts() {
     return { events: 0, organizers: 0, exhibitors: 0, speakers: 0, bulkImports: 0, total: 0 };
@@ -233,7 +237,7 @@ async function getSubAdminActivityAnalytics(params) {
     }
     for (const log of logs) {
         const when = new Date(log.createdAt);
-        const dayKey = formatDay(startOfDay(when));
+        const dayKey = formatDay(when);
         const weekKey = formatWeek(when);
         const monthKey = formatMonth(when);
         const bumpActivity = () => {

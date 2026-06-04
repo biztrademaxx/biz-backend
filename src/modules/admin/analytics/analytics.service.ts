@@ -75,12 +75,18 @@ const UPDATED_ACTIONS = [
   "ADMIN_ORGANIZER_BULK_UPDATED",
 ] as const;
 
-function startOfDay(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-}
+/** Calendar bucketing timezone (en-CA yields YYYY-MM-DD). */
+const ANALYTICS_TIMEZONE = process.env.ADMIN_ANALYTICS_TIMEZONE ?? "Asia/Kolkata";
+
 function formatDay(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: ANALYTICS_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
 }
+
 function startOfWeek(d: Date): Date {
   const day = d.getDay();
   const diff = (day + 6) % 7;
@@ -89,11 +95,13 @@ function startOfWeek(d: Date): Date {
   out.setHours(0, 0, 0, 0);
   return out;
 }
+
 function formatWeek(d: Date): string {
-  return `${formatDay(startOfWeek(d))}`;
+  return formatDay(startOfWeek(d));
 }
+
 function formatMonth(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  return formatDay(d).slice(0, 7);
 }
 
 function emptyCounts(): ActivityCounts {
@@ -306,7 +314,7 @@ export async function getSubAdminActivityAnalytics(params: { adminId?: string })
 
   for (const log of logs) {
     const when = new Date(log.createdAt);
-    const dayKey = formatDay(startOfDay(when));
+    const dayKey = formatDay(when);
     const weekKey = formatWeek(when);
     const monthKey = formatMonth(when);
 
