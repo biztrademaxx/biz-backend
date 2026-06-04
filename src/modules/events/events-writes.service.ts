@@ -6,6 +6,7 @@
 import { randomBytes, randomUUID } from "crypto";
 import bcrypt from "bcryptjs";
 import prisma from "../../config/prisma";
+import { recordAdminActivity } from "../../services/admin-activity-log.service";
 import { normalizeYoutubeVideoUrlForStorage } from "../../utils/youtube-url";
 import type { EventStatus, SessionType, SessionStatus, User } from "@prisma/client";
 import type { UserRole } from "@prisma/client";
@@ -702,10 +703,13 @@ export async function createEventAdmin(params: CreateEventAdminParams) {
     city: eventData.city,
   });
 
-  await prisma.adminLog.create({
-    data: {
-      adminId,
-      adminType,
+  await recordAdminActivity(
+    {
+      sub: adminId,
+      role: adminType,
+      domain: "ADMIN",
+    },
+    {
       action: "EVENT_CREATED",
       resource: "EVENT",
       resourceId: createdEvent.id,
@@ -719,10 +723,8 @@ export async function createEventAdmin(params: CreateEventAdminParams) {
         spaceCount: createdEvent.exhibitionSpaces?.length ?? 0,
         status: createdEvent.status,
       },
-      ipAddress: ipAddress ?? undefined,
-      userAgent: userAgent ?? undefined,
     },
-  });
+  );
 
   return {
     success: true,

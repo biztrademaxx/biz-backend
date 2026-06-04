@@ -112,7 +112,7 @@ function classifyCreatedEntries(log) {
         entries.push({ key: "bulkImports", count: 1 });
         return entries;
     }
-    if (a === "EVENT_CREATED" || a.includes("EVENT_CREATED")) {
+    if (a === "EVENT_CREATED") {
         entries.push({ key: "events", count: 1 });
         return entries;
     }
@@ -141,7 +141,7 @@ function classifyUpdatedEntries(log) {
             { key: "bulkImports", count: n },
         ];
     }
-    if (a.includes("EVENT_UPDATED") || (a.includes("UPDATED") && r === "EVENT")) {
+    if (a === "EVENT_UPDATED") {
         return [{ key: "events", count: 1 }];
     }
     if (a.includes("ORGANIZER_UPDATED") || (a.includes("UPDATED") && r === "ORGANIZER" && !a.includes("BULK"))) {

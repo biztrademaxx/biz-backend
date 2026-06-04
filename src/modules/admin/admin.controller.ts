@@ -126,6 +126,13 @@ export async function adminVerifyEventHandler(req: Request, res: Response) {
       });
     }
 
+    await recordAdminActivity(req.auth, {
+      action: "EVENT_UPDATED",
+      resource: "EVENT",
+      resourceId: id,
+      details: { kind: "verify", isVerified },
+    });
+
     return res.json({
       success: true,
       data: result.event,
@@ -179,12 +186,20 @@ export async function adminUpdateEventHandler(req: Request, res: Response) {
       });
     }
 
+    if ("error" in result) {
+      return res.status(400).json({
+        success: false,
+        error: String(result.error),
+      });
+    }
+
     await recordAdminActivity(req.auth, {
       action: "EVENT_UPDATED",
       resource: "EVENT",
       resourceId: id,
       details: {
-        title: (result as { event?: { title?: string } }).event?.title ?? null,
+        title: result.event?.title ?? null,
+        kind: "edit",
       },
     });
 
@@ -251,6 +266,13 @@ export async function adminApproveEventHandler(req: Request, res: Response) {
       });
     }
 
+    await recordAdminActivity(req.auth, {
+      action: "EVENT_UPDATED",
+      resource: "EVENT",
+      resourceId: eventId,
+      details: { kind: "approve" },
+    });
+
     return res.json({
       success: true,
       data: result.event,
@@ -286,6 +308,13 @@ export async function adminRejectEventHandler(req: Request, res: Response) {
         error: "Event not found",
       });
     }
+
+    await recordAdminActivity(req.auth, {
+      action: "EVENT_UPDATED",
+      resource: "EVENT",
+      resourceId: eventId,
+      details: { kind: "reject" },
+    });
 
     return res.json({
       success: true,
