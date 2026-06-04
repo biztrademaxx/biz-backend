@@ -3,8 +3,145 @@ import { parseListQuery } from "../../../lib/admin-response";
 import type { UserRole } from "@prisma/client";
 import { randomBytes } from "crypto";
 import { resolveFrontendBase, sendUserAccountAccessEmail } from "../../../services/email.service";
+import {
+  applyOrganizerLocationBodyAliases,
+  resolveOrganizerLocationFields,
+} from "../../../utils/organizer-location-resolve";
 
 const ROLE: UserRole = "ORGANIZER";
+
+const ORGANIZER_ADMIN_SELECT = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  email: true,
+  phone: true,
+  company: true,
+  avatar: true,
+  role: true,
+  isActive: true,
+  isVerified: true,
+  lastLogin: true,
+  createdAt: true,
+  updatedAt: true,
+  organizationName: true,
+  description: true,
+  headquarters: true,
+  location: true,
+  organizerCountry: true,
+  organizerState: true,
+  organizerCity: true,
+  profileCountry: true,
+  profileState: true,
+  profileCity: true,
+  website: true,
+  founded: true,
+  teamSize: true,
+  specialties: true,
+  achievements: true,
+  certifications: true,
+  businessEmail: true,
+  businessPhone: true,
+  businessAddress: true,
+  taxId: true,
+  totalEvents: true,
+  activeEvents: true,
+  totalAttendees: true,
+  totalRevenue: true,
+  averageRating: true,
+  totalReviews: true,
+  _count: {
+    select: {
+      organizedEvents: true,
+    },
+  },
+} as const;
+
+type OrganizerAdminRow = {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
+  phone: string | null;
+  company: string | null;
+  avatar: string | null;
+  role: UserRole;
+  isActive: boolean;
+  isVerified: boolean;
+  lastLogin: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  organizationName: string | null;
+  description: string | null;
+  headquarters: string | null;
+  location: string | null;
+  organizerCountry: string | null;
+  organizerState: string | null;
+  organizerCity: string | null;
+  profileCountry: string | null;
+  profileState: string | null;
+  profileCity: string | null;
+  website: string | null;
+  founded: string | null;
+  teamSize: string | null;
+  specialties: string[];
+  achievements: string[];
+  certifications: string[];
+  businessEmail: string | null;
+  businessPhone: string | null;
+  businessAddress: string | null;
+  taxId: string | null;
+  totalEvents: number;
+  activeEvents: number;
+  totalAttendees: number;
+  totalRevenue: number;
+  averageRating: number | null;
+  totalReviews: number | null;
+  _count?: { organizedEvents: number };
+};
+
+function mapOrganizerForAdmin(u: OrganizerAdminRow) {
+  const loc = resolveOrganizerLocationFields(u);
+  return {
+    id: u.id,
+    firstName: u.firstName,
+    lastName: u.lastName,
+    email: u.email,
+    phone: u.phone,
+    company: u.company,
+    avatar: u.avatar,
+    role: u.role,
+    isActive: u.isActive,
+    isVerified: u.isVerified,
+    lastLogin: u.lastLogin ? u.lastLogin.toISOString() : null,
+    createdAt: u.createdAt.toISOString(),
+    updatedAt: u.updatedAt.toISOString(),
+    organizationName: u.organizationName,
+    description: u.description,
+    headquarters: u.headquarters,
+    location: u.location,
+    organizerCountry: loc.organizerCountry || null,
+    organizerState: loc.organizerState || null,
+    organizerCity: loc.organizerCity || null,
+    website: u.website,
+    founded: u.founded,
+    teamSize: u.teamSize,
+    specialties: u.specialties,
+    achievements: u.achievements,
+    certifications: u.certifications,
+    businessEmail: u.businessEmail,
+    businessPhone: u.businessPhone,
+    businessAddress: u.businessAddress,
+    taxId: u.taxId,
+    totalEvents: u._count?.organizedEvents ?? u.totalEvents,
+    activeEvents: u.activeEvents,
+    totalAttendees: u.totalAttendees,
+    totalRevenue: u.totalRevenue,
+    averageRating: u.averageRating ?? 0,
+    totalReviews: u.totalReviews ?? 0,
+    _count: u._count,
+  };
+}
 
 export async function listOrganizers(query: Record<string, unknown>) {
   const { page, limit, search, skip, sort, order } = parseListQuery(query);
@@ -44,131 +181,29 @@ export async function listOrganizers(query: Record<string, unknown>) {
       skip,
       take: limit,
       orderBy: { [sort]: order },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        email: true,
-        phone: true,
-        company: true,
-        avatar: true,
-        role: true,
-        isActive: true,
-        isVerified: true,
-        lastLogin: true,
-        createdAt: true,
-        updatedAt: true,
-        organizationName: true,
-        description: true,
-        headquarters: true,
-        location: true,
-        organizerCountry: true,
-        organizerState: true,
-        organizerCity: true,
-        website: true,
-        founded: true,
-        teamSize: true,
-        specialties: true,
-        achievements: true,
-        certifications: true,
-        businessEmail: true,
-        businessPhone: true,
-        businessAddress: true,
-        taxId: true,
-        totalEvents: true,
-        activeEvents: true,
-        totalAttendees: true,
-        totalRevenue: true,
-        averageRating: true,
-        totalReviews: true,
-        _count: {
-          select: {
-            organizedEvents: true,
-          },
-        },
-      },
+      select: ORGANIZER_ADMIN_SELECT,
     }),
     prisma.user.count({ where }),
   ]);
-  const data = items.map((u) => ({
-    id: u.id,
-    firstName: u.firstName,
-    lastName: u.lastName,
-    email: u.email,
-    phone: u.phone,
-    company: u.company,
-    avatar: u.avatar,
-    role: u.role,
-    isActive: u.isActive,
-    isVerified: u.isVerified,
-    lastLogin: u.lastLogin ? u.lastLogin.toISOString() : null,
-    createdAt: u.createdAt.toISOString(),
-    updatedAt: u.updatedAt.toISOString(),
-    organizationName: u.organizationName,
-    description: u.description,
-    headquarters: u.headquarters,
-    location: u.location,
-    organizerCountry: u.organizerCountry,
-    organizerState: u.organizerState,
-    organizerCity: u.organizerCity,
-    website: u.website,
-    founded: u.founded,
-    teamSize: u.teamSize,
-    specialties: u.specialties,
-    achievements: u.achievements,
-    certifications: u.certifications,
-    businessEmail: u.businessEmail,
-    businessPhone: u.businessPhone,
-    businessAddress: u.businessAddress,
-    taxId: u.taxId,
-    // Prefer live relation count — User.totalEvents is often stale vs Event rows
-    totalEvents: u._count.organizedEvents,
-    activeEvents: u.activeEvents,
-    totalAttendees: u.totalAttendees,
-    totalRevenue: u.totalRevenue,
-    averageRating: u.averageRating ?? 0,
-    totalReviews: u.totalReviews ?? 0,
-    _count: u._count,
-  }));
+  const data = items.map((u) => mapOrganizerForAdmin(u as OrganizerAdminRow));
   return { data, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
 }
 
 export async function getOrganizerById(id: string) {
   const user = await prisma.user.findFirst({
     where: { id, role: ROLE },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      email: true,
-      phone: true,
-      company: true,
-      isActive: true,
-      isVerified: true,
-      createdAt: true,
-      updatedAt: true,
-      totalEvents: true,
-      activeEvents: true,
-      description: true,
-      website: true,
-      headquarters: true,
-      location: true,
-      organizerCountry: true,
-      organizerState: true,
-      organizerCity: true,
-      organizationName: true,
-    },
+    select: ORGANIZER_ADMIN_SELECT,
   });
   if (!user) return null;
+  const mapped = mapOrganizerForAdmin(user as OrganizerAdminRow);
   return {
-    ...user,
+    ...mapped,
     name: `${user.firstName || ""} ${user.lastName || ""}`.trim(),
-    createdAt: user.createdAt.toISOString(),
-    updatedAt: user.updatedAt.toISOString(),
   };
 }
 
 export async function createOrganizer(body: Record<string, unknown>) {
+  applyOrganizerLocationBodyAliases(body);
   const email = String(body.email ?? "").trim().toLowerCase();
   if (!email) throw new Error("Email is required");
   const existing = await prisma.user.findFirst({ where: { email, role: ROLE } });
@@ -211,6 +246,7 @@ export async function createOrganizer(body: Record<string, unknown>) {
 }
 
 export async function updateOrganizer(id: string, body: Record<string, unknown>) {
+  applyOrganizerLocationBodyAliases(body);
   const existing = await prisma.user.findFirst({ where: { id, role: ROLE } });
   if (!existing) return null;
   const allowed = [

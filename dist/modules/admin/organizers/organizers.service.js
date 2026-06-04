@@ -16,7 +16,96 @@ const prisma_1 = __importDefault(require("../../../config/prisma"));
 const admin_response_1 = require("../../../lib/admin-response");
 const crypto_1 = require("crypto");
 const email_service_1 = require("../../../services/email.service");
+const organizer_location_resolve_1 = require("../../../utils/organizer-location-resolve");
 const ROLE = "ORGANIZER";
+const ORGANIZER_ADMIN_SELECT = {
+    id: true,
+    firstName: true,
+    lastName: true,
+    email: true,
+    phone: true,
+    company: true,
+    avatar: true,
+    role: true,
+    isActive: true,
+    isVerified: true,
+    lastLogin: true,
+    createdAt: true,
+    updatedAt: true,
+    organizationName: true,
+    description: true,
+    headquarters: true,
+    location: true,
+    organizerCountry: true,
+    organizerState: true,
+    organizerCity: true,
+    profileCountry: true,
+    profileState: true,
+    profileCity: true,
+    website: true,
+    founded: true,
+    teamSize: true,
+    specialties: true,
+    achievements: true,
+    certifications: true,
+    businessEmail: true,
+    businessPhone: true,
+    businessAddress: true,
+    taxId: true,
+    totalEvents: true,
+    activeEvents: true,
+    totalAttendees: true,
+    totalRevenue: true,
+    averageRating: true,
+    totalReviews: true,
+    _count: {
+        select: {
+            organizedEvents: true,
+        },
+    },
+};
+function mapOrganizerForAdmin(u) {
+    const loc = (0, organizer_location_resolve_1.resolveOrganizerLocationFields)(u);
+    return {
+        id: u.id,
+        firstName: u.firstName,
+        lastName: u.lastName,
+        email: u.email,
+        phone: u.phone,
+        company: u.company,
+        avatar: u.avatar,
+        role: u.role,
+        isActive: u.isActive,
+        isVerified: u.isVerified,
+        lastLogin: u.lastLogin ? u.lastLogin.toISOString() : null,
+        createdAt: u.createdAt.toISOString(),
+        updatedAt: u.updatedAt.toISOString(),
+        organizationName: u.organizationName,
+        description: u.description,
+        headquarters: u.headquarters,
+        location: u.location,
+        organizerCountry: loc.organizerCountry || null,
+        organizerState: loc.organizerState || null,
+        organizerCity: loc.organizerCity || null,
+        website: u.website,
+        founded: u.founded,
+        teamSize: u.teamSize,
+        specialties: u.specialties,
+        achievements: u.achievements,
+        certifications: u.certifications,
+        businessEmail: u.businessEmail,
+        businessPhone: u.businessPhone,
+        businessAddress: u.businessAddress,
+        taxId: u.taxId,
+        totalEvents: u._count?.organizedEvents ?? u.totalEvents,
+        activeEvents: u.activeEvents,
+        totalAttendees: u.totalAttendees,
+        totalRevenue: u.totalRevenue,
+        averageRating: u.averageRating ?? 0,
+        totalReviews: u.totalReviews ?? 0,
+        _count: u._count,
+    };
+}
 async function listOrganizers(query) {
     const { page, limit, search, skip, sort, order } = (0, admin_response_1.parseListQuery)(query);
     const country = String(query.country ?? "").trim();
@@ -52,130 +141,28 @@ async function listOrganizers(query) {
             skip,
             take: limit,
             orderBy: { [sort]: order },
-            select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                email: true,
-                phone: true,
-                company: true,
-                avatar: true,
-                role: true,
-                isActive: true,
-                isVerified: true,
-                lastLogin: true,
-                createdAt: true,
-                updatedAt: true,
-                organizationName: true,
-                description: true,
-                headquarters: true,
-                location: true,
-                organizerCountry: true,
-                organizerState: true,
-                organizerCity: true,
-                website: true,
-                founded: true,
-                teamSize: true,
-                specialties: true,
-                achievements: true,
-                certifications: true,
-                businessEmail: true,
-                businessPhone: true,
-                businessAddress: true,
-                taxId: true,
-                totalEvents: true,
-                activeEvents: true,
-                totalAttendees: true,
-                totalRevenue: true,
-                averageRating: true,
-                totalReviews: true,
-                _count: {
-                    select: {
-                        organizedEvents: true,
-                    },
-                },
-            },
+            select: ORGANIZER_ADMIN_SELECT,
         }),
         prisma_1.default.user.count({ where }),
     ]);
-    const data = items.map((u) => ({
-        id: u.id,
-        firstName: u.firstName,
-        lastName: u.lastName,
-        email: u.email,
-        phone: u.phone,
-        company: u.company,
-        avatar: u.avatar,
-        role: u.role,
-        isActive: u.isActive,
-        isVerified: u.isVerified,
-        lastLogin: u.lastLogin ? u.lastLogin.toISOString() : null,
-        createdAt: u.createdAt.toISOString(),
-        updatedAt: u.updatedAt.toISOString(),
-        organizationName: u.organizationName,
-        description: u.description,
-        headquarters: u.headquarters,
-        location: u.location,
-        organizerCountry: u.organizerCountry,
-        organizerState: u.organizerState,
-        organizerCity: u.organizerCity,
-        website: u.website,
-        founded: u.founded,
-        teamSize: u.teamSize,
-        specialties: u.specialties,
-        achievements: u.achievements,
-        certifications: u.certifications,
-        businessEmail: u.businessEmail,
-        businessPhone: u.businessPhone,
-        businessAddress: u.businessAddress,
-        taxId: u.taxId,
-        // Prefer live relation count — User.totalEvents is often stale vs Event rows
-        totalEvents: u._count.organizedEvents,
-        activeEvents: u.activeEvents,
-        totalAttendees: u.totalAttendees,
-        totalRevenue: u.totalRevenue,
-        averageRating: u.averageRating ?? 0,
-        totalReviews: u.totalReviews ?? 0,
-        _count: u._count,
-    }));
+    const data = items.map((u) => mapOrganizerForAdmin(u));
     return { data, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
 }
 async function getOrganizerById(id) {
     const user = await prisma_1.default.user.findFirst({
         where: { id, role: ROLE },
-        select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            phone: true,
-            company: true,
-            isActive: true,
-            isVerified: true,
-            createdAt: true,
-            updatedAt: true,
-            totalEvents: true,
-            activeEvents: true,
-            description: true,
-            website: true,
-            headquarters: true,
-            location: true,
-            organizerCountry: true,
-            organizerState: true,
-            organizerCity: true,
-            organizationName: true,
-        },
+        select: ORGANIZER_ADMIN_SELECT,
     });
     if (!user)
         return null;
+    const mapped = mapOrganizerForAdmin(user);
     return {
-        ...user,
+        ...mapped,
         name: `${user.firstName || ""} ${user.lastName || ""}`.trim(),
-        createdAt: user.createdAt.toISOString(),
-        updatedAt: user.updatedAt.toISOString(),
     };
 }
 async function createOrganizer(body) {
+    (0, organizer_location_resolve_1.applyOrganizerLocationBodyAliases)(body);
     const email = String(body.email ?? "").trim().toLowerCase();
     if (!email)
         throw new Error("Email is required");
@@ -216,6 +203,7 @@ async function createOrganizer(body) {
     return getOrganizerById(user.id);
 }
 async function updateOrganizer(id, body) {
+    (0, organizer_location_resolve_1.applyOrganizerLocationBodyAliases)(body);
     const existing = await prisma_1.default.user.findFirst({ where: { id, role: ROLE } });
     if (!existing)
         return null;
