@@ -939,6 +939,60 @@ export async function listEventAttendees(eventId: string) {
   }));
 }
 
+const ATTENDEE_LEAD_TYPES = new Set(["attendee", "visitor", "visit", "guest"]);
+
+export function isAttendeeLeadType(type: string): boolean {
+  return ATTENDEE_LEAD_TYPES.has(String(type || "").toLowerCase().trim());
+}
+
+const interestedEventInclude = {
+  ticketTypes: true,
+  venue: true,
+  organizer: true,
+} as const;
+
+/** Saved events + visit (attendee) leads for visitor dashboard “interested events”. */
+export async function listInterestedEventsForUser(userId: string) {
+  const [saved, visitLeads] = await Promise.all([
+    prisma.savedEvent.findMany({
+      where: { userId },
+      include: { event: { include: interestedEventInclude } },
+      orderBy: { savedAt: "desc" },
+    }),
+    prisma.eventLead.findMany({
+      where: {
+        userId,
+        eventId: { not: null },
+        type: { in: ["attendee", "visitor", "visit", "guest", "ATTENDEE", "VISITOR"] },
+      },
+      include: { event: { include: interestedEventInclude } },
+      orderBy: { createdAt: "desc" },
+    }),
+  ]);
+
+  const byEventId = new Map<string, { event: NonNullable<(typeof saved)[0]["event"]>; sortAt: Date; leadMeta?: { leadId: string; leadType: string } }>();
+
+  for (const row of saved) {
+    if (!row.event) continue;
+    byEventId.set(row.event.id, { event: row.event, sortAt: row.savedAt });
+  }
+
+  for (const lead of visitLeads) {
+    if (!lead.event?.id) continue;
+    if (!byEventId.has(lead.event.id)) {
+      byEventId.set(lead.event.id, {
+        event: lead.event,
+        sortAt: lead.createdAt,
+        leadMeta: { leadId: lead.id, leadType: "visitor" },
+      });
+    }
+  }
+
+  return Array.from(byEventId.values())
+    .sort((a, b) => b.sortAt.getTime() - a.sortAt.getTime())
+    .map(({ event, leadMeta }) => ({ event, leadMeta }));
+}
+
 // Create or reuse an event lead (user interest in event)
 export async function createEventLead(args: {
   eventId: string;
@@ -946,6 +1000,7 @@ export async function createEventLead(args: {
   type: string;
 }) {
   const { eventId, userId, type } = args;
+  const normalizedType = isAttendeeLeadType(type) ? "attendee" : String(type || "").trim();
 
   const event = await prisma.event.findUnique({
     where: { id: eventId },
@@ -967,11 +1022,16 @@ export async function createEventLead(args: {
     where: {
       eventId,
       userId,
-      type,
+      ...(isAttendeeLeadType(normalizedType)
+        ? { type: { in: ["attendee", "visitor", "visit", "guest", "ATTENDEE", "VISITOR"] } }
+        : { type: normalizedType }),
     },
   });
 
   if (existing) {
+    if (isAttendeeLeadType(normalizedType)) {
+      await saveEvent(userId, eventId);
+    }
     return {
       success: true as const,
       alreadyExists: true as const,
@@ -984,10 +1044,14 @@ export async function createEventLead(args: {
     data: {
       eventId,
       userId,
-      type,
+      type: normalizedType,
       status: "NEW",
     },
   });
+
+  if (isAttendeeLeadType(normalizedType)) {
+    await saveEvent(userId, eventId);
+  }
 
   return {
     success: true as const,
