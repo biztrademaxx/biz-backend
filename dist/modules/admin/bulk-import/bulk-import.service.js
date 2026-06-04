@@ -283,21 +283,39 @@ async function importOrganizersFromFile(params) {
     }
     const successCount = createdCount + updatedCount;
     if (params.adminId) {
+        const adminType = params.adminType ?? "SUPER_ADMIN";
+        const importDetails = {
+            processed: rows.length,
+            successCount,
+            createdCount,
+            updatedCount,
+            errorCount: errors.length,
+        };
         await prisma_1.default.adminLog.create({
             data: {
                 adminId: params.adminId,
-                adminType: params.adminType ?? "SUPER_ADMIN",
+                adminType,
                 action: "ADMIN_ORGANIZER_BULK_IMPORTED",
                 resource: "ORGANIZER",
-                details: {
-                    processed: rows.length,
-                    successCount,
-                    createdCount,
-                    updatedCount,
-                    errorCount: errors.length,
-                },
+                details: importDetails,
             },
         });
+        if (updatedCount > 0) {
+            await prisma_1.default.adminLog.create({
+                data: {
+                    adminId: params.adminId,
+                    adminType,
+                    action: "ADMIN_ORGANIZER_BULK_UPDATED",
+                    resource: "ORGANIZER",
+                    details: {
+                        processed: rows.length,
+                        updatedCount,
+                        createdCount,
+                        errorCount: errors.length,
+                    },
+                },
+            });
+        }
     }
     return {
         processed: rows.length,

@@ -44,6 +44,7 @@ exports.remove = remove;
 const admin_response_1 = require("../../../lib/admin-response");
 const service = __importStar(require("./speakers.service"));
 const prisma_1 = __importDefault(require("../../../config/prisma"));
+const admin_activity_log_service_1 = require("../../../services/admin-activity-log.service");
 async function list(req, res) {
     try {
         const result = await service.listSpeakers(req.query);
@@ -95,6 +96,15 @@ async function update(req, res) {
         const item = await service.updateSpeaker(req.params.id, req.body ?? {});
         if (!item)
             return (0, admin_response_1.sendError)(res, 404, "Speaker not found");
+        await (0, admin_activity_log_service_1.recordAdminActivity)(req.auth, {
+            action: "ADMIN_SPEAKER_UPDATED",
+            resource: "SPEAKER",
+            resourceId: item.id ?? req.params.id,
+            details: {
+                email: item.email ?? null,
+                name: `${item.firstName ?? ""} ${item.lastName ?? ""}`.trim(),
+            },
+        });
         return (0, admin_response_1.sendOne)(res, item);
     }
     catch (e) {

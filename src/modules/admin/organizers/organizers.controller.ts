@@ -4,6 +4,7 @@ import * as service from "./organizers.service";
 import * as promoAdmin from "../promotions/promotions-admin.service";
 import prisma from "../../../config/prisma";
 import { importOrganizersFromFile } from "../bulk-import/bulk-import.service";
+import { recordAdminActivity } from "../../../services/admin-activity-log.service";
 
 export async function list(req: Request, res: Response) {
   try {
@@ -53,6 +54,15 @@ export async function update(req: Request, res: Response) {
   try {
     const item = await service.updateOrganizer(req.params.id, req.body ?? {});
     if (!item) return sendError(res, 404, "Organizer not found");
+    await recordAdminActivity(req.auth, {
+      action: "ADMIN_ORGANIZER_UPDATED",
+      resource: "ORGANIZER",
+      resourceId: (item as { id?: string }).id ?? req.params.id,
+      details: {
+        email: (item as { email?: string }).email ?? null,
+        organizationName: (item as { organizationName?: string }).organizationName ?? null,
+      },
+    });
     return sendOne(res, item);
   } catch (e: any) {
     return sendError(res, 500, "Failed to update organizer", e?.message);

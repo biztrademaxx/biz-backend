@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { sendList, sendOne, sendError } from "../../../lib/admin-response";
 import * as service from "./speakers.service";
 import prisma from "../../../config/prisma";
+import { recordAdminActivity } from "../../../services/admin-activity-log.service";
 
 export async function list(req: Request, res: Response) {
   try {
@@ -51,6 +52,15 @@ export async function update(req: Request, res: Response) {
   try {
     const item = await service.updateSpeaker(req.params.id, req.body ?? {});
     if (!item) return sendError(res, 404, "Speaker not found");
+    await recordAdminActivity(req.auth, {
+      action: "ADMIN_SPEAKER_UPDATED",
+      resource: "SPEAKER",
+      resourceId: (item as { id?: string }).id ?? req.params.id,
+      details: {
+        email: (item as { email?: string }).email ?? null,
+        name: `${(item as { firstName?: string }).firstName ?? ""} ${(item as { lastName?: string }).lastName ?? ""}`.trim(),
+      },
+    });
     return sendOne(res, item);
   } catch (e: any) {
     return sendError(res, 500, "Failed to update speaker", e?.message);

@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { recordAdminActivity } from "../../services/admin-activity-log.service";
 import {
   adminListEvents,
   adminGetEventById,
@@ -177,6 +178,15 @@ export async function adminUpdateEventHandler(req: Request, res: Response) {
         error: (result as { message?: string }).message ?? "Invalid YouTube URL",
       });
     }
+
+    await recordAdminActivity(req.auth, {
+      action: "EVENT_UPDATED",
+      resource: "EVENT",
+      resourceId: id,
+      details: {
+        title: (result as { event?: { title?: string } }).event?.title ?? null,
+      },
+    });
 
     return res.json({
       success: true,
