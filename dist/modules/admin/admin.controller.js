@@ -15,6 +15,7 @@ exports.adminGetEventOverviewHandler = adminGetEventOverviewHandler;
 exports.adminGetEventCategoriesHandler = adminGetEventCategoriesHandler;
 exports.adminGetEventMailCandidatesHandler = adminGetEventMailCandidatesHandler;
 exports.adminSendEventListingEmailHandler = adminSendEventListingEmailHandler;
+const admin_activity_log_service_1 = require("../../services/admin-activity-log.service");
 const admin_service_1 = require("./admin.service");
 async function adminGetEventsHandler(req, res) {
     try {
@@ -115,6 +116,12 @@ async function adminVerifyEventHandler(req, res) {
                 error: "Event not found",
             });
         }
+        await (0, admin_activity_log_service_1.recordAdminActivity)(req.auth, {
+            action: "EVENT_UPDATED",
+            resource: "EVENT",
+            resourceId: id,
+            details: { kind: "verify", isVerified },
+        });
         return res.json({
             success: true,
             data: result.event,
@@ -163,6 +170,21 @@ async function adminUpdateEventHandler(req, res) {
                 error: result.message ?? "Invalid YouTube URL",
             });
         }
+        if ("error" in result) {
+            return res.status(400).json({
+                success: false,
+                error: String(result.error),
+            });
+        }
+        await (0, admin_activity_log_service_1.recordAdminActivity)(req.auth, {
+            action: "EVENT_UPDATED",
+            resource: "EVENT",
+            resourceId: id,
+            details: {
+                title: result.event?.title ?? null,
+                kind: "edit",
+            },
+        });
         return res.json({
             success: true,
             data: result.event,
@@ -220,6 +242,12 @@ async function adminApproveEventHandler(req, res) {
                 error: "Event not found",
             });
         }
+        await (0, admin_activity_log_service_1.recordAdminActivity)(req.auth, {
+            action: "EVENT_UPDATED",
+            resource: "EVENT",
+            resourceId: eventId,
+            details: { kind: "approve" },
+        });
         return res.json({
             success: true,
             data: result.event,
@@ -252,6 +280,12 @@ async function adminRejectEventHandler(req, res) {
                 error: "Event not found",
             });
         }
+        await (0, admin_activity_log_service_1.recordAdminActivity)(req.auth, {
+            action: "EVENT_UPDATED",
+            resource: "EVENT",
+            resourceId: eventId,
+            details: { kind: "reject" },
+        });
         return res.json({
             success: true,
             data: result.event,

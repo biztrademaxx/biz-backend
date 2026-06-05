@@ -54,6 +54,7 @@ const service = __importStar(require("./organizers.service"));
 const promoAdmin = __importStar(require("../promotions/promotions-admin.service"));
 const prisma_1 = __importDefault(require("../../../config/prisma"));
 const bulk_import_service_1 = require("../bulk-import/bulk-import.service");
+const admin_activity_log_service_1 = require("../../../services/admin-activity-log.service");
 async function list(req, res) {
     try {
         const result = await service.listOrganizers(req.query);
@@ -105,6 +106,15 @@ async function update(req, res) {
         const item = await service.updateOrganizer(req.params.id, req.body ?? {});
         if (!item)
             return (0, admin_response_1.sendError)(res, 404, "Organizer not found");
+        await (0, admin_activity_log_service_1.recordAdminActivity)(req.auth, {
+            action: "ADMIN_ORGANIZER_UPDATED",
+            resource: "ORGANIZER",
+            resourceId: item.id ?? req.params.id,
+            details: {
+                email: item.email ?? null,
+                organizationName: item.organizationName ?? null,
+            },
+        });
         return (0, admin_response_1.sendOne)(res, item);
     }
     catch (e) {

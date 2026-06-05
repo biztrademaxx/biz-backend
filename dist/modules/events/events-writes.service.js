@@ -14,6 +14,7 @@ exports.createSpeakerSession = createSpeakerSession;
 const crypto_1 = require("crypto");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const prisma_1 = __importDefault(require("../../config/prisma"));
+const admin_activity_log_service_1 = require("../../services/admin-activity-log.service");
 const youtube_url_1 = require("../../utils/youtube-url");
 function trimTextField(v) {
     if (v == null)
@@ -664,25 +665,23 @@ async function createEventAdmin(params) {
         state: eventData.state,
         city: eventData.city,
     });
-    await prisma_1.default.adminLog.create({
-        data: {
-            adminId,
-            adminType,
-            action: "EVENT_CREATED",
-            resource: "EVENT",
-            resourceId: createdEvent.id,
-            details: {
-                title: createdEvent.title,
-                organizerId: createdEvent.organizerId,
-                venueId: createdEvent.venueId,
-                importSource: body.importSource === "spreadsheet" ? "spreadsheet" : "manual",
-                speakerCount: createdEvent.speakerSessions?.length ?? 0,
-                exhibitorCount: createdEvent.exhibitorBooths?.length ?? 0,
-                spaceCount: createdEvent.exhibitionSpaces?.length ?? 0,
-                status: createdEvent.status,
-            },
-            ipAddress: ipAddress ?? undefined,
-            userAgent: userAgent ?? undefined,
+    await (0, admin_activity_log_service_1.recordAdminActivity)({
+        sub: adminId,
+        role: adminType,
+        domain: "ADMIN",
+    }, {
+        action: "EVENT_CREATED",
+        resource: "EVENT",
+        resourceId: createdEvent.id,
+        details: {
+            title: createdEvent.title,
+            organizerId: createdEvent.organizerId,
+            venueId: createdEvent.venueId,
+            importSource: body.importSource === "spreadsheet" ? "spreadsheet" : "manual",
+            speakerCount: createdEvent.speakerSessions?.length ?? 0,
+            exhibitorCount: createdEvent.exhibitorBooths?.length ?? 0,
+            spaceCount: createdEvent.exhibitionSpaces?.length ?? 0,
+            status: createdEvent.status,
         },
     });
     return {

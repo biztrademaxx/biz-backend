@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { AdminType, Prisma } from "@prisma/client";
 import prisma from "../../../config/prisma";
 import { parseWorkbookToRows } from "../event-import/event-import.service";
 import { createVenue, normalizeVenueName } from "../venues/venues.service";
@@ -377,21 +377,40 @@ export async function importOrganizersFromFile(params: {
   const successCount = createdCount + updatedCount;
 
   if (params.adminId) {
+    const adminType: AdminType = params.adminType ?? "SUPER_ADMIN";
+    const importDetails = {
+      processed: rows.length,
+      successCount,
+      createdCount,
+      updatedCount,
+      errorCount: errors.length,
+    } as Prisma.InputJsonValue;
+
     await prisma.adminLog.create({
       data: {
         adminId: params.adminId,
-        adminType: params.adminType ?? "SUPER_ADMIN",
+        adminType,
         action: "ADMIN_ORGANIZER_BULK_IMPORTED",
         resource: "ORGANIZER",
-        details: {
-          processed: rows.length,
-          successCount,
-          createdCount,
-          updatedCount,
-          errorCount: errors.length,
-        },
+        details: importDetails,
       },
     });
+    if (updatedCount > 0) {
+      await prisma.adminLog.create({
+        data: {
+          adminId: params.adminId,
+          adminType,
+          action: "ADMIN_ORGANIZER_BULK_UPDATED",
+          resource: "ORGANIZER",
+          details: {
+            processed: rows.length,
+            updatedCount,
+            createdCount,
+            errorCount: errors.length,
+          } as Prisma.InputJsonValue,
+        },
+      });
+    }
   }
 
   return {

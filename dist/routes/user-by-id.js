@@ -10,6 +10,7 @@ const public_profile_1 = require("../utils/public-profile");
 const display_name_1 = require("../utils/display-name");
 const profile_slug_1 = require("../utils/profile-slug");
 const speakers_service_1 = require("../modules/speakers/speakers.service");
+const events_service_1 = require("../modules/events/events.service");
 const router = (0, express_1.Router)();
 function buildLocationPayload(user) {
     const city = user.profileCity?.trim() ?? "";
@@ -461,23 +462,11 @@ router.get("/users/:id/interested-events", async (req, res) => {
             .json({ success: false, error: "User not found" });
     }
     try {
-        const saved = await prisma_1.default.savedEvent.findMany({
-            where: { userId: id },
-            include: {
-                event: {
-                    include: {
-                        ticketTypes: true,
-                        venue: true,
-                        organizer: true,
-                    },
-                },
-            },
-            orderBy: { savedAt: "desc" },
-        });
-        const rawEvents = saved
-            .map((s) => s.event)
-            .filter((e) => Boolean(e));
-        const events = rawEvents.map((e) => toFrontendEvent(e));
+        const rows = await (0, events_service_1.listInterestedEventsForUser)(id);
+        const events = rows.map(({ event, leadMeta }) => ({
+            ...toFrontendEvent(event),
+            ...(leadMeta ?? {}),
+        }));
         return res.json({
             success: true,
             data: events,

@@ -54,6 +54,7 @@ const service = __importStar(require("./exhibitors.service"));
 const appointments_service_1 = require("../../appointments/appointments.service");
 const promoAdmin = __importStar(require("../promotions/promotions-admin.service"));
 const prisma_1 = __importDefault(require("../../../config/prisma"));
+const admin_activity_log_service_1 = require("../../../services/admin-activity-log.service");
 async function list(req, res) {
     try {
         const result = await service.listExhibitors(req.query);
@@ -114,6 +115,15 @@ async function update(req, res) {
         const item = await service.updateExhibitor(req.params.id, req.body ?? {});
         if (!item)
             return (0, admin_response_1.sendError)(res, 404, "Exhibitor not found");
+        await (0, admin_activity_log_service_1.recordAdminActivity)(req.auth, {
+            action: "ADMIN_EXHIBITOR_UPDATED",
+            resource: "EXHIBITOR",
+            resourceId: item.id ?? req.params.id,
+            details: {
+                email: item.email ?? null,
+                company: item.company ?? null,
+            },
+        });
         return (0, admin_response_1.sendOne)(res, item);
     }
     catch (e) {

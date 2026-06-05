@@ -24,43 +24,175 @@ async function getUserGrowth() {
 async function getRevenue() {
     return { total: 0, byEvent: [], byMonth: [] };
 }
-function startOfDay(d) {
-    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-}
+const CREATED_ACTIONS = [
+    "EVENT_CREATED",
+    "ADMIN_ORGANIZER_CREATED",
+    "ADMIN_EXHIBITOR_CREATED",
+    "ADMIN_SPEAKER_CREATED",
+    "ADMIN_EVENT_BULK_IMPORT_STARTED",
+    "ADMIN_EVENT_BULK_IMPORT_COMPLETED",
+    "ADMIN_ORGANIZER_BULK_IMPORTED",
+    "ADMIN_VENUE_BULK_IMPORTED",
+];
+const UPDATED_ACTIONS = [
+    "EVENT_UPDATED",
+    "ADMIN_ORGANIZER_UPDATED",
+    "ADMIN_EXHIBITOR_UPDATED",
+    "ADMIN_SPEAKER_UPDATED",
+    "ADMIN_ORGANIZER_BULK_UPDATED",
+];
+/** Calendar bucketing timezone (en-CA yields YYYY-MM-DD). */
+const ANALYTICS_TIMEZONE = process.env.ADMIN_ANALYTICS_TIMEZONE ?? "Asia/Kolkata";
 function formatDay(d) {
-    return d.toISOString().slice(0, 10);
+    return new Intl.DateTimeFormat("en-CA", {
+        timeZone: ANALYTICS_TIMEZONE,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).format(d);
 }
 function startOfWeek(d) {
     const day = d.getDay();
-    const diff = (day + 6) % 7; // monday-based
+    const diff = (day + 6) % 7;
     const out = new Date(d);
     out.setDate(out.getDate() - diff);
     out.setHours(0, 0, 0, 0);
     return out;
 }
 function formatWeek(d) {
-    return `${formatDay(startOfWeek(d))}`;
+    return formatDay(startOfWeek(d));
 }
 function formatMonth(d) {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    return formatDay(d).slice(0, 7);
 }
-function classify(log) {
-    const a = String(log.action || "").toUpperCase();
-    const r = String(log.resource || "").toUpperCase();
-    if (a.includes("EVENT_BULK_IMPORT") || r === "EVENT_IMPORT")
-        return "bulkImports";
-    if (a.includes("EVENT_CREATED") || r === "EVENT")
-        return "events";
-    if (a.includes("ORGANIZER_CREATED") || r === "ORGANIZER")
-        return "organizers";
-    if (a.includes("EXHIBITOR_CREATED") || r === "EXHIBITOR")
-        return "exhibitors";
-    if (a.includes("SPEAKER_CREATED") || r === "SPEAKER")
-        return "speakers";
+function emptyCounts() {
+    return { events: 0, organizers: 0, exhibitors: 0, speakers: 0, bulkImports: 0, total: 0 };
+}
+function emptyUpdatedSlice() {
+    return {
+        eventsUpdated: 0,
+        organizersUpdated: 0,
+        exhibitorsUpdated: 0,
+        speakersUpdated: 0,
+        bulkImportsUpdated: 0,
+        totalUpdated: 0,
+    };
+}
+function createBucket(period = "") {
+    return { ...emptyCounts(), ...emptyUpdatedSlice(), period };
+}
+function parseLogDetails(details) {
+    if (details && typeof details === "object" && !Array.isArray(details)) {
+        return details;
+    }
     return null;
 }
-function createBucket() {
-    return { period: "", events: 0, organizers: 0, exhibitors: 0, speakers: 0, bulkImports: 0, total: 0 };
+function positiveInt(value, fallback = 1) {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+/** Excel / bulk uploads may produce multiple created metrics per log row. */
+function classifyCreatedEntries(log) {
+    const a = String(log.action || "").toUpperCase();
+    const r = String(log.resource || "").toUpperCase();
+    const details = parseLogDetails(log.details);
+    const entries = [];
+    if (a === "ADMIN_ORGANIZER_BULK_IMPORTED") {
+        const created = positiveInt(details?.createdCount, 0);
+        if (created > 0)
+            entries.push({ key: "organizers", count: created });
+        entries.push({ key: "bulkImports", count: 1 });
+        return entries;
+    }
+    if (a.includes("VENUE_BULK_IMPORTED")) {
+        entries.push({ key: "bulkImports", count: positiveInt(details?.createdCount ?? details?.successCount, 1) });
+        return entries;
+    }
+    if (a.includes("EVENT_BULK_IMPORT") || r === "EVENT_IMPORT") {
+        entries.push({ key: "bulkImports", count: 1 });
+        return entries;
+    }
+    if (a === "EVENT_CREATED") {
+        entries.push({ key: "events", count: 1 });
+        return entries;
+    }
+    if (a.includes("ORGANIZER_CREATED") || (r === "ORGANIZER" && !a.includes("BULK"))) {
+        entries.push({ key: "organizers", count: 1 });
+        return entries;
+    }
+    if (a.includes("EXHIBITOR_CREATED") || r === "EXHIBITOR") {
+        entries.push({ key: "exhibitors", count: 1 });
+        return entries;
+    }
+    if (a.includes("SPEAKER_CREATED") || r === "SPEAKER") {
+        entries.push({ key: "speakers", count: 1 });
+        return entries;
+    }
+    return entries;
+}
+function classifyUpdatedEntries(log) {
+    const a = String(log.action || "").toUpperCase();
+    const r = String(log.resource || "").toUpperCase();
+    const details = parseLogDetails(log.details);
+    if (a === "ADMIN_ORGANIZER_BULK_UPDATED" || (a.includes("ORGANIZER_BULK") && a.includes("UPDATED"))) {
+        const n = positiveInt(details?.updatedCount ?? details?.count, 1);
+        return [
+            { key: "organizers", count: n },
+            { key: "bulkImports", count: n },
+        ];
+    }
+    if (a === "EVENT_UPDATED") {
+        return [{ key: "events", count: 1 }];
+    }
+    if (a.includes("ORGANIZER_UPDATED") || (a.includes("UPDATED") && r === "ORGANIZER" && !a.includes("BULK"))) {
+        return [{ key: "organizers", count: 1 }];
+    }
+    if (a.includes("EXHIBITOR_UPDATED") || (a.includes("UPDATED") && r === "EXHIBITOR")) {
+        return [{ key: "exhibitors", count: 1 }];
+    }
+    if (a.includes("SPEAKER_UPDATED") || (a.includes("UPDATED") && r === "SPEAKER")) {
+        return [{ key: "speakers", count: 1 }];
+    }
+    return [];
+}
+function applyCreated(bucket, key, count) {
+    bucket[key] += count;
+    bucket.total += count;
+}
+function applyUpdatedKey(target, key, count) {
+    if (key === "events")
+        target.eventsUpdated += count;
+    else if (key === "organizers")
+        target.organizersUpdated += count;
+    else if (key === "exhibitors")
+        target.exhibitorsUpdated += count;
+    else if (key === "speakers")
+        target.speakersUpdated += count;
+    else if (key === "bulkImports")
+        target.bulkImportsUpdated += count;
+}
+function applyUpdatedEntries(target, entries) {
+    if (entries.length === 0)
+        return;
+    let totalAdd = 0;
+    for (const entry of entries) {
+        applyUpdatedKey(target, entry.key, entry.count);
+        totalAdd = Math.max(totalAdd, entry.count);
+    }
+    target.totalUpdated += totalAdd;
+}
+function initSubAdminRow(admin) {
+    return {
+        adminId: admin.id,
+        name: admin.name || "Sub Admin",
+        email: admin.email || "",
+        isActive: admin.isActive,
+        lastLogin: admin.lastLogin ? admin.lastLogin.toISOString() : null,
+        lastActivityAt: null,
+        onlineStatus: "OFFLINE",
+        ...emptyCounts(),
+        ...emptyUpdatedSlice(),
+    };
 }
 async function getSubAdminActivityAnalytics(params) {
     const since = new Date();
@@ -68,15 +200,10 @@ async function getSubAdminActivityAnalytics(params) {
     const where = {
         adminType: "SUB_ADMIN",
         createdAt: { gte: since },
-        action: {
-            in: [
-                "EVENT_CREATED",
-                "ADMIN_ORGANIZER_CREATED",
-                "ADMIN_EXHIBITOR_CREATED",
-                "ADMIN_SPEAKER_CREATED",
-                "ADMIN_EVENT_BULK_IMPORT_STARTED",
-            ],
-        },
+        OR: [
+            { action: { in: [...CREATED_ACTIONS] } },
+            { action: { in: [...UPDATED_ACTIONS] } },
+        ],
     };
     if (params.adminId)
         where.adminId = params.adminId;
@@ -88,6 +215,7 @@ async function getSubAdminActivityAnalytics(params) {
             action: true,
             resource: true,
             resourceId: true,
+            details: true,
             createdAt: true,
         },
     });
@@ -102,70 +230,74 @@ async function getSubAdminActivityAnalytics(params) {
     const bySubAdmin = new Map();
     const lastActivityByAdmin = new Map();
     const eventIds = [];
-    const totals = createBucket();
+    const totalsCreated = emptyCounts();
+    const totalsUpdated = emptyUpdatedSlice();
     for (const admin of subAdmins) {
-        bySubAdmin.set(admin.id, {
-            adminId: admin.id,
-            name: admin.name || "Sub Admin",
-            email: admin.email || "",
-            isActive: admin.isActive,
-            lastLogin: admin.lastLogin ? admin.lastLogin.toISOString() : null,
-            lastActivityAt: null,
-            onlineStatus: "OFFLINE",
-            events: 0,
-            organizers: 0,
-            exhibitors: 0,
-            speakers: 0,
-            bulkImports: 0,
-            total: 0,
-        });
+        bySubAdmin.set(admin.id, initSubAdminRow(admin));
     }
     for (const log of logs) {
-        const key = classify(log);
-        if (!key)
-            continue;
         const when = new Date(log.createdAt);
-        const dayKey = formatDay(startOfDay(when));
+        const dayKey = formatDay(when);
         const weekKey = formatWeek(when);
         const monthKey = formatMonth(when);
-        const d = daily.get(dayKey) ?? { ...createBucket(), period: dayKey };
-        d[key] += 1;
-        d.total += 1;
-        daily.set(dayKey, d);
-        const w = weekly.get(weekKey) ?? { ...createBucket(), period: weekKey };
-        w[key] += 1;
-        w.total += 1;
-        weekly.set(weekKey, w);
-        const m = monthly.get(monthKey) ?? { ...createBucket(), period: monthKey };
-        m[key] += 1;
-        m.total += 1;
-        monthly.set(monthKey, m);
-        totals[key] += 1;
-        totals.total += 1;
-        if (key === "events" && log.resourceId)
-            eventIds.push(log.resourceId);
-        const existingLast = lastActivityByAdmin.get(log.adminId);
-        if (!existingLast || when > existingLast) {
-            lastActivityByAdmin.set(log.adminId, when);
-        }
-        const sub = bySubAdmin.get(log.adminId) ?? {
-            adminId: log.adminId,
-            name: subAdminMap.get(log.adminId)?.name ?? "Unknown",
-            email: subAdminMap.get(log.adminId)?.email ?? "",
-            isActive: subAdminMap.get(log.adminId)?.isActive ?? false,
-            lastLogin: subAdminMap.get(log.adminId)?.lastLogin?.toISOString() ?? null,
-            lastActivityAt: null,
-            onlineStatus: "OFFLINE",
-            events: 0,
-            organizers: 0,
-            exhibitors: 0,
-            speakers: 0,
-            bulkImports: 0,
-            total: 0,
+        const bumpActivity = () => {
+            const existingLast = lastActivityByAdmin.get(log.adminId);
+            if (!existingLast || when > existingLast) {
+                lastActivityByAdmin.set(log.adminId, when);
+            }
         };
-        sub[key] += 1;
-        sub.total += 1;
-        bySubAdmin.set(log.adminId, sub);
+        const createdEntries = classifyCreatedEntries(log);
+        if (createdEntries.length > 0) {
+            bumpActivity();
+            for (const entry of createdEntries) {
+                const d = daily.get(dayKey) ?? createBucket(dayKey);
+                applyCreated(d, entry.key, entry.count);
+                daily.set(dayKey, d);
+                const w = weekly.get(weekKey) ?? createBucket(weekKey);
+                applyCreated(w, entry.key, entry.count);
+                weekly.set(weekKey, w);
+                const m = monthly.get(monthKey) ?? createBucket(monthKey);
+                applyCreated(m, entry.key, entry.count);
+                monthly.set(monthKey, m);
+                applyCreated(totalsCreated, entry.key, entry.count);
+                if (entry.key === "events" && log.resourceId)
+                    eventIds.push(log.resourceId);
+                const sub = bySubAdmin.get(log.adminId) ??
+                    initSubAdminRow({
+                        id: log.adminId,
+                        name: subAdminMap.get(log.adminId)?.name ?? null,
+                        email: subAdminMap.get(log.adminId)?.email ?? null,
+                        isActive: subAdminMap.get(log.adminId)?.isActive ?? false,
+                        lastLogin: subAdminMap.get(log.adminId)?.lastLogin ?? null,
+                    });
+                applyCreated(sub, entry.key, entry.count);
+                bySubAdmin.set(log.adminId, sub);
+            }
+        }
+        const updatedEntries = classifyUpdatedEntries(log);
+        if (updatedEntries.length > 0) {
+            bumpActivity();
+            const d = daily.get(dayKey) ?? createBucket(dayKey);
+            const w = weekly.get(weekKey) ?? createBucket(weekKey);
+            const m = monthly.get(monthKey) ?? createBucket(monthKey);
+            const sub = bySubAdmin.get(log.adminId) ??
+                initSubAdminRow({
+                    id: log.adminId,
+                    name: subAdminMap.get(log.adminId)?.name ?? null,
+                    email: subAdminMap.get(log.adminId)?.email ?? null,
+                    isActive: subAdminMap.get(log.adminId)?.isActive ?? false,
+                    lastLogin: subAdminMap.get(log.adminId)?.lastLogin ?? null,
+                });
+            applyUpdatedEntries(d, updatedEntries);
+            applyUpdatedEntries(w, updatedEntries);
+            applyUpdatedEntries(m, updatedEntries);
+            applyUpdatedEntries(totalsUpdated, updatedEntries);
+            applyUpdatedEntries(sub, updatedEntries);
+            daily.set(dayKey, d);
+            weekly.set(weekKey, w);
+            monthly.set(monthKey, m);
+            bySubAdmin.set(log.adminId, sub);
+        }
     }
     const ONLINE_WINDOW_MS = 15 * 60 * 1000;
     const now = Date.now();
@@ -205,11 +337,12 @@ async function getSubAdminActivityAnalytics(params) {
     return {
         generatedAt: new Date().toISOString(),
         scope: params.adminId ? "self" : "all-sub-admins",
-        totals,
+        totals: totalsCreated,
+        totalsUpdated,
         daily: Array.from(daily.values()),
         weekly: Array.from(weekly.values()),
         monthly: Array.from(monthly.values()),
         eventCountries,
-        bySubAdmin: Array.from(bySubAdmin.values()).sort((a, b) => b.total - a.total),
+        bySubAdmin: Array.from(bySubAdmin.values()).sort((a, b) => b.total + b.totalUpdated - (a.total + a.totalUpdated)),
     };
 }

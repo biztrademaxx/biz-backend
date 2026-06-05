@@ -54,6 +54,13 @@ async function getOrganizersHandler(req, res) {
         const country = typeof req.query.country === "string" ? req.query.country : undefined;
         const city = typeof req.query.city === "string" ? req.query.city : undefined;
         const category = typeof req.query.category === "string" ? req.query.category : undefined;
+        const eventsBucket = typeof req.query.eventsBucket === "string" ? req.query.eventsBucket : undefined;
+        const followersBucket = typeof req.query.followersBucket === "string" ? req.query.followersBucket : undefined;
+        const prioritizeCountry = typeof req.query.prioritizeCountry === "string" ? req.query.prioritizeCountry : undefined;
+        const prioritizeCountryCode = typeof req.query.prioritizeCountryCode === "string"
+            ? req.query.prioritizeCountryCode
+            : undefined;
+        const prioritizeCity = typeof req.query.prioritizeCity === "string" ? req.query.prioritizeCity : undefined;
         const result = await (0, organizers_service_1.listOrganizers)({
             requireProfileImage,
             paginate,
@@ -63,6 +70,11 @@ async function getOrganizersHandler(req, res) {
             country,
             city,
             category,
+            eventsBucket,
+            followersBucket,
+            prioritizeCountry,
+            prioritizeCountryCode,
+            prioritizeCity,
         });
         return res.json({
             organizers: result.organizers,

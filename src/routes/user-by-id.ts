@@ -5,6 +5,7 @@ import { canUserViewOwnPrivateProfile, activePublicProfileUserWhere } from "../u
 import { getDisplayName } from "../utils/display-name";
 import { getPublicProfileSlug, isUuidLike, publicSlugRequestMatches } from "../utils/profile-slug";
 import { resolveSpeakerId } from "../modules/speakers/speakers.service";
+import { listInterestedEventsForUser } from "../modules/events/events.service";
 
 const router = Router();
 
@@ -519,24 +520,11 @@ router.get(
     }
 
     try {
-      const saved = await prisma.savedEvent.findMany({
-        where: { userId: id },
-        include: {
-          event: {
-            include: {
-              ticketTypes: true,
-              venue: true,
-              organizer: true,
-            },
-          },
-        },
-        orderBy: { savedAt: "desc" },
-      });
-
-      const rawEvents = saved
-        .map((s) => s.event)
-        .filter((e): e is NonNullable<typeof e> => Boolean(e));
-      const events = rawEvents.map((e) => toFrontendEvent(e));
+      const rows = await listInterestedEventsForUser(id);
+      const events = rows.map(({ event, leadMeta }) => ({
+        ...toFrontendEvent(event),
+        ...(leadMeta ?? {}),
+      }));
 
       return res.json({
         success: true,

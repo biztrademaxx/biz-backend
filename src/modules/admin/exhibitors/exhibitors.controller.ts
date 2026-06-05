@@ -4,6 +4,7 @@ import * as service from "./exhibitors.service";
 import { updateEventAppointment } from "../../appointments/appointments.service";
 import * as promoAdmin from "../promotions/promotions-admin.service";
 import prisma from "../../../config/prisma";
+import { recordAdminActivity } from "../../../services/admin-activity-log.service";
 
 export async function list(req: Request, res: Response) {
   try {
@@ -62,6 +63,15 @@ export async function update(req: Request, res: Response) {
   try {
     const item = await service.updateExhibitor(req.params.id, req.body ?? {});
     if (!item) return sendError(res, 404, "Exhibitor not found");
+    await recordAdminActivity(req.auth, {
+      action: "ADMIN_EXHIBITOR_UPDATED",
+      resource: "EXHIBITOR",
+      resourceId: (item as { id?: string }).id ?? req.params.id,
+      details: {
+        email: (item as { email?: string }).email ?? null,
+        company: (item as { company?: string }).company ?? null,
+      },
+    });
     return sendOne(res, item);
   } catch (e: any) {
     return sendError(res, 500, "Failed to update exhibitor", e?.message);

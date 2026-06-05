@@ -474,6 +474,25 @@ async function runImportJob(jobId) {
             importedSummary: importedSummary,
         },
     });
+    if (job.createdByAdminId) {
+        await prisma_1.default.adminLog.create({
+            data: {
+                adminId: job.createdByAdminId,
+                adminType,
+                action: "ADMIN_EVENT_BULK_IMPORT_COMPLETED",
+                resource: "EVENT_IMPORT",
+                resourceId: jobId,
+                details: {
+                    fileName: job.fileName,
+                    processed: rows.length,
+                    successCount: importedSummary.length,
+                    createdCount: importedSummary.length,
+                    updatedCount: 0,
+                    errorCount: errors.length,
+                },
+            },
+        });
+    }
     // Manual dispatch only (from Admin Events -> Mail tab).
     // await sendThankYouEmails(importedSummary);
 }
