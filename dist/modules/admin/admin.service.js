@@ -1081,6 +1081,7 @@ async function adminGetEventMailCandidates() {
             organizerEmail: email,
             organizerName: [organizer?.firstName, organizer?.lastName].filter(Boolean).join(" ").trim() || "Organizer",
             createdAt: row.createdAt.toISOString(),
+            emailVerified: false,
         });
     }
     for (const job of importJobs) {
@@ -1097,10 +1098,42 @@ async function adminGetEventMailCandidates() {
                 organizerEmail: email,
                 organizerName: "Organizer",
                 createdAt: job.createdAt.toISOString(),
+                emailVerified: false,
             });
         }
     }
-    return out.slice(0, 500);
+    const uniqueEmails = [
+        ...new Set(out.map((row) => row.organizerEmail.trim().toLowerCase()).filter(Boolean)),
+    ];
+    const organizerUsers = uniqueEmails.length
+        ? await prisma_1.default.user.findMany({
+            where: { email: { in: uniqueEmails }, role: "ORGANIZER" },
+            select: {
+                email: true,
+                emailVerified: true,
+                firstName: true,
+                lastName: true,
+            },
+        })
+        : [];
+    const organizerByEmail = new Map(organizerUsers
+        .filter((u) => typeof u.email === "string" && u.email.trim() !== "")
+        .map((u) => [u.email.trim().toLowerCase(), u]));
+    const enriched = out.map((row) => {
+        const emailKey = row.organizerEmail.trim().toLowerCase();
+        const user = organizerByEmail.get(emailKey);
+        const nameFromUser = user
+            ? [user.firstName, user.lastName].filter(Boolean).join(" ").trim()
+            : "";
+        return {
+            ...row,
+            emailVerified: user?.emailVerified ?? false,
+            organizerName: row.organizerName && row.organizerName !== "Organizer"
+                ? row.organizerName
+                : nameFromUser || row.organizerName,
+        };
+    });
+    return enriched.slice(0, 500);
 }
 async function adminSendEventListingEmail(params) {
     const organizerEmail = params.organizerEmail.trim().toLowerCase();

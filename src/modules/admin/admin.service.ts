@@ -1126,6 +1126,7 @@ type EventMailListRow = {
   organizerEmail: string;
   organizerName: string;
   createdAt: string;
+  emailVerified: boolean;
 };
 
 function asObject(v: unknown): Record<string, unknown> {
@@ -1191,6 +1192,7 @@ export async function adminGetEventMailCandidates(): Promise<EventMailListRow[]>
       organizerEmail: email,
       organizerName: [organizer?.firstName, organizer?.lastName].filter(Boolean).join(" ").trim() || "Organizer",
       createdAt: row.createdAt.toISOString(),
+      emailVerified: false,
     });
   }
 
@@ -1207,11 +1209,48 @@ export async function adminGetEventMailCandidates(): Promise<EventMailListRow[]>
         organizerEmail: email,
         organizerName: "Organizer",
         createdAt: job.createdAt.toISOString(),
+        emailVerified: false,
       });
     }
   }
 
-  return out.slice(0, 500);
+  const uniqueEmails = [
+    ...new Set(out.map((row) => row.organizerEmail.trim().toLowerCase()).filter(Boolean)),
+  ];
+  const organizerUsers = uniqueEmails.length
+    ? await prisma.user.findMany({
+        where: { email: { in: uniqueEmails }, role: "ORGANIZER" },
+        select: {
+          email: true,
+          emailVerified: true,
+          firstName: true,
+          lastName: true,
+        },
+      })
+    : [];
+  const organizerByEmail = new Map(
+    organizerUsers
+      .filter((u): u is typeof u & { email: string } => typeof u.email === "string" && u.email.trim() !== "")
+      .map((u) => [u.email.trim().toLowerCase(), u]),
+  );
+
+  const enriched = out.map((row) => {
+    const emailKey = row.organizerEmail.trim().toLowerCase();
+    const user = organizerByEmail.get(emailKey);
+    const nameFromUser = user
+      ? [user.firstName, user.lastName].filter(Boolean).join(" ").trim()
+      : "";
+    return {
+      ...row,
+      emailVerified: user?.emailVerified ?? false,
+      organizerName:
+        row.organizerName && row.organizerName !== "Organizer"
+          ? row.organizerName
+          : nameFromUser || row.organizerName,
+    };
+  });
+
+  return enriched.slice(0, 500);
 }
 
 export async function adminSendEventListingEmail(params: { organizerEmail: string; eventTitles: string[] }) {
