@@ -30,6 +30,19 @@ function corsAllowedOrigins() {
     const origins = new Set(list.filter((o) => o !== "*"));
     return { allowAny, origins };
 }
+/** Allow any `https://*.biztradefairs.com` app origin (dev, www, staging, etc.). */
+function isBiztradefairsHttpsOrigin(origin) {
+    try {
+        const u = new URL(origin);
+        if (u.protocol !== "https:")
+            return false;
+        const host = u.hostname.toLowerCase();
+        return host === "biztradefairs.com" || host.endsWith(".biztradefairs.com");
+    }
+    catch {
+        return false;
+    }
+}
 /** When `CORS_ALLOW_VERCEL_APP=true`, allow any `https://*.vercel.app` preview / production URL. */
 function isVercelAppHttpsOrigin(origin) {
     try {
@@ -62,6 +75,9 @@ function createApp() {
                 return callback(null, true);
             }
             if (allowVercelApp && isVercelAppHttpsOrigin(origin)) {
+                return callback(null, true);
+            }
+            if (isBiztradefairsHttpsOrigin(origin)) {
                 return callback(null, true);
             }
             return callback(null, false);
