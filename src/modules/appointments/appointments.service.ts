@@ -268,6 +268,11 @@ export async function listVenueAppointments(params: { venueId?: string; requeste
             lastName: true,
             email: true,
             avatar: true,
+            venueName: true,
+            venueCity: true,
+            venueState: true,
+            venueCountry: true,
+            venueAddress: true,
           },
         },
         visitor: {

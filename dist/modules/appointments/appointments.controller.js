@@ -7,6 +7,7 @@ exports.getVenueAppointmentsHandler = getVenueAppointmentsHandler;
 exports.createVenueAppointmentHandler = createVenueAppointmentHandler;
 exports.updateVenueAppointmentHandler = updateVenueAppointmentHandler;
 const appointments_service_1 = require("./appointments.service");
+const profile_location_1 = require("../../utils/profile-location");
 // ─── Event–exhibitor appointments (Schedule Meeting) ───────────────────────
 async function getAppointmentsHandler(req, res) {
     try {
@@ -128,62 +129,70 @@ async function getVenueAppointmentsHandler(req, res) {
     try {
         const { venueId, requesterId } = req.query;
         const result = await (0, appointments_service_1.listVenueAppointments)({ venueId, requesterId });
-        const apiAppointments = result.appointments.map((apt) => ({
-            id: apt.id,
-            venueId: apt.venueId,
-            requesterId: apt.visitorId ?? "",
-            title: apt.purpose ?? "Venue booking",
-            requester: apt.visitor
-                ? {
-                    id: apt.visitor.id,
-                    firstName: apt.visitor.firstName,
-                    lastName: apt.visitor.lastName,
-                    email: apt.visitor.email,
-                    avatar: apt.visitor.avatar,
-                }
-                : {
-                    id: "",
-                    firstName: "Guest",
-                    lastName: "",
-                    email: "",
-                    avatar: null,
-                },
-            venue: apt.venue
-                ? {
-                    id: apt.venue.id,
-                    firstName: apt.venue.firstName ?? "",
-                    lastName: apt.venue.lastName ?? "",
-                    email: apt.venue.email ?? "",
-                    avatar: apt.venue.avatar ?? null,
-                }
-                : {
-                    id: "",
-                    firstName: "Venue",
-                    lastName: "",
-                    email: "",
-                    avatar: null,
-                },
-            requesterPhone: apt.visitor?.phone ?? "",
-            requesterCompany: apt.visitor?.company ?? "",
-            requesterTitle: apt.visitor?.jobTitle ?? "",
-            requestedDate: apt.requestedDate?.toISOString?.() ?? new Date().toISOString(),
-            requestedTime: apt.requestedTime ?? "09:00",
-            duration: apt.duration ?? 30,
-            purpose: apt.purpose ?? "",
-            status: apt.status ?? "PENDING",
-            priority: apt.priority ?? "MEDIUM",
-            notes: apt.notes ?? "",
-            meetingLink: apt.meetingLink ?? "",
-            location: apt.location ?? "",
-            type: apt.type ?? "VENUE_TOUR",
-            meetingType: "IN_PERSON",
-            agenda: [],
-            meetingSpacesInterested: [],
-            reminderSent: false,
-            followUpRequired: false,
-            createdAt: apt.createdAt?.toISOString?.() ?? new Date().toISOString(),
-            updatedAt: apt.updatedAt?.toISOString?.() ?? new Date().toISOString(),
-        }));
+        const apiAppointments = result.appointments.map((apt) => {
+            const venueLocation = (0, profile_location_1.resolveVenueCityCountry)(apt.venue, apt.location);
+            return {
+                id: apt.id,
+                venueId: apt.venueId,
+                requesterId: apt.visitorId ?? "",
+                title: apt.purpose ?? "Venue booking",
+                requester: apt.visitor
+                    ? {
+                        id: apt.visitor.id,
+                        firstName: apt.visitor.firstName,
+                        lastName: apt.visitor.lastName,
+                        email: apt.visitor.email,
+                        avatar: apt.visitor.avatar,
+                    }
+                    : {
+                        id: "",
+                        firstName: "Guest",
+                        lastName: "",
+                        email: "",
+                        avatar: null,
+                    },
+                venue: apt.venue
+                    ? {
+                        id: apt.venue.id,
+                        firstName: apt.venue.firstName ?? "",
+                        lastName: apt.venue.lastName ?? "",
+                        email: apt.venue.email ?? "",
+                        avatar: apt.venue.avatar ?? null,
+                        venueName: apt.venue.venueName ?? "",
+                    }
+                    : {
+                        id: "",
+                        firstName: "Venue",
+                        lastName: "",
+                        email: "",
+                        avatar: null,
+                        venueName: "",
+                    },
+                requesterPhone: apt.visitor?.phone ?? "",
+                requesterCompany: apt.visitor?.company ?? "",
+                requesterTitle: apt.visitor?.jobTitle ?? "",
+                requestedDate: apt.requestedDate?.toISOString?.() ?? new Date().toISOString(),
+                requestedTime: apt.requestedTime ?? "09:00",
+                duration: apt.duration ?? 30,
+                purpose: apt.purpose ?? "",
+                status: apt.status ?? "PENDING",
+                priority: apt.priority ?? "MEDIUM",
+                notes: apt.notes ?? "",
+                meetingLink: apt.meetingLink ?? "",
+                location: apt.location ?? "",
+                city: venueLocation.city,
+                country: venueLocation.country,
+                locationDisplay: venueLocation.display,
+                type: apt.type ?? "VENUE_TOUR",
+                meetingType: "IN_PERSON",
+                agenda: [],
+                meetingSpacesInterested: [],
+                reminderSent: false,
+                followUpRequired: false,
+                createdAt: apt.createdAt?.toISOString?.() ?? new Date().toISOString(),
+                updatedAt: apt.updatedAt?.toISOString?.() ?? new Date().toISOString(),
+            };
+        });
         return res.json({
             success: true,
             data: apiAppointments,

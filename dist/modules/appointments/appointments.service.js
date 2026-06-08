@@ -237,6 +237,11 @@ async function listVenueAppointments(params) {
                         lastName: true,
                         email: true,
                         avatar: true,
+                        venueName: true,
+                        venueCity: true,
+                        venueState: true,
+                        venueCountry: true,
+                        venueAddress: true,
                     },
                 },
                 visitor: {

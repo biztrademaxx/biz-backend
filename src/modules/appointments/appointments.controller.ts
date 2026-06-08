@@ -7,6 +7,7 @@ import {
   createVenueAppointment,
   updateVenueAppointment,
 } from "./appointments.service";
+import { resolveVenueCityCountry } from "../../utils/profile-location";
 
 // ─── Event–exhibitor appointments (Schedule Meeting) ───────────────────────
 
@@ -138,7 +139,10 @@ export async function getVenueAppointmentsHandler(req: Request, res: Response) {
     const { venueId, requesterId } = req.query as { venueId?: string; requesterId?: string };
     const result = await listVenueAppointments({ venueId, requesterId });
 
-    const apiAppointments = result.appointments.map((apt: any) => ({
+    const apiAppointments = result.appointments.map((apt: any) => {
+      const venueLocation = resolveVenueCityCountry(apt.venue, apt.location);
+
+      return {
       id: apt.id,
       venueId: apt.venueId,
       requesterId: apt.visitorId ?? "",
@@ -165,6 +169,7 @@ export async function getVenueAppointmentsHandler(req: Request, res: Response) {
             lastName: apt.venue.lastName ?? "",
             email: apt.venue.email ?? "",
             avatar: apt.venue.avatar ?? null,
+            venueName: apt.venue.venueName ?? "",
           }
         : {
             id: "",
@@ -172,6 +177,7 @@ export async function getVenueAppointmentsHandler(req: Request, res: Response) {
             lastName: "",
             email: "",
             avatar: null,
+            venueName: "",
           },
       requesterPhone: apt.visitor?.phone ?? "",
       requesterCompany: apt.visitor?.company ?? "",
@@ -185,6 +191,9 @@ export async function getVenueAppointmentsHandler(req: Request, res: Response) {
       notes: apt.notes ?? "",
       meetingLink: apt.meetingLink ?? "",
       location: apt.location ?? "",
+      city: venueLocation.city,
+      country: venueLocation.country,
+      locationDisplay: venueLocation.display,
       type: apt.type ?? "VENUE_TOUR",
       meetingType: "IN_PERSON",
       agenda: [],
@@ -193,7 +202,8 @@ export async function getVenueAppointmentsHandler(req: Request, res: Response) {
       followUpRequired: false,
       createdAt: apt.createdAt?.toISOString?.() ?? new Date().toISOString(),
       updatedAt: apt.updatedAt?.toISOString?.() ?? new Date().toISOString(),
-    }));
+    };
+    });
 
     return res.json({
       success: true,

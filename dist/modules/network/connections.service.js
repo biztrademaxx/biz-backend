@@ -11,6 +11,44 @@ exports.rejectConnection = rejectConnection;
 exports.deleteConnection = deleteConnection;
 const prisma_1 = __importDefault(require("../../config/prisma"));
 const client_1 = require("@prisma/client");
+const profile_location_1 = require("../../utils/profile-location");
+const connectionUserSelect = {
+    id: true,
+    firstName: true,
+    lastName: true,
+    email: true,
+    avatar: true,
+    role: true,
+    company: true,
+    jobTitle: true,
+    lastLogin: true,
+    profileCity: true,
+    profileState: true,
+    profileCountry: true,
+    organizerCity: true,
+    organizerState: true,
+    organizerCountry: true,
+    location: true,
+    headquarters: true,
+};
+function mapConnectionUser(other) {
+    const loc = (0, profile_location_1.resolveUserCityCountry)(other);
+    return {
+        firstName: other.firstName,
+        lastName: other.lastName,
+        email: other.email ?? undefined,
+        avatar: other.avatar ?? undefined,
+        role: other.role,
+        company: other.company ?? undefined,
+        jobTitle: other.jobTitle ?? undefined,
+        lastLogin: other.lastLogin?.toISOString() ?? undefined,
+        profileCity: other.profileCity ?? undefined,
+        profileCountry: other.profileCountry ?? undefined,
+        city: loc.city || undefined,
+        country: loc.country || undefined,
+        locationDisplay: loc.display || undefined,
+    };
+}
 // ─── List connections (accepted + pending outgoing) for the current user ──────
 async function listConnections(userId) {
     const connections = await prisma_1.default.connection.findMany({
@@ -21,32 +59,8 @@ async function listConnections(userId) {
             ],
         },
         include: {
-            requester: {
-                select: {
-                    id: true,
-                    firstName: true,
-                    lastName: true,
-                    email: true,
-                    avatar: true,
-                    role: true,
-                    company: true,
-                    jobTitle: true,
-                    lastLogin: true,
-                },
-            },
-            receiver: {
-                select: {
-                    id: true,
-                    firstName: true,
-                    lastName: true,
-                    email: true,
-                    avatar: true,
-                    role: true,
-                    company: true,
-                    jobTitle: true,
-                    lastLogin: true,
-                },
-            },
+            requester: { select: connectionUserSelect },
+            receiver: { select: connectionUserSelect },
         },
         orderBy: { updatedAt: "desc" },
     });
@@ -57,6 +71,7 @@ async function listConnections(userId) {
             : c.status === client_1.ConnectionStatus.PENDING && c.requesterId === userId
                 ? "pending"
                 : "connected";
+        const mapped = other ? mapConnectionUser(other) : null;
         return {
             connectionId: c.id,
             id: other?.id ?? c.id,
@@ -65,14 +80,19 @@ async function listConnections(userId) {
             receiverId: c.receiverId,
             createdAt: c.createdAt.toISOString(),
             updatedAt: c.updatedAt.toISOString(),
-            firstName: other?.firstName ?? "",
-            lastName: other?.lastName ?? "",
-            email: other?.email ?? undefined,
-            avatar: other?.avatar ?? undefined,
-            role: other?.role,
-            company: other?.company ?? undefined,
-            jobTitle: other?.jobTitle ?? undefined,
-            lastLogin: other?.lastLogin?.toISOString() ?? undefined,
+            firstName: mapped?.firstName ?? other?.firstName ?? "",
+            lastName: mapped?.lastName ?? other?.lastName ?? "",
+            email: mapped?.email,
+            avatar: mapped?.avatar,
+            role: mapped?.role ?? other?.role,
+            company: mapped?.company,
+            jobTitle: mapped?.jobTitle,
+            lastLogin: mapped?.lastLogin,
+            profileCity: mapped?.profileCity,
+            profileCountry: mapped?.profileCountry,
+            city: mapped?.city,
+            country: mapped?.country,
+            locationDisplay: mapped?.locationDisplay,
         };
     });
 }
@@ -84,36 +104,33 @@ async function listConnectionRequests(userId) {
             status: client_1.ConnectionStatus.PENDING,
         },
         include: {
-            requester: {
-                select: {
-                    id: true,
-                    firstName: true,
-                    lastName: true,
-                    email: true,
-                    avatar: true,
-                    role: true,
-                    company: true,
-                    jobTitle: true,
-                },
-            },
+            requester: { select: connectionUserSelect },
         },
         orderBy: { createdAt: "desc" },
     });
-    return connections.map((c) => ({
-        id: c.requester.id,
-        connectionId: c.id,
-        status: "request_received",
-        requesterId: c.requesterId,
-        receiverId: c.receiverId,
-        firstName: c.requester.firstName,
-        lastName: c.requester.lastName,
-        email: c.requester.email ?? undefined,
-        avatar: c.requester.avatar ?? undefined,
-        role: c.requester.role,
-        company: c.requester.company ?? undefined,
-        jobTitle: c.requester.jobTitle ?? undefined,
-        createdAt: c.createdAt.toISOString(),
-    }));
+    return connections.map((c) => {
+        const mapped = mapConnectionUser(c.requester);
+        return {
+            id: c.requester.id,
+            connectionId: c.id,
+            status: "request_received",
+            requesterId: c.requesterId,
+            receiverId: c.receiverId,
+            firstName: mapped.firstName,
+            lastName: mapped.lastName,
+            email: mapped.email,
+            avatar: mapped.avatar,
+            role: mapped.role,
+            company: mapped.company,
+            jobTitle: mapped.jobTitle,
+            profileCity: mapped.profileCity,
+            profileCountry: mapped.profileCountry,
+            city: mapped.city,
+            country: mapped.country,
+            locationDisplay: mapped.locationDisplay,
+            createdAt: c.createdAt.toISOString(),
+        };
+    });
 }
 // ─── Send connection request ───────────────────────────────────────────────
 async function requestConnection(requesterId, receiverId) {

@@ -39,6 +39,7 @@ const prisma_1 = __importDefault(require("../../config/prisma"));
 const event_schedule_1 = require("./event-schedule");
 const public_profile_1 = require("../../utils/public-profile");
 const profile_slug_1 = require("../../utils/profile-slug");
+const profile_location_1 = require("../../utils/profile-location");
 const statusMap = {
     PUBLISHED: "Approved",
     PENDING_APPROVAL: "Pending Review",
@@ -821,6 +822,15 @@ async function listEventAttendees(eventId) {
                     company: true,
                     jobTitle: true,
                     avatar: true,
+                    role: true,
+                    profileCity: true,
+                    profileState: true,
+                    profileCountry: true,
+                    organizerCity: true,
+                    organizerState: true,
+                    organizerCountry: true,
+                    location: true,
+                    headquarters: true,
                 },
             },
             event: {
@@ -840,16 +850,24 @@ async function listEventAttendees(eventId) {
         notes: lead.notes ?? undefined,
         createdAt: lead.createdAt.toISOString(),
         user: lead.user
-            ? {
-                id: lead.user.id,
-                firstName: lead.user.firstName,
-                lastName: lead.user.lastName,
-                email: lead.user.email,
-                phone: lead.user.phone ?? undefined,
-                company: lead.user.company ?? undefined,
-                jobTitle: lead.user.jobTitle ?? undefined,
-                avatar: lead.user.avatar ?? undefined,
-            }
+            ? (() => {
+                const loc = (0, profile_location_1.resolveUserCityCountry)(lead.user);
+                return {
+                    id: lead.user.id,
+                    firstName: lead.user.firstName,
+                    lastName: lead.user.lastName,
+                    email: lead.user.email,
+                    phone: lead.user.phone ?? undefined,
+                    company: lead.user.company ?? undefined,
+                    jobTitle: lead.user.jobTitle ?? undefined,
+                    avatar: lead.user.avatar ?? undefined,
+                    profileCity: lead.user.profileCity ?? undefined,
+                    profileCountry: lead.user.profileCountry ?? undefined,
+                    city: loc.city || undefined,
+                    country: loc.country || undefined,
+                    locationDisplay: loc.display || undefined,
+                };
+            })()
             : null,
         event: lead.event
             ? {
@@ -978,6 +996,15 @@ async function listEventExhibitors(eventId) {
                     avatar: true,
                     company: true,
                     jobTitle: true,
+                    role: true,
+                    profileCity: true,
+                    profileState: true,
+                    profileCountry: true,
+                    organizerCity: true,
+                    organizerState: true,
+                    organizerCountry: true,
+                    location: true,
+                    headquarters: true,
                 },
             },
             space: {
@@ -1041,8 +1068,18 @@ async function listEventExhibitors(eventId) {
     return booths.map((booth) => {
         const exhibitorId = booth.exhibitor?.id ?? booth.exhibitorId;
         const f = followerMap.get(exhibitorId) ?? { count: 0, preview: [] };
+        const loc = booth.exhibitor ? (0, profile_location_1.resolveUserCityCountry)(booth.exhibitor) : { city: "", country: "", display: "" };
+        const exhibitor = booth.exhibitor
+            ? {
+                ...booth.exhibitor,
+                city: loc.city || undefined,
+                country: loc.country || undefined,
+                locationDisplay: loc.display || undefined,
+            }
+            : booth.exhibitor;
         return {
             ...booth,
+            exhibitor,
             followersCount: f.count,
             followerPreview: f.preview,
         };
