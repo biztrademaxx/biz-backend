@@ -45,14 +45,56 @@ export async function listEventAppointments(params: {
           title: true,
           startDate: true,
           endDate: true,
+          city: true,
+          state: true,
+          country: true,
+          venue: {
+            select: {
+              venueName: true,
+              venueCity: true,
+              venueState: true,
+              venueCountry: true,
+            },
+          },
         },
       },
     },
   });
 
+  const boothPairs = appointments.map((a) => ({
+    eventId: a.eventId,
+    exhibitorId: a.exhibitorId,
+  }));
+
+  const booths =
+    boothPairs.length > 0
+      ? await prisma.exhibitorBooth.findMany({
+          where: {
+            OR: boothPairs.map((p) => ({
+              eventId: p.eventId,
+              exhibitorId: p.exhibitorId,
+            })),
+          },
+          select: {
+            eventId: true,
+            exhibitorId: true,
+            boothNumber: true,
+          },
+        })
+      : [];
+
+  const boothByKey = new Map(
+    booths.map((b) => [`${b.eventId}:${b.exhibitorId}`, b.boothNumber])
+  );
+
+  const enriched = appointments.map((apt) => ({
+    ...apt,
+    boothNumber: boothByKey.get(`${apt.eventId}:${apt.exhibitorId}`) ?? null,
+  }));
+
   return {
-    appointments,
-    total: appointments.length,
+    appointments: enriched,
+    total: enriched.length,
   };
 }
 

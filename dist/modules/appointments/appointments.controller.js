@@ -26,6 +26,7 @@ async function getAppointmentsHandler(req, res) {
                 : new Date().toISOString().split("T")[0];
             const reqTime = apt.requestedTime || "09:00";
             const exhibitor = apt.exhibitor;
+            const eventLocation = (0, profile_location_1.resolveEventCityCountry)(apt.event);
             return {
                 id: apt.id,
                 exhibitorId: apt.exhibitorId || "",
@@ -36,11 +37,19 @@ async function getAppointmentsHandler(req, res) {
                 exhibitorEmail: exhibitor?.email || "",
                 exhibitorPhone: exhibitor?.phone || "",
                 exhibitorAvatar: exhibitor?.avatar || null,
+                boothNumber: apt.boothNumber || "",
                 eventId: apt.event?.id || apt.eventId,
                 eventName: apt.event?.title || "Unknown Event",
                 eventTitle: apt.event?.title || "Unknown Event",
                 eventStartDate: apt.event?.startDate ? new Date(apt.event.startDate).toISOString() : null,
                 eventEndDate: apt.event?.endDate ? new Date(apt.event.endDate).toISOString() : null,
+                eventCity: eventLocation.city,
+                eventState: eventLocation.state,
+                eventCountry: eventLocation.country,
+                eventVenue: eventLocation.venueName,
+                locationDisplay: eventLocation.display,
+                city: eventLocation.city,
+                country: eventLocation.country,
                 visitorName: apt.requester
                     ? `${apt.requester.firstName || ""} ${apt.requester.lastName || ""}`.trim()
                     : "Unknown Visitor",

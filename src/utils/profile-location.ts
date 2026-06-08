@@ -88,3 +88,24 @@ export function resolveVenueCityCountry(
   const display = [city, country].filter(Boolean).join(", ");
   return { city, country, display };
 }
+
+type EventLocationSource = {
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+  venue?: (VenueLocationSource & { venueName?: string | null }) | null;
+};
+
+export function resolveEventCityCountry(
+  event: EventLocationSource | null | undefined
+): UserCityCountry & { state: string; venueName: string } {
+  if (!event) return { city: "", state: "", country: "", display: "", venueName: "" };
+
+  const city = String(event.city ?? event.venue?.venueCity ?? "").trim();
+  const state = String(event.state ?? event.venue?.venueState ?? "").trim();
+  const country = String(event.country ?? event.venue?.venueCountry ?? "").trim();
+  const venueName = String(event.venue?.venueName ?? "").trim();
+  const display = [city, country].filter(Boolean).join(", ");
+
+  return { city, state, country, display, venueName };
+}
