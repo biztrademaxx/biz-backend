@@ -129,6 +129,16 @@ function exhibitorSelfIdFromStaleSlug(identifier, viewerUserId, viewerRole) {
     }
     return null;
 }
+function formatExhibitorProfileLocation(user) {
+    const city = user.profileCity?.trim() ?? "";
+    const state = user.profileState?.trim() ?? "";
+    const country = user.profileCountry?.trim() ?? "";
+    const fromParts = [city, state, country].filter(Boolean).join(", ");
+    if (fromParts)
+        return fromParts;
+    const legacy = user.location?.trim() ?? "";
+    return legacy || undefined;
+}
 /** Update exhibitor profile (User with role EXHIBITOR). Persists to PostgreSQL. */
 async function updateExhibitorProfile(id, body, viewerUserId, viewerRole) {
     if (!id || id === "undefined") {
@@ -168,16 +178,55 @@ async function updateExhibitorProfile(id, body, viewerUserId, viewerRole) {
         data.company = body.company === "" ? null : body.company;
     if (body.linkedin !== undefined)
         data.linkedin = body.linkedin === "" ? null : body.linkedin;
-    if (body.location !== undefined)
-        data.location = body.location === "" ? null : body.location;
     if (body.businessEmail !== undefined)
         data.businessEmail = body.businessEmail === "" ? null : body.businessEmail;
     if (body.businessPhone !== undefined)
         data.businessPhone = body.businessPhone === "" ? null : body.businessPhone;
     if (body.businessAddress !== undefined)
         data.businessAddress = body.businessAddress === "" ? null : body.businessAddress;
-    if (Object.keys(data).length === 0) {
+    const locObj = body.location && typeof body.location === "object" && !Array.isArray(body.location)
+        ? body.location
+        : null;
+    const nextCity = body.profileCity !== undefined
+        ? String(body.profileCity ?? "").trim() || null
+        : body.city !== undefined
+            ? String(body.city ?? "").trim() || null
+            : locObj?.city !== undefined
+                ? String(locObj.city ?? "").trim() || null
+                : undefined;
+    const nextState = body.profileState !== undefined
+        ? String(body.profileState ?? "").trim() || null
+        : body.state !== undefined
+            ? String(body.state ?? "").trim() || null
+            : locObj?.state !== undefined
+                ? String(locObj.state ?? "").trim() || null
+                : undefined;
+    const nextCountry = body.profileCountry !== undefined
+        ? String(body.profileCountry ?? "").trim() || null
+        : body.country !== undefined
+            ? String(body.country ?? "").trim() || null
+            : locObj?.country !== undefined
+                ? String(locObj.country ?? "").trim() || null
+                : undefined;
+    const hasProfileLocUpdate = nextCity !== undefined || nextState !== undefined || nextCountry !== undefined;
+    if (typeof body.location === "string" && body.location !== undefined && !hasProfileLocUpdate) {
+        data.location = body.location === "" ? null : body.location;
+    }
+    if (Object.keys(data).length === 0 && !hasProfileLocUpdate) {
         return getExhibitorById(resolvedId, resolvedId);
+    }
+    if (hasProfileLocUpdate) {
+        const current = await prisma_1.default.user.findUnique({
+            where: { id: resolvedId },
+            select: { profileCity: true, profileState: true, profileCountry: true },
+        });
+        const mergedCity = nextCity !== undefined ? nextCity : (current?.profileCity?.trim() || null);
+        const mergedState = nextState !== undefined ? nextState : (current?.profileState?.trim() || null);
+        const mergedCountry = nextCountry !== undefined ? nextCountry : (current?.profileCountry?.trim() || null);
+        data.profileCity = mergedCity;
+        data.profileState = mergedState;
+        data.profileCountry = mergedCountry;
+        data.location = [mergedCity, mergedState, mergedCountry].filter(Boolean).join(", ") || null;
     }
     await prisma_1.default.user.update({
         where: { id: resolvedId },
@@ -280,6 +329,9 @@ async function getExhibitorById(identifier, viewerUserId, viewerRole) {
             company: true,
             linkedin: true,
             location: true,
+            profileCity: true,
+            profileState: true,
+            profileCountry: true,
             isVerified: true,
             createdAt: true,
             companyIndustry: true,
@@ -344,7 +396,10 @@ async function getExhibitorById(identifier, viewerUserId, viewerRole) {
         company: user.company ?? user.organizationName ?? undefined,
         organizationName: user.organizationName ?? user.company ?? undefined,
         linkedin: user.linkedin ?? undefined,
-        location: user.location ?? undefined,
+        profileCity: user.profileCity ?? undefined,
+        profileState: user.profileState ?? undefined,
+        profileCountry: user.profileCountry ?? undefined,
+        location: formatExhibitorProfileLocation(user),
         isVerified: user.isVerified,
         createdAt: user.createdAt.toISOString(),
         industry: user.companyIndustry ?? undefined,

@@ -149,6 +149,21 @@ function exhibitorSelfIdFromStaleSlug(
   return null;
 }
 
+function formatExhibitorProfileLocation(user: {
+  profileCity?: string | null;
+  profileState?: string | null;
+  profileCountry?: string | null;
+  location?: string | null;
+}): string | undefined {
+  const city = user.profileCity?.trim() ?? "";
+  const state = user.profileState?.trim() ?? "";
+  const country = user.profileCountry?.trim() ?? "";
+  const fromParts = [city, state, country].filter(Boolean).join(", ");
+  if (fromParts) return fromParts;
+  const legacy = user.location?.trim() ?? "";
+  return legacy || undefined;
+}
+
 /** Update exhibitor profile (User with role EXHIBITOR). Persists to PostgreSQL. */
 export async function updateExhibitorProfile(
   id: string,
@@ -163,7 +178,13 @@ export async function updateExhibitorProfile(
     jobTitle?: string;
     company?: string;
     linkedin?: string;
-    location?: string;
+    location?: string | { city?: string; state?: string; country?: string };
+    profileCity?: string;
+    profileState?: string;
+    profileCountry?: string;
+    city?: string;
+    state?: string;
+    country?: string;
     businessEmail?: string;
     businessPhone?: string;
     businessAddress?: string;
@@ -201,13 +222,65 @@ export async function updateExhibitorProfile(
   if (body.jobTitle !== undefined) data.jobTitle = body.jobTitle === "" ? null : (body.jobTitle as string);
   if (body.company !== undefined) data.company = body.company === "" ? null : (body.company as string);
   if (body.linkedin !== undefined) data.linkedin = body.linkedin === "" ? null : (body.linkedin as string);
-  if (body.location !== undefined) data.location = body.location === "" ? null : (body.location as string);
   if (body.businessEmail !== undefined) data.businessEmail = body.businessEmail === "" ? null : (body.businessEmail as string);
   if (body.businessPhone !== undefined) data.businessPhone = body.businessPhone === "" ? null : (body.businessPhone as string);
   if (body.businessAddress !== undefined) data.businessAddress = body.businessAddress === "" ? null : (body.businessAddress as string);
 
-  if (Object.keys(data).length === 0) {
+  const locObj =
+    body.location && typeof body.location === "object" && !Array.isArray(body.location)
+      ? (body.location as { city?: string; state?: string; country?: string })
+      : null;
+  const nextCity =
+    body.profileCity !== undefined
+      ? String(body.profileCity ?? "").trim() || null
+      : body.city !== undefined
+        ? String(body.city ?? "").trim() || null
+        : locObj?.city !== undefined
+          ? String(locObj.city ?? "").trim() || null
+          : undefined;
+  const nextState =
+    body.profileState !== undefined
+      ? String(body.profileState ?? "").trim() || null
+      : body.state !== undefined
+        ? String(body.state ?? "").trim() || null
+        : locObj?.state !== undefined
+          ? String(locObj.state ?? "").trim() || null
+          : undefined;
+  const nextCountry =
+    body.profileCountry !== undefined
+      ? String(body.profileCountry ?? "").trim() || null
+      : body.country !== undefined
+        ? String(body.country ?? "").trim() || null
+        : locObj?.country !== undefined
+          ? String(locObj.country ?? "").trim() || null
+          : undefined;
+
+  const hasProfileLocUpdate =
+    nextCity !== undefined || nextState !== undefined || nextCountry !== undefined;
+
+  if (typeof body.location === "string" && body.location !== undefined && !hasProfileLocUpdate) {
+    data.location = body.location === "" ? null : body.location;
+  }
+
+  if (Object.keys(data).length === 0 && !hasProfileLocUpdate) {
     return getExhibitorById(resolvedId, resolvedId);
+  }
+
+  if (hasProfileLocUpdate) {
+    const current = await prisma.user.findUnique({
+      where: { id: resolvedId },
+      select: { profileCity: true, profileState: true, profileCountry: true },
+    });
+    const mergedCity =
+      nextCity !== undefined ? nextCity : (current?.profileCity?.trim() || null);
+    const mergedState =
+      nextState !== undefined ? nextState : (current?.profileState?.trim() || null);
+    const mergedCountry =
+      nextCountry !== undefined ? nextCountry : (current?.profileCountry?.trim() || null);
+    data.profileCity = mergedCity;
+    data.profileState = mergedState;
+    data.profileCountry = mergedCountry;
+    data.location = [mergedCity, mergedState, mergedCountry].filter(Boolean).join(", ") || null;
   }
 
   await prisma.user.update({
@@ -324,6 +397,9 @@ export async function getExhibitorById(
       company: true,
       linkedin: true,
       location: true,
+      profileCity: true,
+      profileState: true,
+      profileCountry: true,
       isVerified: true,
       createdAt: true,
       companyIndustry: true,
@@ -395,7 +471,10 @@ export async function getExhibitorById(
     company: user.company ?? user.organizationName ?? undefined,
     organizationName: user.organizationName ?? user.company ?? undefined,
     linkedin: user.linkedin ?? undefined,
-    location: user.location ?? undefined,
+    profileCity: user.profileCity ?? undefined,
+    profileState: user.profileState ?? undefined,
+    profileCountry: user.profileCountry ?? undefined,
+    location: formatExhibitorProfileLocation(user),
     isVerified: user.isVerified,
     createdAt: user.createdAt.toISOString(),
     industry: user.companyIndustry ?? undefined,
