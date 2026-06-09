@@ -134,9 +134,13 @@ async function remove(req, res) {
 }
 async function listOrganizerConnections(req, res) {
     try {
-        const items = await service.listOrganizerConnectionsForAdmin();
-        // Frontend expects a plain array
-        return res.json(items);
+        const result = await service.listOrganizerConnectionsForAdmin(req.query);
+        return res.json({
+            success: true,
+            data: result.data,
+            pagination: result.pagination,
+            stats: result.stats,
+        });
     }
     catch (e) {
         return (0, admin_response_1.sendError)(res, 500, "Failed to list organizer connections", e?.message);

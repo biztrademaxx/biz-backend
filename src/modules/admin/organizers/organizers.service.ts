@@ -1,6 +1,6 @@
 import prisma from "../../../config/prisma";
 import { parseListQuery } from "../../../lib/admin-response";
-import type { UserRole } from "@prisma/client";
+import type { Prisma, UserRole } from "@prisma/client";
 import { randomBytes } from "crypto";
 import { resolveFrontendBase, sendUserAccountAccessEmail } from "../../../services/email.service";
 import {
@@ -9,6 +9,44 @@ import {
 } from "../../../utils/organizer-location-resolve";
 
 const ROLE: UserRole = "ORGANIZER";
+
+/** Lighter projection for paginated admin list (table + inline view dialog). */
+const ORGANIZER_LIST_SELECT = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  email: true,
+  phone: true,
+  company: true,
+  avatar: true,
+  isActive: true,
+  isVerified: true,
+  lastLogin: true,
+  createdAt: true,
+  updatedAt: true,
+  organizationName: true,
+  description: true,
+  headquarters: true,
+  location: true,
+  organizerCountry: true,
+  organizerState: true,
+  organizerCity: true,
+  specialties: true,
+  certifications: true,
+  businessPhone: true,
+  businessAddress: true,
+  totalEvents: true,
+  activeEvents: true,
+  totalAttendees: true,
+  totalRevenue: true,
+  averageRating: true,
+  totalReviews: true,
+  _count: {
+    select: {
+      organizedEvents: true,
+    },
+  },
+} as const;
 
 const ORGANIZER_ADMIN_SELECT = {
   id: true,
@@ -181,7 +219,7 @@ export async function listOrganizers(query: Record<string, unknown>) {
       skip,
       take: limit,
       orderBy: { [sort]: order },
-      select: ORGANIZER_ADMIN_SELECT,
+      select: ORGANIZER_LIST_SELECT,
     }),
     prisma.user.count({ where }),
   ]);
@@ -372,62 +410,122 @@ type AdminOrganizerFollower = {
   followedAt: string;
 };
 
-export async function listOrganizerConnectionsForAdmin(): Promise<AdminOrganizerConnectionSummary[]> {
-  const organizers = await prisma.user.findMany({
-    where: { role: ROLE },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      email: true,
-      avatar: true,
-      organizationName: true,
-      createdAt: true,
-    },
-  });
+type OrganizerConnectionsStats = {
+  totalOrganizers: number;
+  totalFollowers: number;
+  avgFollowersPerOrganizer: number;
+  topOrganizer: {
+    firstName: string | null;
+    lastName: string | null;
+    totalFollowers: number;
+  } | null;
+};
 
-  const followModel = (prisma as any).follow as {
-    count: (args: any) => Promise<number>;
-  };
+async function getOrganizerConnectionsStatsForAdmin(): Promise<OrganizerConnectionsStats> {
+  const [totalOrganizers, followerGroups] = await Promise.all([
+    prisma.user.count({ where: { role: ROLE } }),
+    prisma.follow.groupBy({
+      by: ["followingId"],
+      _count: { _all: true },
+    }),
+  ]);
 
-  const withStats: AdminOrganizerConnectionSummary[] = [];
+  const totalFollowers = followerGroups.reduce((sum, row) => sum + (row._count._all ?? 0), 0);
+  const avgFollowersPerOrganizer =
+    totalOrganizers > 0 ? Math.round(totalFollowers / totalOrganizers) : 0;
 
-  const now = new Date();
-
-  for (const org of organizers) {
-    let followersCount = 0;
-    if (followModel) {
-      followersCount = await followModel.count({
-        where: { followingId: org.id },
-      });
-    }
-
-    const [totalEvents, activeEvents] = await Promise.all([
-      prisma.event.count({ where: { organizerId: org.id } }),
-      prisma.event.count({
-        where: {
-          organizerId: org.id,
-          status: "PUBLISHED",
-          endDate: { gte: now },
-        },
-      }),
-    ]);
-
-    withStats.push({
-      id: org.id,
-      firstName: org.firstName,
-      lastName: org.lastName,
-      email: org.email ?? "",
-      avatar: org.avatar,
-      organizationName: org.organizationName ?? null,
-      totalFollowers: followersCount,
-      totalEvents,
-      activeEvents,
-      createdAt: org.createdAt.toISOString(),
+  let topOrganizer: OrganizerConnectionsStats["topOrganizer"] = null;
+  if (followerGroups.length > 0) {
+    const topRow = followerGroups.reduce((max, row) =>
+      (row._count._all ?? 0) > (max._count._all ?? 0) ? row : max,
+    );
+    const topUser = await prisma.user.findFirst({
+      where: { id: topRow.followingId, role: ROLE },
+      select: { firstName: true, lastName: true },
     });
+    if (topUser) {
+      topOrganizer = {
+        firstName: topUser.firstName,
+        lastName: topUser.lastName,
+        totalFollowers: topRow._count._all ?? 0,
+      };
+    }
   }
 
-  return withStats;
+  return { totalOrganizers, totalFollowers, avgFollowersPerOrganizer, topOrganizer };
+}
+
+export async function listOrganizerConnectionsForAdmin(query: Record<string, unknown> = {}) {
+  const { page, limit, search, skip } = parseListQuery(query);
+  const where: Prisma.UserWhereInput = { role: ROLE };
+
+  if (search) {
+    where.AND = [
+      {
+        OR: [
+          { firstName: { contains: search, mode: "insensitive" } },
+          { lastName: { contains: search, mode: "insensitive" } },
+          { email: { contains: search, mode: "insensitive" } },
+          { organizationName: { contains: search, mode: "insensitive" } },
+        ],
+      },
+    ];
+  }
+
+  const [organizers, total, stats] = await Promise.all([
+    prisma.user.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        avatar: true,
+        organizationName: true,
+        createdAt: true,
+        totalEvents: true,
+        activeEvents: true,
+      },
+    }),
+    prisma.user.count({ where }),
+    getOrganizerConnectionsStatsForAdmin(),
+  ]);
+
+  const organizerIds = organizers.map((org) => org.id);
+  const followerCounts = new Map<string, number>();
+
+  if (organizerIds.length > 0) {
+    const grouped = await prisma.follow.groupBy({
+      by: ["followingId"],
+      where: { followingId: { in: organizerIds } },
+      _count: { _all: true },
+    });
+    for (const row of grouped) {
+      followerCounts.set(row.followingId, row._count._all ?? 0);
+    }
+  }
+
+  const data: AdminOrganizerConnectionSummary[] = organizers.map((org) => ({
+    id: org.id,
+    firstName: org.firstName,
+    lastName: org.lastName,
+    email: org.email ?? "",
+    avatar: org.avatar,
+    organizationName: org.organizationName ?? null,
+    totalFollowers: followerCounts.get(org.id) ?? 0,
+    totalEvents: org.totalEvents,
+    activeEvents: org.activeEvents,
+    createdAt: org.createdAt.toISOString(),
+  }));
+
+  return {
+    data,
+    pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
+    stats,
+  };
 }
 
 export async function getOrganizerConnectionsDetailForAdmin(
@@ -443,59 +541,45 @@ export async function getOrganizerConnectionsDetailForAdmin(
       avatar: true,
       organizationName: true,
       createdAt: true,
+      totalEvents: true,
+      activeEvents: true,
     },
   });
 
   if (!organizer) return null;
 
-  const [totalEvents, activeEvents] = await Promise.all([
-    prisma.event.count({ where: { organizerId: organizer.id } }),
-    prisma.event.count({
-      where: {
-        organizerId: organizer.id,
-        status: "PUBLISHED",
-        endDate: { gte: new Date() },
+  const [followersCount, followersRaw] = await Promise.all([
+    prisma.follow.count({ where: { followingId: organizer.id } }),
+    prisma.follow.findMany({
+      where: { followingId: organizer.id },
+      take: 50,
+      include: {
+        follower: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            avatar: true,
+            role: true,
+          },
+        },
       },
+      orderBy: { createdAt: "desc" },
     }),
   ]);
 
-  const followModel = (prisma as any).follow as {
-    findMany: (args: any) => Promise<any[]>;
-    count: (args: any) => Promise<number>;
-  };
-
-  const followersRaw = followModel
-    ? await followModel.findMany({
-        where: { followingId: organizer.id },
-        include: {
-          follower: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-              avatar: true,
-              role: true,
-            },
-          },
-        },
-        orderBy: { createdAt: "desc" },
-      })
-    : [];
-
   const followers: AdminOrganizerFollower[] = followersRaw
-    .filter((f: any) => !!f.follower)
-    .map((f: any) => ({
+    .filter((f) => !!f.follower)
+    .map((f) => ({
       id: f.follower.id,
       firstName: f.follower.firstName,
       lastName: f.follower.lastName,
       email: f.follower.email ?? "",
       avatar: f.follower.avatar,
       role: String(f.follower.role),
-      followedAt: f.createdAt instanceof Date ? f.createdAt.toISOString() : String(f.createdAt),
+      followedAt: f.createdAt.toISOString(),
     }));
-
-  const followersCount = followers.length;
 
   const organizerSummary: AdminOrganizerConnectionSummary = {
     id: organizer.id,
@@ -505,8 +589,8 @@ export async function getOrganizerConnectionsDetailForAdmin(
     avatar: organizer.avatar,
     organizationName: organizer.organizationName ?? null,
     totalFollowers: followersCount,
-    totalEvents,
-    activeEvents,
+    totalEvents: organizer.totalEvents,
+    activeEvents: organizer.activeEvents,
     createdAt: organizer.createdAt.toISOString(),
   };
 

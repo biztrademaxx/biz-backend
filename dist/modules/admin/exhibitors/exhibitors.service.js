@@ -17,14 +17,28 @@ const ROLE = "EXHIBITOR";
 async function listExhibitors(query) {
     const { page, limit, search, skip, sort, order } = (0, admin_response_1.parseListQuery)(query);
     const where = { role: ROLE };
+    const filters = [];
     if (search) {
-        where.OR = [
-            { firstName: { contains: search, mode: "insensitive" } },
-            { lastName: { contains: search, mode: "insensitive" } },
-            { email: { contains: search, mode: "insensitive" } },
-            { company: { contains: search, mode: "insensitive" } },
-        ];
+        filters.push({
+            OR: [
+                { firstName: { contains: search, mode: "insensitive" } },
+                { lastName: { contains: search, mode: "insensitive" } },
+                { email: { contains: search, mode: "insensitive" } },
+                { company: { contains: search, mode: "insensitive" } },
+            ],
+        });
     }
+    const status = String(query.status ?? "").trim().toLowerCase();
+    if (status === "active")
+        filters.push({ isActive: true });
+    else if (status === "suspended")
+        filters.push({ isActive: false });
+    const industry = String(query.industry ?? "").trim();
+    if (industry && industry.toLowerCase() !== "all") {
+        filters.push({ companyIndustry: { equals: industry, mode: "insensitive" } });
+    }
+    if (filters.length > 0)
+        where.AND = filters;
     const [items, total] = await Promise.all([
         prisma_1.default.user.findMany({
             where,
@@ -38,6 +52,9 @@ async function listExhibitors(query) {
                 email: true,
                 phone: true,
                 company: true,
+                companyIndustry: true,
+                location: true,
+                avatar: true,
                 isActive: true,
                 createdAt: true,
                 updatedAt: true,
@@ -53,11 +70,14 @@ async function listExhibitors(query) {
         email: u.email,
         phone: u.phone,
         company: u.company,
+        companyIndustry: u.companyIndustry,
+        location: u.location,
+        avatar: u.avatar,
         isActive: u.isActive,
         createdAt: u.createdAt.toISOString(),
         updatedAt: u.updatedAt.toISOString(),
     }));
-    return { data, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+    return { data, pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } };
 }
 async function getExhibitorById(id) {
     const user = await prisma_1.default.user.findFirst({
@@ -73,6 +93,15 @@ async function getExhibitorById(id) {
         email: user.email,
         phone: user.phone,
         company: user.company,
+        jobTitle: user.jobTitle,
+        companyIndustry: user.companyIndustry,
+        website: user.website,
+        location: user.location,
+        businessEmail: user.businessEmail,
+        businessPhone: user.businessPhone,
+        businessAddress: user.businessAddress,
+        taxId: user.taxId,
+        bio: user.bio,
         isActive: user.isActive,
         createdAt: user.createdAt.toISOString(),
         updatedAt: user.updatedAt.toISOString(),
