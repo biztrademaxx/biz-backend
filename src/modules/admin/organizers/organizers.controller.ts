@@ -182,6 +182,27 @@ export async function importBulk(req: Request, res: Response) {
   }
 }
 
+export async function listOrganizerEventFeedback(req: Request, res: Response) {
+  try {
+    const items = await service.listOrganizerEventFeedbackForAdmin();
+    return res.json(items);
+  } catch (e: any) {
+    return sendError(res, 500, "Failed to list organizer event feedback", e?.message);
+  }
+}
+
+export async function updateOrganizerEventFeedback(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+    if (!id) return sendError(res, 400, "Review id required");
+    const result = await service.updateOrganizerEventFeedbackById(id, req.body ?? {});
+    if (!result) return sendError(res, 404, "Feedback not found");
+    return res.json(result);
+  } catch (e: any) {
+    return sendError(res, 500, "Failed to update organizer feedback", e?.message);
+  }
+}
+
 export async function sendAccountEmail(req: Request, res: Response) {
   try {
     await service.sendOrganizerAccountEmail({

@@ -265,14 +265,38 @@ export async function listExhibitorFeedbackForAdmin(): Promise<AdminExhibitorFee
         ? { id: r.event.id, title: r.event.title }
         : { id: null, title: null },
       rating: r.rating ?? 0,
-      title: null,
+      title: r.title ?? null,
       comment: r.comment ?? null,
-      isApproved: true,
-      isPublic: true,
+      isApproved: r.isApproved,
+      isPublic: r.isPublic,
       createdAt: r.createdAt.toISOString(),
       updatedAt: r.updatedAt.toISOString(),
     };
   });
+}
+
+export async function updateExhibitorFeedbackById(
+  id: string,
+  body: { action?: string; isApproved?: boolean; isPublic?: boolean; reason?: string },
+) {
+  const review = await prisma.review.findUnique({ where: { id } });
+  if (!review || !review.exhibitorId) return null;
+
+  const reject =
+    body.action === "reject" || body.action === "rejected";
+  const approve =
+    body.action === "approve" || body.action === "approved" || body.isApproved === true;
+
+  await prisma.review.update({
+    where: { id },
+    data: {
+      isApproved: reject ? false : approve ? true : review.isApproved,
+      ...(reject && { isPublic: false }),
+      ...(body.isPublic !== undefined && { isPublic: body.isPublic }),
+    },
+  });
+
+  return { success: true, id };
 }
 
 // ---------- Admin exhibitor appointments (list all for admin dashboard) ----------

@@ -8,31 +8,72 @@ exports.createState = createState;
 exports.updateState = updateState;
 exports.deleteState = deleteState;
 const prisma_1 = __importDefault(require("../../../config/prisma"));
-async function backfillStatesFromCities() {
-    const rows = await prisma_1.default.city.findMany({
-        select: {
-            state: true,
-            countryId: true,
-        },
-    });
-    for (const row of rows) {
-        const name = String(row.state ?? "").trim();
-        if (!name || !row.countryId)
-            continue;
-        await prisma_1.default.state.upsert({
-            where: { name_countryId: { name, countryId: row.countryId } },
-            update: {},
-            create: {
-                name,
-                countryId: row.countryId,
-                isActive: true,
-                isPermitted: false,
-            },
+let backfillPromise = null;
+async function backfillStatesFromCitiesIfNeeded() {
+    if (!backfillPromise) {
+        backfillPromise = (async () => {
+            const existing = await prisma_1.default.state.count();
+            if (existing > 0)
+                return;
+            const rows = await prisma_1.default.city.findMany({
+                select: { state: true, countryId: true },
+            });
+            const unique = new Map();
+            for (const row of rows) {
+                const name = String(row.state ?? "").trim();
+                if (!name || !row.countryId)
+                    continue;
+                unique.set(`${name.toLowerCase()}::${row.countryId}`, { name, countryId: row.countryId });
+            }
+            if (unique.size === 0)
+                return;
+            await prisma_1.default.state.createMany({
+                data: Array.from(unique.values()).map((v) => ({
+                    name: v.name,
+                    countryId: v.countryId,
+                    isActive: true,
+                    isPermitted: false,
+                })),
+                skipDuplicates: true,
+            });
+        })().catch((err) => {
+            backfillPromise = null;
+            throw err;
         });
     }
+    await backfillPromise;
+}
+async function buildStateCounts() {
+    const [cityGroups, events] = await Promise.all([
+        prisma_1.default.city.groupBy({
+            by: ["countryId", "state"],
+            _count: { _all: true },
+        }),
+        prisma_1.default.event.findMany({
+            select: {
+                state: true,
+                venue: { select: { venueState: true } },
+            },
+        }),
+    ]);
+    const cityCountByKey = new Map();
+    for (const group of cityGroups) {
+        const stateName = String(group.state ?? "").trim().toLowerCase();
+        if (!stateName)
+            continue;
+        cityCountByKey.set(`${group.countryId}::${stateName}`, group._count._all ?? 0);
+    }
+    const eventCountByStateName = new Map();
+    for (const event of events) {
+        const stateName = (event.state || event.venue?.venueState || "").trim().toLowerCase();
+        if (!stateName)
+            continue;
+        eventCountByStateName.set(stateName, (eventCountByStateName.get(stateName) ?? 0) + 1);
+    }
+    return { cityCountByKey, eventCountByStateName };
 }
 async function listStates(includeCounts, countryCode) {
-    await backfillStatesFromCities();
+    await backfillStatesFromCitiesIfNeeded();
     const where = {};
     if (countryCode) {
         const country = await prisma_1.default.country.findFirst({
@@ -41,13 +82,13 @@ async function listStates(includeCounts, countryCode) {
         });
         where.countryId = country?.id ?? "__none__";
     }
-    const states = (await prisma_1.default.state.findMany({
+    const states = await prisma_1.default.state.findMany({
         where,
         include: {
             country: { select: { id: true, name: true, code: true } },
         },
         orderBy: [{ country: { name: "asc" } }, { name: "asc" }],
-    }));
+    });
     if (!includeCounts) {
         return states.map((s) => ({
             ...s,
@@ -57,25 +98,9 @@ async function listStates(includeCounts, countryCode) {
             cityCount: 0,
         }));
     }
-    const withCounts = await Promise.all(states.map(async (state) => {
-        const cityCount = await prisma_1.default.city.count({
-            where: {
-                countryId: state.countryId,
-                state: { equals: state.name, mode: "insensitive" },
-            },
-        });
-        const eventCount = await prisma_1.default.event.count({
-            where: {
-                OR: [
-                    { state: { equals: state.name, mode: "insensitive" } },
-                    {
-                        venue: {
-                            venueState: { equals: state.name, mode: "insensitive" },
-                        },
-                    },
-                ],
-            },
-        });
+    const { cityCountByKey, eventCountByStateName } = await buildStateCounts();
+    return states.map((state) => {
+        const stateKey = state.name.trim().toLowerCase();
         return {
             id: state.id,
             name: state.name,
@@ -84,12 +109,11 @@ async function listStates(includeCounts, countryCode) {
             isPermitted: state.isPermitted,
             createdAt: state.createdAt.toISOString(),
             updatedAt: state.updatedAt.toISOString(),
-            eventCount,
-            cityCount,
+            eventCount: eventCountByStateName.get(stateKey) ?? 0,
+            cityCount: cityCountByKey.get(`${state.countryId}::${stateKey}`) ?? 0,
             country: state.country,
         };
-    }));
-    return withCounts;
+    });
 }
 async function createState(data) {
     const state = await prisma_1.default.state.create({

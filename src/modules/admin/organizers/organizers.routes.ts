@@ -19,6 +19,10 @@ router.get("/organizer-connections/:id", requireAdmin, ctrl.getOrganizerConnecti
 // GET /api/admin/organizers/venue-bookings
 router.get("/venue-bookings", requireAdmin, ctrl.listVenueBookings);
 
+// Event / organizer feedback (admin dashboard)
+router.get("/event-feedback", requireAdmin, ctrl.listOrganizerEventFeedback);
+router.patch("/event-feedback/:id", requireAdmin, ctrl.updateOrganizerEventFeedback);
+
 // Organizer promotions (admin) — before /:id
 router.get("/promotions", requireAdmin, ctrl.listOrganizerPromotions);
 router.get("/promotions/:id", requireAdmin, ctrl.getOrganizerPromotionById);

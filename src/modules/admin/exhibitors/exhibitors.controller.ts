@@ -100,10 +100,10 @@ export async function listExhibitorFeedback(req: Request, res: Response) {
 export async function updateExhibitorFeedback(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    const { action } = req.body ?? {};
     if (!id) return sendError(res, 400, "Review id required");
-    // Optional: persist approval state if Review gets isApproved/isPublic later
-    return res.json({ success: true, id, action: action ?? "approved" });
+    const result = await service.updateExhibitorFeedbackById(id, req.body ?? {});
+    if (!result) return sendError(res, 404, "Feedback not found");
+    return res.json(result);
   } catch (e: any) {
     return sendError(res, 500, "Failed to update feedback", e?.message);
   }

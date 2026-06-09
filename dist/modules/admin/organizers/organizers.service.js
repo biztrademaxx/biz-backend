@@ -12,6 +12,8 @@ exports.sendOrganizerAccountEmail = sendOrganizerAccountEmail;
 exports.listOrganizerConnectionsForAdmin = listOrganizerConnectionsForAdmin;
 exports.getOrganizerConnectionsDetailForAdmin = getOrganizerConnectionsDetailForAdmin;
 exports.listVenueBookingsForAdmin = listVenueBookingsForAdmin;
+exports.listOrganizerEventFeedbackForAdmin = listOrganizerEventFeedbackForAdmin;
+exports.updateOrganizerEventFeedbackById = updateOrganizerEventFeedbackById;
 const prisma_1 = __importDefault(require("../../../config/prisma"));
 const admin_response_1 = require("../../../lib/admin-response");
 const crypto_1 = require("crypto");
@@ -546,4 +548,91 @@ async function listVenueBookingsForAdmin() {
             createdAt: a.createdAt.toISOString(),
         };
     });
+}
+function feedbackDisplayName(first, last, fallback) {
+    return `${first ?? ""} ${last ?? ""}`.trim() || fallback;
+}
+async function listOrganizerEventFeedbackForAdmin() {
+    const reviews = await prisma_1.default.review.findMany({
+        where: {
+            exhibitorId: null,
+            venueId: null,
+            OR: [{ eventId: { not: null } }, { organizerId: { not: null } }],
+        },
+        orderBy: { createdAt: "desc" },
+        include: {
+            user: {
+                select: { id: true, firstName: true, lastName: true, email: true },
+            },
+            event: {
+                select: {
+                    id: true,
+                    title: true,
+                    organizer: {
+                        select: { id: true, firstName: true, lastName: true, email: true },
+                    },
+                },
+            },
+        },
+    });
+    const organizerIds = [
+        ...new Set(reviews.map((r) => r.organizerId).filter(Boolean)),
+    ];
+    const organizers = organizerIds.length > 0
+        ? await prisma_1.default.user.findMany({
+            where: { id: { in: organizerIds } },
+            select: { id: true, firstName: true, lastName: true, email: true },
+        })
+        : [];
+    const organizerMap = new Map(organizers.map((o) => [o.id, o]));
+    return reviews.map((r) => {
+        const fromEvent = r.event?.organizer;
+        const fromOrganizerId = r.organizerId ? organizerMap.get(r.organizerId) : null;
+        const organizerUser = fromEvent ?? fromOrganizerId;
+        return {
+            id: r.id,
+            organizer: organizerUser
+                ? {
+                    id: organizerUser.id,
+                    name: feedbackDisplayName(organizerUser.firstName, organizerUser.lastName, "Organizer"),
+                    email: organizerUser.email ?? "",
+                }
+                : { id: "", name: "—", email: "" },
+            event: r.event
+                ? { id: r.event.id, title: r.event.title }
+                : { id: null, title: null },
+            reviewer: r.user
+                ? {
+                    id: r.user.id,
+                    name: feedbackDisplayName(r.user.firstName, r.user.lastName, "Visitor"),
+                    email: r.user.email ?? "",
+                }
+                : { id: "", name: "Anonymous", email: "" },
+            rating: r.rating ?? 0,
+            title: r.title ?? null,
+            comment: r.comment ?? null,
+            isApproved: r.isApproved,
+            isPublic: r.isPublic,
+            createdAt: r.createdAt.toISOString(),
+            updatedAt: r.updatedAt.toISOString(),
+        };
+    });
+}
+async function updateOrganizerEventFeedbackById(id, body) {
+    const review = await prisma_1.default.review.findUnique({ where: { id } });
+    if (!review)
+        return null;
+    if (review.exhibitorId || review.venueId)
+        return null;
+    const reject = body.action === "reject" || body.action === "rejected";
+    const approve = body.action === "approve" || body.action === "approved" || body.isApproved === true;
+    await prisma_1.default.review.update({
+        where: { id },
+        data: {
+            isApproved: reject ? false : approve ? true : review.isApproved,
+            ...(reject && { isPublic: false }),
+            ...(body.isPublic !== undefined && { isPublic: body.isPublic }),
+        },
+    });
+    return { success: true, id };
 }

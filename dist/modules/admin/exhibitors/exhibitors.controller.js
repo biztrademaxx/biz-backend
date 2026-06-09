@@ -153,11 +153,12 @@ async function listExhibitorFeedback(req, res) {
 async function updateExhibitorFeedback(req, res) {
     try {
         const { id } = req.params;
-        const { action } = req.body ?? {};
         if (!id)
             return (0, admin_response_1.sendError)(res, 400, "Review id required");
-        // Optional: persist approval state if Review gets isApproved/isPublic later
-        return res.json({ success: true, id, action: action ?? "approved" });
+        const result = await service.updateExhibitorFeedbackById(id, req.body ?? {});
+        if (!result)
+            return (0, admin_response_1.sendError)(res, 404, "Feedback not found");
+        return res.json(result);
     }
     catch (e) {
         return (0, admin_response_1.sendError)(res, 500, "Failed to update feedback", e?.message);

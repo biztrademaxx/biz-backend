@@ -683,3 +683,126 @@ export async function listVenueBookingsForAdmin(): Promise<AdminVenueBookingItem
     };
   });
 }
+
+// ---------- Organizer / event feedback (admin dashboard) ----------
+
+export type AdminOrganizerEventFeedbackItem = {
+  id: string;
+  organizer: { id: string; name: string; email: string };
+  event: { id: string | null; title: string | null };
+  reviewer: { id: string; name: string; email: string };
+  rating: number;
+  title: string | null;
+  comment: string | null;
+  isApproved: boolean;
+  isPublic: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+function feedbackDisplayName(
+  first: string | null | undefined,
+  last: string | null | undefined,
+  fallback: string,
+) {
+  return `${first ?? ""} ${last ?? ""}`.trim() || fallback;
+}
+
+export async function listOrganizerEventFeedbackForAdmin(): Promise<AdminOrganizerEventFeedbackItem[]> {
+  const reviews = await prisma.review.findMany({
+    where: {
+      exhibitorId: null,
+      venueId: null,
+      OR: [{ eventId: { not: null } }, { organizerId: { not: null } }],
+    },
+    orderBy: { createdAt: "desc" },
+    include: {
+      user: {
+        select: { id: true, firstName: true, lastName: true, email: true },
+      },
+      event: {
+        select: {
+          id: true,
+          title: true,
+          organizer: {
+            select: { id: true, firstName: true, lastName: true, email: true },
+          },
+        },
+      },
+    },
+  });
+
+  const organizerIds = [
+    ...new Set(reviews.map((r) => r.organizerId).filter(Boolean) as string[]),
+  ];
+  const organizers =
+    organizerIds.length > 0
+      ? await prisma.user.findMany({
+          where: { id: { in: organizerIds } },
+          select: { id: true, firstName: true, lastName: true, email: true },
+        })
+      : [];
+  const organizerMap = new Map(organizers.map((o) => [o.id, o]));
+
+  return reviews.map((r) => {
+    const fromEvent = r.event?.organizer;
+    const fromOrganizerId = r.organizerId ? organizerMap.get(r.organizerId) : null;
+    const organizerUser = fromEvent ?? fromOrganizerId;
+
+    return {
+      id: r.id,
+      organizer: organizerUser
+        ? {
+            id: organizerUser.id,
+            name: feedbackDisplayName(
+              organizerUser.firstName,
+              organizerUser.lastName,
+              "Organizer",
+            ),
+            email: organizerUser.email ?? "",
+          }
+        : { id: "", name: "—", email: "" },
+      event: r.event
+        ? { id: r.event.id, title: r.event.title }
+        : { id: null, title: null },
+      reviewer: r.user
+        ? {
+            id: r.user.id,
+            name: feedbackDisplayName(r.user.firstName, r.user.lastName, "Visitor"),
+            email: r.user.email ?? "",
+          }
+        : { id: "", name: "Anonymous", email: "" },
+      rating: r.rating ?? 0,
+      title: r.title ?? null,
+      comment: r.comment ?? null,
+      isApproved: r.isApproved,
+      isPublic: r.isPublic,
+      createdAt: r.createdAt.toISOString(),
+      updatedAt: r.updatedAt.toISOString(),
+    };
+  });
+}
+
+export async function updateOrganizerEventFeedbackById(
+  id: string,
+  body: { action?: string; isApproved?: boolean; isPublic?: boolean; reason?: string },
+) {
+  const review = await prisma.review.findUnique({ where: { id } });
+  if (!review) return null;
+  if (review.exhibitorId || review.venueId) return null;
+
+  const reject = body.action === "reject" || body.action === "rejected";
+  const approve =
+    body.action === "approve" || body.action === "approved" || body.isApproved === true;
+
+  await prisma.review.update({
+    where: { id },
+    data: {
+      isApproved: reject ? false : approve ? true : review.isApproved,
+      ...(reject && { isPublic: false }),
+      ...(body.isPublic !== undefined && { isPublic: body.isPublic }),
+    },
+  });
+
+  return { success: true, id };
+}
