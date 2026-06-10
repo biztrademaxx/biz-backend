@@ -7,6 +7,7 @@ import {
   createVenueAppointment,
   updateVenueAppointment,
 } from "./appointments.service";
+import { resolveEventCityCountry, resolveVenueCityCountry } from "../../utils/profile-location";
 
 // ─── Event–exhibitor appointments (Schedule Meeting) ───────────────────────
 
@@ -31,6 +32,7 @@ export async function getAppointmentsHandler(req: Request, res: Response) {
         : new Date().toISOString().split("T")[0];
       const reqTime = apt.requestedTime || "09:00";
       const exhibitor = apt.exhibitor;
+      const eventLocation = resolveEventCityCountry(apt.event);
       return {
         id: apt.id,
         exhibitorId: apt.exhibitorId || "",
@@ -41,11 +43,19 @@ export async function getAppointmentsHandler(req: Request, res: Response) {
         exhibitorEmail: exhibitor?.email || "",
         exhibitorPhone: exhibitor?.phone || "",
         exhibitorAvatar: exhibitor?.avatar || null,
+        boothNumber: apt.boothNumber || "",
         eventId: apt.event?.id || apt.eventId,
         eventName: apt.event?.title || "Unknown Event",
         eventTitle: apt.event?.title || "Unknown Event",
         eventStartDate: apt.event?.startDate ? new Date(apt.event.startDate).toISOString() : null,
         eventEndDate: apt.event?.endDate ? new Date(apt.event.endDate).toISOString() : null,
+        eventCity: eventLocation.city,
+        eventState: eventLocation.state,
+        eventCountry: eventLocation.country,
+        eventVenue: eventLocation.venueName,
+        locationDisplay: eventLocation.display,
+        city: eventLocation.city,
+        country: eventLocation.country,
         visitorName: apt.requester
           ? `${apt.requester.firstName || ""} ${apt.requester.lastName || ""}`.trim()
           : "Unknown Visitor",
@@ -138,7 +148,10 @@ export async function getVenueAppointmentsHandler(req: Request, res: Response) {
     const { venueId, requesterId } = req.query as { venueId?: string; requesterId?: string };
     const result = await listVenueAppointments({ venueId, requesterId });
 
-    const apiAppointments = result.appointments.map((apt: any) => ({
+    const apiAppointments = result.appointments.map((apt: any) => {
+      const venueLocation = resolveVenueCityCountry(apt.venue, apt.location);
+
+      return {
       id: apt.id,
       venueId: apt.venueId,
       requesterId: apt.visitorId ?? "",
@@ -165,6 +178,7 @@ export async function getVenueAppointmentsHandler(req: Request, res: Response) {
             lastName: apt.venue.lastName ?? "",
             email: apt.venue.email ?? "",
             avatar: apt.venue.avatar ?? null,
+            venueName: apt.venue.venueName ?? "",
           }
         : {
             id: "",
@@ -172,6 +186,7 @@ export async function getVenueAppointmentsHandler(req: Request, res: Response) {
             lastName: "",
             email: "",
             avatar: null,
+            venueName: "",
           },
       requesterPhone: apt.visitor?.phone ?? "",
       requesterCompany: apt.visitor?.company ?? "",
@@ -185,6 +200,9 @@ export async function getVenueAppointmentsHandler(req: Request, res: Response) {
       notes: apt.notes ?? "",
       meetingLink: apt.meetingLink ?? "",
       location: apt.location ?? "",
+      city: venueLocation.city,
+      country: venueLocation.country,
+      locationDisplay: venueLocation.display,
       type: apt.type ?? "VENUE_TOUR",
       meetingType: "IN_PERSON",
       agenda: [],
@@ -193,7 +211,8 @@ export async function getVenueAppointmentsHandler(req: Request, res: Response) {
       followUpRequired: false,
       createdAt: apt.createdAt?.toISOString?.() ?? new Date().toISOString(),
       updatedAt: apt.updatedAt?.toISOString?.() ?? new Date().toISOString(),
-    }));
+    };
+    });
 
     return res.json({
       success: true,

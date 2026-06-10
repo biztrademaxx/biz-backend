@@ -48,6 +48,8 @@ exports.listOrganizerPromotions = listOrganizerPromotions;
 exports.getOrganizerPromotionById = getOrganizerPromotionById;
 exports.patchOrganizerPromotion = patchOrganizerPromotion;
 exports.importBulk = importBulk;
+exports.listOrganizerEventFeedback = listOrganizerEventFeedback;
+exports.updateOrganizerEventFeedback = updateOrganizerEventFeedback;
 exports.sendAccountEmail = sendAccountEmail;
 const admin_response_1 = require("../../../lib/admin-response");
 const service = __importStar(require("./organizers.service"));
@@ -134,9 +136,13 @@ async function remove(req, res) {
 }
 async function listOrganizerConnections(req, res) {
     try {
-        const items = await service.listOrganizerConnectionsForAdmin();
-        // Frontend expects a plain array
-        return res.json(items);
+        const result = await service.listOrganizerConnectionsForAdmin(req.query);
+        return res.json({
+            success: true,
+            data: result.data,
+            pagination: result.pagination,
+            stats: result.stats,
+        });
     }
     catch (e) {
         return (0, admin_response_1.sendError)(res, 500, "Failed to list organizer connections", e?.message);
@@ -231,6 +237,29 @@ async function importBulk(req, res) {
     }
     catch (e) {
         return (0, admin_response_1.sendError)(res, 500, "Failed to import organizers", e?.message);
+    }
+}
+async function listOrganizerEventFeedback(req, res) {
+    try {
+        const items = await service.listOrganizerEventFeedbackForAdmin();
+        return res.json(items);
+    }
+    catch (e) {
+        return (0, admin_response_1.sendError)(res, 500, "Failed to list organizer event feedback", e?.message);
+    }
+}
+async function updateOrganizerEventFeedback(req, res) {
+    try {
+        const { id } = req.params;
+        if (!id)
+            return (0, admin_response_1.sendError)(res, 400, "Review id required");
+        const result = await service.updateOrganizerEventFeedbackById(id, req.body ?? {});
+        if (!result)
+            return (0, admin_response_1.sendError)(res, 404, "Feedback not found");
+        return res.json(result);
+    }
+    catch (e) {
+        return (0, admin_response_1.sendError)(res, 500, "Failed to update organizer feedback", e?.message);
     }
 }
 async function sendAccountEmail(req, res) {

@@ -6,8 +6,8 @@ import * as feedbackSvc from "./venue-feedback.service";
 
 export async function listVenueEvents(req: Request, res: Response) {
   try {
-    const data = await eventsSvc.listVenueEventsForAdmin();
-    return res.json(data);
+    const result = await eventsSvc.listVenueEventsForAdmin(req.query as Record<string, unknown>);
+    return res.json({ success: true, ...result });
   } catch (e: any) {
     return sendError(res, 500, "Failed to list venue events", e?.message);
   }

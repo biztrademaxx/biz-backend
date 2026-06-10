@@ -81,9 +81,13 @@ export async function remove(req: Request, res: Response) {
 
 export async function listOrganizerConnections(req: Request, res: Response) {
   try {
-    const items = await service.listOrganizerConnectionsForAdmin();
-    // Frontend expects a plain array
-    return res.json(items);
+    const result = await service.listOrganizerConnectionsForAdmin(req.query as Record<string, unknown>);
+    return res.json({
+      success: true,
+      data: result.data,
+      pagination: result.pagination,
+      stats: result.stats,
+    });
   } catch (e: any) {
     return sendError(res, 500, "Failed to list organizer connections", e?.message);
   }
@@ -175,6 +179,27 @@ export async function importBulk(req: Request, res: Response) {
     });
   } catch (e: any) {
     return sendError(res, 500, "Failed to import organizers", e?.message);
+  }
+}
+
+export async function listOrganizerEventFeedback(req: Request, res: Response) {
+  try {
+    const items = await service.listOrganizerEventFeedbackForAdmin();
+    return res.json(items);
+  } catch (e: any) {
+    return sendError(res, 500, "Failed to list organizer event feedback", e?.message);
+  }
+}
+
+export async function updateOrganizerEventFeedback(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+    if (!id) return sendError(res, 400, "Review id required");
+    const result = await service.updateOrganizerEventFeedbackById(id, req.body ?? {});
+    if (!result) return sendError(res, 404, "Feedback not found");
+    return res.json(result);
+  } catch (e: any) {
+    return sendError(res, 500, "Failed to update organizer feedback", e?.message);
   }
 }
 

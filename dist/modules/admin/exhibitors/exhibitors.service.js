@@ -10,6 +10,7 @@ exports.updateExhibitor = updateExhibitor;
 exports.deleteExhibitor = deleteExhibitor;
 exports.getExhibitorStats = getExhibitorStats;
 exports.listExhibitorFeedbackForAdmin = listExhibitorFeedbackForAdmin;
+exports.updateExhibitorFeedbackById = updateExhibitorFeedbackById;
 exports.listExhibitorAppointmentsForAdmin = listExhibitorAppointmentsForAdmin;
 const prisma_1 = __importDefault(require("../../../config/prisma"));
 const admin_response_1 = require("../../../lib/admin-response");
@@ -17,14 +18,28 @@ const ROLE = "EXHIBITOR";
 async function listExhibitors(query) {
     const { page, limit, search, skip, sort, order } = (0, admin_response_1.parseListQuery)(query);
     const where = { role: ROLE };
+    const filters = [];
     if (search) {
-        where.OR = [
-            { firstName: { contains: search, mode: "insensitive" } },
-            { lastName: { contains: search, mode: "insensitive" } },
-            { email: { contains: search, mode: "insensitive" } },
-            { company: { contains: search, mode: "insensitive" } },
-        ];
+        filters.push({
+            OR: [
+                { firstName: { contains: search, mode: "insensitive" } },
+                { lastName: { contains: search, mode: "insensitive" } },
+                { email: { contains: search, mode: "insensitive" } },
+                { company: { contains: search, mode: "insensitive" } },
+            ],
+        });
     }
+    const status = String(query.status ?? "").trim().toLowerCase();
+    if (status === "active")
+        filters.push({ isActive: true });
+    else if (status === "suspended")
+        filters.push({ isActive: false });
+    const industry = String(query.industry ?? "").trim();
+    if (industry && industry.toLowerCase() !== "all") {
+        filters.push({ companyIndustry: { equals: industry, mode: "insensitive" } });
+    }
+    if (filters.length > 0)
+        where.AND = filters;
     const [items, total] = await Promise.all([
         prisma_1.default.user.findMany({
             where,
@@ -38,6 +53,9 @@ async function listExhibitors(query) {
                 email: true,
                 phone: true,
                 company: true,
+                companyIndustry: true,
+                location: true,
+                avatar: true,
                 isActive: true,
                 createdAt: true,
                 updatedAt: true,
@@ -53,11 +71,14 @@ async function listExhibitors(query) {
         email: u.email,
         phone: u.phone,
         company: u.company,
+        companyIndustry: u.companyIndustry,
+        location: u.location,
+        avatar: u.avatar,
         isActive: u.isActive,
         createdAt: u.createdAt.toISOString(),
         updatedAt: u.updatedAt.toISOString(),
     }));
-    return { data, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+    return { data, pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } };
 }
 async function getExhibitorById(id) {
     const user = await prisma_1.default.user.findFirst({
@@ -73,6 +94,15 @@ async function getExhibitorById(id) {
         email: user.email,
         phone: user.phone,
         company: user.company,
+        jobTitle: user.jobTitle,
+        companyIndustry: user.companyIndustry,
+        website: user.website,
+        location: user.location,
+        businessEmail: user.businessEmail,
+        businessPhone: user.businessPhone,
+        businessAddress: user.businessAddress,
+        taxId: user.taxId,
+        bio: user.bio,
         isActive: user.isActive,
         createdAt: user.createdAt.toISOString(),
         updatedAt: user.updatedAt.toISOString(),
@@ -225,14 +255,30 @@ async function listExhibitorFeedbackForAdmin() {
                 ? { id: r.event.id, title: r.event.title }
                 : { id: null, title: null },
             rating: r.rating ?? 0,
-            title: null,
+            title: r.title ?? null,
             comment: r.comment ?? null,
-            isApproved: true,
-            isPublic: true,
+            isApproved: r.isApproved,
+            isPublic: r.isPublic,
             createdAt: r.createdAt.toISOString(),
             updatedAt: r.updatedAt.toISOString(),
         };
     });
+}
+async function updateExhibitorFeedbackById(id, body) {
+    const review = await prisma_1.default.review.findUnique({ where: { id } });
+    if (!review || !review.exhibitorId)
+        return null;
+    const reject = body.action === "reject" || body.action === "rejected";
+    const approve = body.action === "approve" || body.action === "approved" || body.isApproved === true;
+    await prisma_1.default.review.update({
+        where: { id },
+        data: {
+            isApproved: reject ? false : approve ? true : review.isApproved,
+            ...(reject && { isPublic: false }),
+            ...(body.isPublic !== undefined && { isPublic: body.isPublic }),
+        },
+    });
+    return { success: true, id };
 }
 // ---------- Admin exhibitor appointments (list all for admin dashboard) ----------
 async function listExhibitorAppointmentsForAdmin() {

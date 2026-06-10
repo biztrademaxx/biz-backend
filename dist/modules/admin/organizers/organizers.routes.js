@@ -53,6 +53,9 @@ router.get("/organizer-connections/:id", auth_middleware_1.requireAdmin, ctrl.ge
 // Venue bookings (admin dashboard)
 // GET /api/admin/organizers/venue-bookings
 router.get("/venue-bookings", auth_middleware_1.requireAdmin, ctrl.listVenueBookings);
+// Event / organizer feedback (admin dashboard)
+router.get("/event-feedback", auth_middleware_1.requireAdmin, ctrl.listOrganizerEventFeedback);
+router.patch("/event-feedback/:id", auth_middleware_1.requireAdmin, ctrl.updateOrganizerEventFeedback);
 // Organizer promotions (admin) — before /:id
 router.get("/promotions", auth_middleware_1.requireAdmin, ctrl.listOrganizerPromotions);
 router.get("/promotions/:id", auth_middleware_1.requireAdmin, ctrl.getOrganizerPromotionById);

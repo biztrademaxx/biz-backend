@@ -33,7 +33,7 @@ async function imageUploadHandler(req, res, next) {
                 return res.status(400).json({ success: false, message: "Unsupported image type" });
             }
             if (err.message === "IMAGE_TOO_LARGE") {
-                return res.status(400).json({ success: false, message: "Image exceeds 5MB size limit" });
+                return res.status(400).json({ success: false, message: "Image exceeds 10MB size limit" });
             }
         }
         return next(err);

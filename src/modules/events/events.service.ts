@@ -8,6 +8,7 @@ import {
   isEventPubliclyVisible,
 } from "../../utils/public-profile";
 import { getPublicProfileSlug } from "../../utils/profile-slug";
+import { resolveUserCityCountry } from "../../utils/profile-location";
 
 const statusMap: Record<string, string> = {
   PUBLISHED: "Approved",
@@ -897,6 +898,15 @@ export async function listEventAttendees(eventId: string) {
           company: true,
           jobTitle: true,
           avatar: true,
+          role: true,
+          profileCity: true,
+          profileState: true,
+          profileCountry: true,
+          organizerCity: true,
+          organizerState: true,
+          organizerCountry: true,
+          location: true,
+          headquarters: true,
         },
       },
       event: {
@@ -917,16 +927,24 @@ export async function listEventAttendees(eventId: string) {
     notes: lead.notes ?? undefined,
     createdAt: lead.createdAt.toISOString(),
     user: lead.user
-      ? {
-          id: lead.user.id,
-          firstName: lead.user.firstName,
-          lastName: lead.user.lastName,
-          email: lead.user.email,
-          phone: lead.user.phone ?? undefined,
-          company: lead.user.company ?? undefined,
-          jobTitle: lead.user.jobTitle ?? undefined,
-          avatar: lead.user.avatar ?? undefined,
-        }
+      ? (() => {
+          const loc = resolveUserCityCountry(lead.user);
+          return {
+            id: lead.user.id,
+            firstName: lead.user.firstName,
+            lastName: lead.user.lastName,
+            email: lead.user.email,
+            phone: lead.user.phone ?? undefined,
+            company: lead.user.company ?? undefined,
+            jobTitle: lead.user.jobTitle ?? undefined,
+            avatar: lead.user.avatar ?? undefined,
+            profileCity: lead.user.profileCity ?? undefined,
+            profileCountry: lead.user.profileCountry ?? undefined,
+            city: loc.city || undefined,
+            country: loc.country || undefined,
+            locationDisplay: loc.display || undefined,
+          };
+        })()
       : null,
     event: lead.event
       ? {
@@ -1074,6 +1092,15 @@ export async function listEventExhibitors(eventId: string) {
           avatar: true,
           company: true,
           jobTitle: true,
+          role: true,
+          profileCity: true,
+          profileState: true,
+          profileCountry: true,
+          organizerCity: true,
+          organizerState: true,
+          organizerCountry: true,
+          location: true,
+          headquarters: true,
         },
       },
       space: {
@@ -1148,8 +1175,18 @@ export async function listEventExhibitors(eventId: string) {
   return booths.map((booth) => {
     const exhibitorId = booth.exhibitor?.id ?? booth.exhibitorId;
     const f = followerMap.get(exhibitorId) ?? { count: 0, preview: [] as Array<{ id: string; avatar: string | null; firstName: string; lastName: string }> };
+    const loc = booth.exhibitor ? resolveUserCityCountry(booth.exhibitor) : { city: "", country: "", display: "" };
+    const exhibitor = booth.exhibitor
+      ? {
+          ...booth.exhibitor,
+          city: loc.city || undefined,
+          country: loc.country || undefined,
+          locationDisplay: loc.display || undefined,
+        }
+      : booth.exhibitor;
     return {
       ...booth,
+      exhibitor,
       followersCount: f.count,
       followerPreview: f.preview,
     };

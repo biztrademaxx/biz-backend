@@ -6,15 +6,31 @@ const ROLE: UserRole = "EXHIBITOR";
 
 export async function listExhibitors(query: Record<string, unknown>) {
   const { page, limit, search, skip, sort, order } = parseListQuery(query);
-  const where: any = { role: ROLE };
+  const where: { role: typeof ROLE; AND?: Record<string, unknown>[] } = { role: ROLE };
+  const filters: Record<string, unknown>[] = [];
+
   if (search) {
-    where.OR = [
-      { firstName: { contains: search, mode: "insensitive" } },
-      { lastName: { contains: search, mode: "insensitive" } },
-      { email: { contains: search, mode: "insensitive" } },
-      { company: { contains: search, mode: "insensitive" } },
-    ];
+    filters.push({
+      OR: [
+        { firstName: { contains: search, mode: "insensitive" } },
+        { lastName: { contains: search, mode: "insensitive" } },
+        { email: { contains: search, mode: "insensitive" } },
+        { company: { contains: search, mode: "insensitive" } },
+      ],
+    });
   }
+
+  const status = String(query.status ?? "").trim().toLowerCase();
+  if (status === "active") filters.push({ isActive: true });
+  else if (status === "suspended") filters.push({ isActive: false });
+
+  const industry = String(query.industry ?? "").trim();
+  if (industry && industry.toLowerCase() !== "all") {
+    filters.push({ companyIndustry: { equals: industry, mode: "insensitive" } });
+  }
+
+  if (filters.length > 0) where.AND = filters;
+
   const [items, total] = await Promise.all([
     prisma.user.findMany({
       where,
@@ -28,6 +44,9 @@ export async function listExhibitors(query: Record<string, unknown>) {
         email: true,
         phone: true,
         company: true,
+        companyIndustry: true,
+        location: true,
+        avatar: true,
         isActive: true,
         createdAt: true,
         updatedAt: true,
@@ -43,11 +62,14 @@ export async function listExhibitors(query: Record<string, unknown>) {
     email: u.email,
     phone: u.phone,
     company: u.company,
+    companyIndustry: u.companyIndustry,
+    location: u.location,
+    avatar: u.avatar,
     isActive: u.isActive,
     createdAt: u.createdAt.toISOString(),
     updatedAt: u.updatedAt.toISOString(),
   }));
-  return { data, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+  return { data, pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } };
 }
 
 export async function getExhibitorById(id: string) {
@@ -63,6 +85,15 @@ export async function getExhibitorById(id: string) {
     email: user.email,
     phone: user.phone,
     company: user.company,
+    jobTitle: user.jobTitle,
+    companyIndustry: user.companyIndustry,
+    website: user.website,
+    location: user.location,
+    businessEmail: user.businessEmail,
+    businessPhone: user.businessPhone,
+    businessAddress: user.businessAddress,
+    taxId: user.taxId,
+    bio: user.bio,
     isActive: user.isActive,
     createdAt: user.createdAt.toISOString(),
     updatedAt: user.updatedAt.toISOString(),
@@ -234,14 +265,38 @@ export async function listExhibitorFeedbackForAdmin(): Promise<AdminExhibitorFee
         ? { id: r.event.id, title: r.event.title }
         : { id: null, title: null },
       rating: r.rating ?? 0,
-      title: null,
+      title: r.title ?? null,
       comment: r.comment ?? null,
-      isApproved: true,
-      isPublic: true,
+      isApproved: r.isApproved,
+      isPublic: r.isPublic,
       createdAt: r.createdAt.toISOString(),
       updatedAt: r.updatedAt.toISOString(),
     };
   });
+}
+
+export async function updateExhibitorFeedbackById(
+  id: string,
+  body: { action?: string; isApproved?: boolean; isPublic?: boolean; reason?: string },
+) {
+  const review = await prisma.review.findUnique({ where: { id } });
+  if (!review || !review.exhibitorId) return null;
+
+  const reject =
+    body.action === "reject" || body.action === "rejected";
+  const approve =
+    body.action === "approve" || body.action === "approved" || body.isApproved === true;
+
+  await prisma.review.update({
+    where: { id },
+    data: {
+      isApproved: reject ? false : approve ? true : review.isApproved,
+      ...(reject && { isPublic: false }),
+      ...(body.isPublic !== undefined && { isPublic: body.isPublic }),
+    },
+  });
+
+  return { success: true, id };
 }
 
 // ---------- Admin exhibitor appointments (list all for admin dashboard) ----------

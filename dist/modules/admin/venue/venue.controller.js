@@ -44,8 +44,8 @@ const bookingsSvc = __importStar(require("./venue-bookings.service"));
 const feedbackSvc = __importStar(require("./venue-feedback.service"));
 async function listVenueEvents(req, res) {
     try {
-        const data = await eventsSvc.listVenueEventsForAdmin();
-        return res.json(data);
+        const result = await eventsSvc.listVenueEventsForAdmin(req.query);
+        return res.json({ success: true, ...result });
     }
     catch (e) {
         return (0, admin_response_1.sendError)(res, 500, "Failed to list venue events", e?.message);

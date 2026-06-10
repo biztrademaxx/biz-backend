@@ -12,7 +12,24 @@ const node_path_1 = __importDefault(require("node:path"));
 const cloudinary_service_1 = require("./cloudinary.service");
 const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB (align with organizer dashboard)
 const MAX_DOCUMENT_SIZE_BYTES = 15 * 1024 * 1024; // 15MB
-const ALLOWED_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+const ALLOWED_IMAGE_MIME_TYPES = new Set([
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "image/avif",
+    "image/svg+xml",
+]);
+const ALLOWED_IMAGE_EXTENSIONS = new Set([
+    ".jpeg",
+    ".jpg",
+    ".png",
+    ".webp",
+    ".gif",
+    ".avif",
+    ".svg",
+]);
 /** Brochure / document uploads (Cloudinary raw). Images allowed for one-sheet “brochures”. */
 const ALLOWED_DOCUMENT_MIME_TYPES = new Set([
     "application/pdf",
@@ -71,7 +88,11 @@ function ensureFilePresent(file) {
     }
 }
 function validateImageFile(file) {
-    if (!ALLOWED_IMAGE_MIME_TYPES.has(file.mimetype)) {
+    const ext = file.originalname ? node_path_1.default.extname(file.originalname).toLowerCase() : "";
+    const extOk = ext.length > 0 && ALLOWED_IMAGE_EXTENSIONS.has(ext);
+    const mimeOk = ALLOWED_IMAGE_MIME_TYPES.has(file.mimetype);
+    const looseBinary = (file.mimetype === "application/octet-stream" || file.mimetype === "") && extOk;
+    if (!mimeOk && !looseBinary) {
         throw new Error("UNSUPPORTED_IMAGE_TYPE");
     }
     if (file.size > MAX_IMAGE_SIZE_BYTES) {
