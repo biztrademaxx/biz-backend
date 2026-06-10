@@ -10,6 +10,8 @@ export interface ListVenuesParams {
   page?: number;
   limit?: number;
   requireVenueImage?: boolean;
+  /** Case-insensitive match on venueCountry (e.g. India). */
+  country?: string;
 }
 
 export async function listVenues(params: ListVenuesParams) {
@@ -35,6 +37,11 @@ export async function listVenues(params: ListVenuesParams) {
       { venueDescription: { contains: search, mode: "insensitive" } },
       { venueAddress: { contains: search, mode: "insensitive" } },
     ];
+  }
+
+  const country = params.country?.trim() ?? "";
+  if (country) {
+    where.venueCountry = { equals: country, mode: "insensitive" };
   }
 
   const [venues, total] = await Promise.all([

@@ -33,6 +33,10 @@ async function listVenues(params) {
             { venueAddress: { contains: search, mode: "insensitive" } },
         ];
     }
+    const country = params.country?.trim() ?? "";
+    if (country) {
+        where.venueCountry = { equals: country, mode: "insensitive" };
+    }
     const [venues, total] = await Promise.all([
         prisma_1.default.user.findMany({
             where,
