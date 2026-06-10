@@ -2,6 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.adminListNewsletterSubscribers = adminListNewsletterSubscribers;
 exports.adminListNewsletterRecentEvents = adminListNewsletterRecentEvents;
+exports.adminListNewsletterCategories = adminListNewsletterCategories;
+exports.adminPreviewNewsletterRecipients = adminPreviewNewsletterRecipients;
 exports.adminListNewsletterCampaigns = adminListNewsletterCampaigns;
 exports.adminSendNewsletter = adminSendNewsletter;
 exports.publicNewsletterSubscribe = publicNewsletterSubscribe;
@@ -25,14 +27,49 @@ async function adminListNewsletterSubscribers(req, res) {
 }
 async function adminListNewsletterRecentEvents(req, res) {
     try {
-        const take = req.query.limit ? Number(req.query.limit) : 40;
-        const events = await (0, newsletter_service_1.listRecentEventsForNewsletter)(Number.isFinite(take) ? take : 40);
-        return res.json({ success: true, events });
+        const take = req.query.limit ? Number(req.query.limit) : 80;
+        const window = (0, newsletter_service_1.parseNewsletterDateWindow)(req.query.window);
+        const category = typeof req.query.category === "string" && req.query.category.trim()
+            ? req.query.category.trim()
+            : null;
+        const events = await (0, newsletter_service_1.listRecentEventsForNewsletter)({
+            take: Number.isFinite(take) ? take : 80,
+            window,
+            category,
+        });
+        return res.json({ success: true, events, window, category });
     }
     catch (e) {
         // eslint-disable-next-line no-console
         console.error("admin newsletter recent-events", e);
         return res.status(500).json({ success: false, error: "Failed to load events" });
+    }
+}
+async function adminListNewsletterCategories(_req, res) {
+    try {
+        const categories = await (0, newsletter_service_1.listNewsletterCategories)();
+        return res.json({ success: true, categories });
+    }
+    catch (e) {
+        // eslint-disable-next-line no-console
+        console.error("admin newsletter categories", e);
+        return res.status(500).json({ success: false, error: "Failed to load categories" });
+    }
+}
+async function adminPreviewNewsletterRecipients(req, res) {
+    try {
+        const audience = (0, newsletter_service_1.parseNewsletterAudience)(req.query.audience);
+        const category = typeof req.query.category === "string" && req.query.category.trim()
+            ? req.query.category.trim()
+            : null;
+        const personalized = String(req.query.personalized ?? "").toLowerCase() === "true";
+        const preview = await (0, newsletter_service_1.previewNewsletterRecipients)({ audience, category, personalized });
+        return res.json({ success: true, ...preview });
+    }
+    catch (e) {
+        // eslint-disable-next-line no-console
+        console.error("admin newsletter recipient-preview", e);
+        return res.status(500).json({ success: false, error: "Failed to preview recipients" });
     }
 }
 async function adminListNewsletterCampaigns(req, res) {
@@ -59,11 +96,17 @@ async function adminSendNewsletter(req, res) {
         const subject = subjectRaw.length > 0 ? subjectRaw.slice(0, 200) : "Curated events from BizTradeFairs";
         const sentByUserId = req.auth?.sub ?? null;
         const sentByEmail = req.auth?.email ?? null;
+        const audience = (0, newsletter_service_1.parseNewsletterAudience)(body.audience);
+        const category = typeof body.category === "string" && body.category.trim() ? body.category.trim() : null;
+        const personalized = Boolean(body.personalized);
         const result = await (0, newsletter_service_1.sendNewsletterToActiveSubscribers)({
             eventIds,
             subject,
             sentByUserId: typeof sentByUserId === "string" ? sentByUserId : null,
             sentByEmail: typeof sentByEmail === "string" ? sentByEmail : null,
+            audience,
+            category,
+            personalized,
         });
         return res.json({ success: true, ...result });
     }

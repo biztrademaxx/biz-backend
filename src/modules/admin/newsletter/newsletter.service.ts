@@ -4,6 +4,70 @@ import { sendNewsletterDigestEmail } from "../../../services/email.service";
 const ACTIVE = "ACTIVE";
 const UNSUBSCRIBED = "UNSUBSCRIBED";
 
+/** Upcoming events whose startDate falls within this many days from today. */
+export const NEWSLETTER_DATE_WINDOWS = {
+  all: null,
+  "30d": 30,
+  "2m": 60,
+  "3m": 90,
+  "5m": 150,
+  "8m": 240,
+  "1y": 365,
+} as const;
+
+export type NewsletterDateWindow = keyof typeof NEWSLETTER_DATE_WINDOWS;
+
+export type NewsletterAudience = "subscribers" | "visitors" | "both";
+
+export function parseNewsletterDateWindow(raw: unknown): NewsletterDateWindow {
+  const key = String(raw ?? "all").trim().toLowerCase();
+  if (key in NEWSLETTER_DATE_WINDOWS) return key as NewsletterDateWindow;
+  return "all";
+}
+
+export function parseNewsletterAudience(raw: unknown): NewsletterAudience {
+  const key = String(raw ?? "both").trim().toLowerCase();
+  if (key === "subscribers" || key === "visitors" || key === "both") return key;
+  return "both";
+}
+
+function normalizeCategoryLabel(s: string): string {
+  return s.trim().toLowerCase();
+}
+
+function categoryLabelsOverlap(a: string[], b: string[]): boolean {
+  if (a.length === 0 || b.length === 0) return false;
+  const setB = new Set(b.map(normalizeCategoryLabel));
+  return a.some((x) => setB.has(normalizeCategoryLabel(x)));
+}
+
+function eventMatchesCategory(eventCategories: string[], category: string | null | undefined): boolean {
+  if (!category?.trim()) return true;
+  const target = normalizeCategoryLabel(category);
+  return eventCategories.some((c) => normalizeCategoryLabel(c) === target);
+}
+
+function recipientMatchesCategory(interests: string[], category: string | null | undefined): boolean {
+  if (!category?.trim()) return true;
+  const target = normalizeCategoryLabel(category);
+  return interests.some((i) => normalizeCategoryLabel(i) === target);
+}
+
+function startOfToday(): Date {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function dateWindowEnd(window: NewsletterDateWindow): Date | null {
+  const days = NEWSLETTER_DATE_WINDOWS[window];
+  if (days == null) return null;
+  const end = new Date();
+  end.setDate(end.getDate() + days);
+  end.setHours(23, 59, 59, 999);
+  return end;
+}
+
 export function normalizeNewsletterEmail(s: unknown): string | null {
   if (typeof s !== "string") return null;
   const t = s.trim().toLowerCase();
@@ -64,14 +128,47 @@ export async function listNewsletterSubscribers(params: { page: number; limit: n
   };
 }
 
-export async function listRecentEventsForNewsletter(take: number) {
-  const n = Math.min(60, Math.max(1, take));
+export async function listNewsletterCategories() {
+  const rows = await prisma.eventCategory.findMany({
+    where: { isActive: true },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+  });
+  return rows;
+}
+
+export async function listRecentEventsForNewsletter(params: {
+  take: number;
+  window?: NewsletterDateWindow;
+  category?: string | null;
+}) {
+  const n = Math.min(120, Math.max(1, params.take));
+  const window = params.window ?? "all";
+  const today = startOfToday();
+  const windowEnd = dateWindowEnd(window);
+
+  const startDateFilter: { gte: Date; lte?: Date } = { gte: today };
+  if (windowEnd) startDateFilter.lte = windowEnd;
+
+  const where: {
+    status: "PUBLISHED";
+    isPublic: true;
+    startDate: { gte: Date; lte?: Date };
+    category?: { has: string };
+  } = {
+    status: "PUBLISHED",
+    isPublic: true,
+    startDate: startDateFilter,
+  };
+
+  const category = String(params.category ?? "").trim();
+  if (category) {
+    where.category = { has: category };
+  }
+
   const events = await prisma.event.findMany({
-    where: {
-      status: "PUBLISHED",
-      isPublic: true,
-    },
-    orderBy: { startDate: "desc" },
+    where,
+    orderBy: { startDate: "asc" },
     take: n,
     select: {
       id: true,
@@ -83,6 +180,7 @@ export async function listRecentEventsForNewsletter(take: number) {
       city: true,
       country: true,
       state: true,
+      category: true,
       thumbnailImage: true,
       bannerImage: true,
       isVirtual: true,
@@ -107,10 +205,93 @@ export async function listRecentEventsForNewsletter(take: number) {
     state: e.state || null,
     country: e.country || e.venue?.venueCountry || null,
     venueName: e.venue?.venueName || null,
+    category: e.category ?? [],
     thumbnailImage: e.thumbnailImage,
     bannerImage: e.bannerImage,
     isVirtual: e.isVirtual,
   }));
+}
+
+type NewsletterRecipient = {
+  email: string;
+  interests: string[];
+  source: "subscriber" | "visitor";
+};
+
+export async function previewNewsletterRecipients(params: {
+  audience: NewsletterAudience;
+  category?: string | null;
+  personalized?: boolean;
+}): Promise<{
+  total: number;
+  subscribers: number;
+  visitors: number;
+  category: string | null;
+  personalized: boolean;
+}> {
+  const recipients = await resolveNewsletterRecipients(params);
+  const subscribers = recipients.filter((r) => r.source === "subscriber").length;
+  const visitors = recipients.filter((r) => r.source === "visitor").length;
+  return {
+    total: recipients.length,
+    subscribers,
+    visitors,
+    category: params.category?.trim() || null,
+    personalized: Boolean(params.personalized),
+  };
+}
+
+async function resolveNewsletterRecipients(params: {
+  audience: NewsletterAudience;
+  category?: string | null;
+  personalized?: boolean;
+}): Promise<NewsletterRecipient[]> {
+  const category = params.category?.trim() || null;
+  const byEmail = new Map<string, NewsletterRecipient>();
+
+  const includeSubscribers = params.audience === "subscribers" || params.audience === "both";
+  const includeVisitors = params.audience === "visitors" || params.audience === "both";
+
+  if (includeSubscribers) {
+    const subs = await prisma.newsletterSubscriber.findMany({
+      where: { status: ACTIVE },
+      select: { email: true },
+    });
+    for (const sub of subs) {
+      const email = sub.email.trim().toLowerCase();
+      if (!email) continue;
+      // Subscribers have no stored interests — include when not filtering by category.
+      if (category) continue;
+      byEmail.set(email, { email: sub.email, interests: [], source: "subscriber" });
+    }
+  }
+
+  if (includeVisitors) {
+    const visitors = await prisma.user.findMany({
+      where: {
+        role: "ATTENDEE",
+        isActive: true,
+        emailNotifications: true,
+        email: { not: null },
+      },
+      select: { email: true, interests: true },
+    });
+
+    for (const v of visitors) {
+      const email = String(v.email ?? "").trim().toLowerCase();
+      if (!email) continue;
+      const interests = Array.isArray(v.interests) ? v.interests : [];
+      if (category && !recipientMatchesCategory(interests, category)) continue;
+      if (params.personalized && interests.length === 0) continue;
+      byEmail.set(email, {
+        email: String(v.email),
+        interests,
+        source: "visitor",
+      });
+    }
+  }
+
+  return [...byEmail.values()];
 }
 
 export type NewsletterSendEvent = {
@@ -124,6 +305,7 @@ export type NewsletterSendEvent = {
   state: string | null;
   country: string | null;
   venueName: string | null;
+  category: string[];
   thumbnailImage: string | null;
   bannerImage: string | null;
   isVirtual: boolean;
@@ -134,11 +316,15 @@ export async function sendNewsletterToActiveSubscribers(params: {
   subject: string;
   sentByUserId: string | null;
   sentByEmail: string | null;
+  audience?: NewsletterAudience;
+  category?: string | null;
+  personalized?: boolean;
 }): Promise<{
   campaignId: string;
   recipientCount: number;
   sentSucceeded: number;
   sentFailed: number;
+  skippedNoMatch: number;
   events: NewsletterSendEvent[];
 }> {
   const uniqueIds = [...new Set(params.eventIds.map((id) => id.trim()).filter(Boolean))];
@@ -165,6 +351,7 @@ export async function sendNewsletterToActiveSubscribers(params: {
       city: true,
       country: true,
       state: true,
+      category: true,
       thumbnailImage: true,
       bannerImage: true,
       isVirtual: true,
@@ -195,23 +382,32 @@ export async function sendNewsletterToActiveSubscribers(params: {
     state: e.state || null,
     country: e.country || e.venue?.venueCountry || null,
     venueName: e.venue?.venueName || null,
+    category: e.category ?? [],
     thumbnailImage: e.thumbnailImage,
     bannerImage: e.bannerImage,
     isVirtual: e.isVirtual,
   }));
 
-  const subscribers = await prisma.newsletterSubscriber.findMany({
-    where: { status: ACTIVE },
-    select: { email: true },
+  const audience = params.audience ?? "both";
+  const category = params.category?.trim() || null;
+  const personalized = Boolean(params.personalized);
+
+  const recipients = await resolveNewsletterRecipients({
+    audience,
+    category,
+    personalized,
   });
 
   const MAX_RECIPIENTS = 2000;
-  if (subscribers.length === 0) {
-    throw Object.assign(new Error("There are no active subscribers to email."), { status: 400 });
-  }
-  if (subscribers.length > MAX_RECIPIENTS) {
+  if (recipients.length === 0) {
     throw Object.assign(
-      new Error(`Too many active subscribers (${subscribers.length}). Contact support to raise the limit.`),
+      new Error("No recipients match your audience and category filters."),
+      { status: 400 },
+    );
+  }
+  if (recipients.length > MAX_RECIPIENTS) {
+    throw Object.assign(
+      new Error(`Too many recipients (${recipients.length}). Contact support to raise the limit.`),
       { status: 400 },
     );
   }
@@ -220,7 +416,7 @@ export async function sendNewsletterToActiveSubscribers(params: {
     data: {
       subject: params.subject,
       eventIds: uniqueIds,
-      recipientCount: subscribers.length,
+      recipientCount: recipients.length,
       sentSucceeded: 0,
       sentFailed: 0,
       sentByUserId: params.sentByUserId,
@@ -230,14 +426,32 @@ export async function sendNewsletterToActiveSubscribers(params: {
 
   let sentSucceeded = 0;
   let sentFailed = 0;
+  let skippedNoMatch = 0;
 
-  for (const sub of subscribers) {
+  for (const recipient of recipients) {
+    let eventsForRecipient = events;
+
+    if (category) {
+      eventsForRecipient = eventsForRecipient.filter((ev) => eventMatchesCategory(ev.category, category));
+    }
+
+    if (personalized && recipient.interests.length > 0) {
+      eventsForRecipient = eventsForRecipient.filter((ev) =>
+        categoryLabelsOverlap(ev.category, recipient.interests),
+      );
+    }
+
+    if (eventsForRecipient.length === 0) {
+      skippedNoMatch += 1;
+      continue;
+    }
+
     try {
       // eslint-disable-next-line no-await-in-loop
       await sendNewsletterDigestEmail({
-        to: sub.email,
+        to: recipient.email,
         subject: params.subject,
-        events,
+        events: eventsForRecipient,
       });
       sentSucceeded += 1;
     } catch {
@@ -252,9 +466,10 @@ export async function sendNewsletterToActiveSubscribers(params: {
 
   return {
     campaignId: campaign.id,
-    recipientCount: subscribers.length,
+    recipientCount: recipients.length,
     sentSucceeded,
     sentFailed,
+    skippedNoMatch,
     events,
   };
 }
