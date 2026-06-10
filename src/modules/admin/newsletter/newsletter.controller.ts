@@ -1,9 +1,13 @@
 import { Request, Response } from "express";
 import {
   listNewsletterSubscribers,
+  listNewsletterCategories,
   listRecentEventsForNewsletter,
   listRecentCampaigns,
   normalizeNewsletterEmail,
+  parseNewsletterAudience,
+  parseNewsletterDateWindow,
+  previewNewsletterRecipients,
   sendNewsletterToActiveSubscribers,
   subscribeNewsletter,
 } from "./newsletter.service";
@@ -27,13 +31,50 @@ export async function adminListNewsletterSubscribers(req: Request, res: Response
 
 export async function adminListNewsletterRecentEvents(req: Request, res: Response) {
   try {
-    const take = req.query.limit ? Number(req.query.limit) : 40;
-    const events = await listRecentEventsForNewsletter(Number.isFinite(take) ? take : 40);
-    return res.json({ success: true, events });
+    const take = req.query.limit ? Number(req.query.limit) : 80;
+    const window = parseNewsletterDateWindow(req.query.window);
+    const category =
+      typeof req.query.category === "string" && req.query.category.trim()
+        ? req.query.category.trim()
+        : null;
+    const events = await listRecentEventsForNewsletter({
+      take: Number.isFinite(take) ? take : 80,
+      window,
+      category,
+    });
+    return res.json({ success: true, events, window, category });
   } catch (e) {
     // eslint-disable-next-line no-console
     console.error("admin newsletter recent-events", e);
     return res.status(500).json({ success: false, error: "Failed to load events" });
+  }
+}
+
+export async function adminListNewsletterCategories(_req: Request, res: Response) {
+  try {
+    const categories = await listNewsletterCategories();
+    return res.json({ success: true, categories });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error("admin newsletter categories", e);
+    return res.status(500).json({ success: false, error: "Failed to load categories" });
+  }
+}
+
+export async function adminPreviewNewsletterRecipients(req: Request, res: Response) {
+  try {
+    const audience = parseNewsletterAudience(req.query.audience);
+    const category =
+      typeof req.query.category === "string" && req.query.category.trim()
+        ? req.query.category.trim()
+        : null;
+    const personalized = String(req.query.personalized ?? "").toLowerCase() === "true";
+    const preview = await previewNewsletterRecipients({ audience, category, personalized });
+    return res.json({ success: true, ...preview });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error("admin newsletter recipient-preview", e);
+    return res.status(500).json({ success: false, error: "Failed to preview recipients" });
   }
 }
 
@@ -64,11 +105,19 @@ export async function adminSendNewsletter(req: Request, res: Response) {
     const sentByUserId = req.auth?.sub ?? null;
     const sentByEmail = req.auth?.email ?? null;
 
+    const audience = parseNewsletterAudience(body.audience);
+    const category =
+      typeof body.category === "string" && body.category.trim() ? body.category.trim() : null;
+    const personalized = Boolean(body.personalized);
+
     const result = await sendNewsletterToActiveSubscribers({
       eventIds,
       subject,
       sentByUserId: typeof sentByUserId === "string" ? sentByUserId : null,
       sentByEmail: typeof sentByEmail === "string" ? sentByEmail : null,
+      audience,
+      category,
+      personalized,
     });
 
     return res.json({ success: true, ...result });
