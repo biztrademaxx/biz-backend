@@ -11,6 +11,7 @@ import {
   isEventSavedHandler,
   getEventPromotionsHandler,
   createPromotionHandler,
+  trackEventMetricsHandler,
   getRecentEventsHandler,
   getVipEventsHandler,
   getEventLeadsHandler,
@@ -99,9 +100,11 @@ router.post("/events/:id/save", requireUser, saveEventHandler);
 router.delete("/events/:id/save", requireUser, unsaveEventHandler);
 router.get("/events/:id/save", requireUser, isEventSavedHandler);
 
-// Event promotions (GET public, POST authenticated)
-router.get("/events/:id/promotions", getEventPromotionsHandler);
+// Event promotions (optional auth for metrics visibility; POST create requires user)
+router.get("/events/:id/promotions", optionalUser, getEventPromotionsHandler);
 router.post("/events/:id/promotions", requireUser, createPromotionHandler);
+// Public metrics beacon (clicks / impressions for active promotions)
+router.post("/events/:id/metrics", trackEventMetricsHandler);
 
 // Global search (events, venues, speakers)
 router.get("/search", searchHandler);

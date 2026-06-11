@@ -753,7 +753,12 @@ export async function isEventSavedHandler(req: Request, res: Response) {
 export async function getEventPromotionsHandler(req: Request, res: Response) {
   try {
     const eventId = req.params.id!;
-    const data = await getEventPromotions(eventId);
+    const data = await getEventPromotions(
+      eventId,
+      req.auth?.sub,
+      req.auth?.role,
+      req.auth?.domain,
+    );
     if (!data) {
       return res.status(404).json({ error: "Event not found" });
     }
@@ -762,6 +767,29 @@ export async function getEventPromotionsHandler(req: Request, res: Response) {
     // eslint-disable-next-line no-console
     console.error("Get event promotions error (backend):", err);
     return res.status(500).json({ error: "Failed to fetch promotion data" });
+  }
+}
+
+/** Public beacon: record promotion impression or event listing click. */
+export async function trackEventMetricsHandler(req: Request, res: Response) {
+  try {
+    const eventId = req.params.id!;
+    const body = req.body as { type?: string; source?: string };
+    const type = body.type === "impression" ? "impression" : body.type === "click" ? "click" : null;
+    if (!type) {
+      return res.status(400).json({ error: "Invalid metric type" });
+    }
+
+    const { trackPromotionMetric } = await import("./promotion-metrics.service");
+    const result = await trackPromotionMetric(eventId, type, body.source);
+    if ("error" in result && result.error === "NOT_FOUND") {
+      return res.status(404).json({ error: "Event not found" });
+    }
+    return res.json({ success: true });
+  } catch (err: any) {
+    // eslint-disable-next-line no-console
+    console.error("Track event metrics error (backend):", err);
+    return res.status(500).json({ error: "Failed to record metric" });
   }
 }
 

@@ -521,13 +521,8 @@ async function getOrganizerAttendeeLeadsHandler(req, res) {
 async function getOrganizerPromotionsHandler(req, res) {
     try {
         const { id } = req.params;
-        const promotions = await (0, organizers_service_1.listOrganizerPromotions)(id);
-        return res.json({
-            success: true,
-            data: {
-                promotions,
-            },
-        });
+        const data = await (0, organizers_service_1.getOrganizerPromotionsMarketing)(id);
+        return res.json(data);
     }
     catch (error) {
         // eslint-disable-next-line no-console

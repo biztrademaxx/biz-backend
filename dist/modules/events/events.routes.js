@@ -50,9 +50,11 @@ router.delete("/events/:id/exhibitors/:exhibitorId", events_controller_1.removeE
 router.post("/events/:id/save", auth_middleware_1.requireUser, events_controller_1.saveEventHandler);
 router.delete("/events/:id/save", auth_middleware_1.requireUser, events_controller_1.unsaveEventHandler);
 router.get("/events/:id/save", auth_middleware_1.requireUser, events_controller_1.isEventSavedHandler);
-// Event promotions (GET public, POST authenticated)
-router.get("/events/:id/promotions", events_controller_1.getEventPromotionsHandler);
+// Event promotions (optional auth for metrics visibility; POST create requires user)
+router.get("/events/:id/promotions", auth_middleware_1.optionalUser, events_controller_1.getEventPromotionsHandler);
 router.post("/events/:id/promotions", auth_middleware_1.requireUser, events_controller_1.createPromotionHandler);
+// Public metrics beacon (clicks / impressions for active promotions)
+router.post("/events/:id/metrics", events_controller_1.trackEventMetricsHandler);
 // Global search (events, venues, speakers)
 router.get("/search", events_controller_1.searchHandler);
 exports.default = router;

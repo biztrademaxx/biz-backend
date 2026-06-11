@@ -17,7 +17,14 @@ async function getVenuesHandler(req, res) {
         const page = req.query.page ? Number.parseInt(req.query.page, 10) : undefined;
         const limit = req.query.limit ? Number.parseInt(req.query.limit, 10) : undefined;
         const requireVenueImage = req.query.requireVenueImage === "1" || req.query.requireVenueImage === "true";
-        const { venues, pagination } = await (0, venues_service_1.listVenues)({ search, page, limit, requireVenueImage });
+        const country = req.query.country ?? undefined;
+        const { venues, pagination } = await (0, venues_service_1.listVenues)({
+            search,
+            page,
+            limit,
+            requireVenueImage,
+            country,
+        });
         return res.json({
             success: true,
             data: venues,

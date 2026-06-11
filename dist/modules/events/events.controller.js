@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -32,6 +65,7 @@ exports.saveEventHandler = saveEventHandler;
 exports.unsaveEventHandler = unsaveEventHandler;
 exports.isEventSavedHandler = isEventSavedHandler;
 exports.getEventPromotionsHandler = getEventPromotionsHandler;
+exports.trackEventMetricsHandler = trackEventMetricsHandler;
 exports.createPromotionHandler = createPromotionHandler;
 exports.createEventAdminHandler = createEventAdminHandler;
 exports.createSpeakerSessionHandler = createSpeakerSessionHandler;
@@ -705,7 +739,7 @@ async function isEventSavedHandler(req, res) {
 async function getEventPromotionsHandler(req, res) {
     try {
         const eventId = req.params.id;
-        const data = await (0, events_service_1.getEventPromotions)(eventId);
+        const data = await (0, events_service_1.getEventPromotions)(eventId, req.auth?.sub, req.auth?.role, req.auth?.domain);
         if (!data) {
             return res.status(404).json({ error: "Event not found" });
         }
@@ -715,6 +749,28 @@ async function getEventPromotionsHandler(req, res) {
         // eslint-disable-next-line no-console
         console.error("Get event promotions error (backend):", err);
         return res.status(500).json({ error: "Failed to fetch promotion data" });
+    }
+}
+/** Public beacon: record promotion impression or event listing click. */
+async function trackEventMetricsHandler(req, res) {
+    try {
+        const eventId = req.params.id;
+        const body = req.body;
+        const type = body.type === "impression" ? "impression" : body.type === "click" ? "click" : null;
+        if (!type) {
+            return res.status(400).json({ error: "Invalid metric type" });
+        }
+        const { trackPromotionMetric } = await Promise.resolve().then(() => __importStar(require("./promotion-metrics.service")));
+        const result = await trackPromotionMetric(eventId, type, body.source);
+        if ("error" in result && result.error === "NOT_FOUND") {
+            return res.status(404).json({ error: "Event not found" });
+        }
+        return res.json({ success: true });
+    }
+    catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("Track event metrics error (backend):", err);
+        return res.status(500).json({ error: "Failed to record metric" });
     }
 }
 async function createPromotionHandler(req, res) {
