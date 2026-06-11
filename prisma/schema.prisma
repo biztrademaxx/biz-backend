@@ -891,7 +891,33 @@ model Promotion {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  marketingReports PromotionMarketingReport[]
+
   @@map("promotions")
+}
+
+/// Daily social / offline marketing lead reports uploaded by admin for a promotion.
+model PromotionMarketingReport {
+  id           String    @id @default(uuid()) @db.Uuid
+  promotionId  String    @db.Uuid
+  promotion    Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  /// Calendar day (UTC midnight) — one report per promotion per day.
+  reportDate   DateTime  @db.Date
+  fileUrl      String
+  filePublicId String?
+  fileName     String
+  fileSize     Int
+  mimeType     String
+  notes        String?
+  /// SOCIAL_MEDIA | EMAIL | OTHER
+  channel      String    @default("SOCIAL_MEDIA")
+  uploadedById String?   @db.Uuid
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([promotionId, reportDate])
+  @@index([promotionId, reportDate])
+  @@map("promotion_marketing_reports")
 }
 
 model SavedEvent {

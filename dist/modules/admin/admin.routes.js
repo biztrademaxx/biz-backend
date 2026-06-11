@@ -37,6 +37,7 @@ const account_deactivation_routes_1 = __importDefault(require("./account-deactiv
 const content_routes_1 = __importDefault(require("./content/content.routes"));
 const role_definitions_routes_1 = __importDefault(require("./role-definitions/role-definitions.routes"));
 const newsletter_routes_1 = __importDefault(require("./newsletter/newsletter.routes"));
+const promotion_marketing_reports_routes_1 = require("../promotions/promotion-marketing-reports.routes");
 const router = (0, express_1.Router)();
 const verifyBadgeUpload = (0, multer_1.default)({
     storage: multer_1.default.memoryStorage(),
@@ -94,4 +95,5 @@ router.use("/account-deactivations", account_deactivation_routes_1.default);
 router.use("/content", content_routes_1.default);
 router.use("/role-definitions", role_definitions_routes_1.default);
 router.use("/newsletter", newsletter_routes_1.default);
+router.use("/promotions", promotion_marketing_reports_routes_1.promotionMarketingReportsAdminRouter);
 exports.default = router;
