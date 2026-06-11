@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -976,6 +1009,11 @@ async function createEventLead(args) {
     if (isAttendeeLeadType(normalizedType)) {
         await saveEvent(userId, eventId);
     }
+    const { leadTypeToConversionKind, recordPromotionConversion } = await Promise.resolve().then(() => __importStar(require("./promotion-metrics.service")));
+    const conversionKind = leadTypeToConversionKind(normalizedType);
+    if (conversionKind) {
+        await recordPromotionConversion(eventId, conversionKind).catch(() => { });
+    }
     return {
         success: true,
         lead,
@@ -1414,6 +1452,8 @@ async function addExhibitorToEvent(eventId, body) {
             space: { select: { id: true, name: true, spaceType: true, basePrice: true } },
         },
     });
+    const { recordPromotionConversion } = await Promise.resolve().then(() => __importStar(require("./promotion-metrics.service")));
+    await recordPromotionConversion(eventId, "EXHIBITOR").catch(() => { });
     return { booth };
 }
 /** Remove exhibitor from event (delete ExhibitorBooth by exhibitorId). */
@@ -1451,7 +1491,7 @@ async function isEventSaved(userId, eventId) {
     });
     return !!saved;
 }
-async function getEventPromotions(eventId) {
+async function getEventPromotions(eventId, viewerUserId, viewerRole, viewerDomain) {
     const event = await prisma_1.default.event.findUnique({
         where: { id: eventId },
         select: {
@@ -1461,25 +1501,29 @@ async function getEventPromotions(eventId) {
             status: true,
             category: true,
             organizerId: true,
+            listingClicks: true,
         },
     });
     if (!event)
         return null;
+    const { canViewPromotionMetrics, sanitizePromotionForViewer, isAdminViewer, } = await Promise.resolve().then(() => __importStar(require("./promotion-metrics.service")));
+    const canViewMetrics = await canViewPromotionMetrics(eventId, viewerUserId, viewerRole, viewerDomain);
+    const isAdmin = isAdminViewer(viewerDomain, viewerRole);
     const promotions = await prisma_1.default.promotion.findMany({
         where: { eventId },
-        include: {
-            event: {
-                select: { id: true, title: true, startDate: true, status: true },
-            },
-        },
         orderBy: { createdAt: "desc" },
     });
     return {
         event: {
-            ...event,
+            id: event.id,
+            title: event.title,
+            startDate: event.startDate,
+            status: event.status,
+            category: event.category,
+            organizerId: event.organizerId,
             date: event.startDate.toISOString().split("T")[0],
         },
-        promotions,
+        promotions: promotions.map((p) => sanitizePromotionForViewer(p, canViewMetrics, isAdmin, event.listingClicks)),
     };
 }
 async function createPromotion(eventId, body) {

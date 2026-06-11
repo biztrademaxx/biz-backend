@@ -565,6 +565,8 @@ model Event {
 
   averageRating Float @default(0)
   totalReviews  Int   @default(0)
+  /// Internal listing clicks — not exposed on public event APIs.
+  listingClicks Int   @default(0)
 
   rejectionReason String?
   rejectedAt      DateTime?
@@ -882,6 +884,9 @@ model Promotion {
   impressions Int @default(0)
   clicks      Int @default(0)
   conversions Int @default(0)
+  conversionVisitors   Int @default(0)
+  conversionExhibitors Int @default(0)
+  conversionSpeakers   Int @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

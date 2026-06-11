@@ -1071,6 +1071,14 @@ export async function createEventLead(args: {
     await saveEvent(userId, eventId);
   }
 
+  const { leadTypeToConversionKind, recordPromotionConversion } = await import(
+    "./promotion-metrics.service"
+  );
+  const conversionKind = leadTypeToConversionKind(normalizedType);
+  if (conversionKind) {
+    await recordPromotionConversion(eventId, conversionKind).catch(() => {});
+  }
+
   return {
     success: true as const,
     lead,
@@ -1596,6 +1604,10 @@ export async function addExhibitorToEvent(
       space: { select: { id: true, name: true, spaceType: true, basePrice: true } },
     },
   });
+
+  const { recordPromotionConversion } = await import("./promotion-metrics.service");
+  await recordPromotionConversion(eventId, "EXHIBITOR").catch(() => {});
+
   return { booth };
 }
 
@@ -1639,7 +1651,12 @@ export async function isEventSaved(userId: string, eventId: string): Promise<boo
   return !!saved;
 }
 
-export async function getEventPromotions(eventId: string) {
+export async function getEventPromotions(
+  eventId: string,
+  viewerUserId?: string | null,
+  viewerRole?: string | null,
+  viewerDomain?: string | null,
+) {
   const event = await prisma.event.findUnique({
     where: { id: eventId },
     select: {
@@ -1649,26 +1666,42 @@ export async function getEventPromotions(eventId: string) {
       status: true,
       category: true,
       organizerId: true,
+      listingClicks: true,
     },
   });
   if (!event) return null;
 
+  const {
+    canViewPromotionMetrics,
+    sanitizePromotionForViewer,
+    isAdminViewer,
+  } = await import("./promotion-metrics.service");
+  const canViewMetrics = await canViewPromotionMetrics(
+    eventId,
+    viewerUserId,
+    viewerRole,
+    viewerDomain,
+  );
+  const isAdmin = isAdminViewer(viewerDomain, viewerRole);
+
   const promotions = await prisma.promotion.findMany({
     where: { eventId },
-    include: {
-      event: {
-        select: { id: true, title: true, startDate: true, status: true },
-      },
-    },
     orderBy: { createdAt: "desc" },
   });
 
   return {
     event: {
-      ...event,
+      id: event.id,
+      title: event.title,
+      startDate: event.startDate,
+      status: event.status,
+      category: event.category,
+      organizerId: event.organizerId,
       date: event.startDate.toISOString().split("T")[0],
     },
-    promotions,
+    promotions: promotions.map((p) =>
+      sanitizePromotionForViewer(p, canViewMetrics, isAdmin, event.listingClicks),
+    ),
   };
 }
 
