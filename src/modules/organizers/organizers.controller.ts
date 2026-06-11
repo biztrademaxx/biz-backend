@@ -9,6 +9,7 @@ import {
   listOrganizerLeads,
   listOrganizerLeadsByType,
   listOrganizerPromotions,
+  getOrganizerPromotionsMarketing,
   createOrganizerPromotion,
   getOrganizerSubscriptionSummary,
   updateOrganizerSubscriptionSummary,
@@ -573,14 +574,9 @@ export async function getOrganizerAttendeeLeadsHandler(req: Request, res: Respon
 export async function getOrganizerPromotionsHandler(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    const promotions = await listOrganizerPromotions(id);
+    const data = await getOrganizerPromotionsMarketing(id);
 
-    return res.json({
-      success: true,
-      data: {
-        promotions,
-      },
-    });
+    return res.json(data);
   } catch (error: any) {
     // eslint-disable-next-line no-console
     console.error("Error fetching organizer promotions (backend):", error);

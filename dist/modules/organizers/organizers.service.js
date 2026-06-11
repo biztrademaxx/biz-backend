@@ -16,6 +16,7 @@ exports.getOrganizerTotalAttendees = getOrganizerTotalAttendees;
 exports.listOrganizerLeads = listOrganizerLeads;
 exports.listOrganizerLeadsByType = listOrganizerLeadsByType;
 exports.listOrganizerPromotions = listOrganizerPromotions;
+exports.getOrganizerPromotionsMarketing = getOrganizerPromotionsMarketing;
 exports.createOrganizerPromotion = createOrganizerPromotion;
 exports.getOrganizerSubscriptionSummary = getOrganizerSubscriptionSummary;
 exports.updateOrganizerSubscriptionSummary = updateOrganizerSubscriptionSummary;
@@ -652,7 +653,7 @@ async function getOrganizerById(identifier, viewerUserId) {
         activeEvents: activeEventStats._count.id,
         totalAttendees: allEventsAttendeesCount,
         totalRevenue: attendeeStats._sum.totalAmount || 0,
-        founded: organizer.founded || "2020",
+        founded: organizer.founded ?? "",
         teamSize: organizer.teamSize || "1-10",
         organizerCountry: organizer.organizerCountry?.trim() ?? "",
         organizerState: organizer.organizerState?.trim() ?? "",
@@ -1320,9 +1321,16 @@ async function listOrganizerLeadsByType(organizerId, type) {
     };
 }
 // ---------- Organizer promotions ----------
+function formatPromotionEventLocation(venue) {
+    const parts = venue
+        ? [venue.venueName, venue.venueCity, venue.venueState].filter(Boolean)
+        : [];
+    return parts.length ? parts.join(", ") : "—";
+}
 async function listOrganizerPromotions(organizerId) {
+    const resolved = (await resolveOrganizerId(organizerId)) ?? organizerId;
     const promotions = await prisma_1.default.promotion.findMany({
-        where: { organizerId },
+        where: { organizerId: resolved },
         include: {
             event: {
                 select: {
@@ -1330,12 +1338,61 @@ async function listOrganizerPromotions(organizerId) {
                     title: true,
                     startDate: true,
                     status: true,
+                    venue: {
+                        select: { venueName: true, venueCity: true, venueState: true },
+                    },
                 },
             },
         },
         orderBy: { createdAt: "desc" },
     });
     return promotions;
+}
+/** Organizer dashboard: promotions list + published events for the promote dropdown. */
+async function getOrganizerPromotionsMarketing(organizerId) {
+    const resolved = (await resolveOrganizerId(organizerId)) ?? organizerId;
+    const promotions = await listOrganizerPromotions(resolved);
+    const events = await prisma_1.default.event.findMany({
+        where: { organizerId: resolved, status: "PUBLISHED" },
+        select: {
+            id: true,
+            title: true,
+            startDate: true,
+            status: true,
+            category: true,
+            currentAttendees: true,
+            maxAttendees: true,
+            venue: {
+                select: { venueName: true, venueCity: true, venueState: true },
+            },
+        },
+        orderBy: { startDate: "asc" },
+    });
+    const transformedEvents = events.map((event) => ({
+        id: event.id,
+        title: event.title,
+        date: event.startDate.toISOString().split("T")[0],
+        location: formatPromotionEventLocation(event.venue),
+        status: event.status,
+        attendees: event.currentAttendees ?? 0,
+        maxAttendees: event.maxAttendees ?? 0,
+        category: Array.isArray(event.category) ? event.category.join(", ") : "",
+        registrations: event.currentAttendees ?? 0,
+        revenue: 0,
+    }));
+    const transformedPromotions = promotions.map((promotion) => ({
+        ...promotion,
+        event: promotion.event
+            ? {
+                id: promotion.event.id,
+                title: promotion.event.title,
+                date: promotion.event.startDate.toISOString().split("T")[0],
+                location: formatPromotionEventLocation(promotion.event.venue),
+                status: promotion.event.status,
+            }
+            : null,
+    }));
+    return { promotions: transformedPromotions, events: transformedEvents };
 }
 async function createOrganizerPromotion(organizerId, body) {
     const eventId = body.eventId ?? null;
@@ -1363,11 +1420,19 @@ async function createOrganizerPromotion(organizerId, body) {
             duration: durationDays,
             startDate,
             endDate,
-            status: "ACTIVE",
+            status: "PENDING",
         },
         include: {
             event: {
-                select: { id: true, title: true, startDate: true, status: true },
+                select: {
+                    id: true,
+                    title: true,
+                    startDate: true,
+                    status: true,
+                    venue: {
+                        select: { venueName: true, venueCity: true, venueState: true },
+                    },
+                },
             },
         },
     });
