@@ -25,6 +25,7 @@ import locationRouter from "../modules/location/location.routes";
 import geoRouter from "../modules/geo/geo.routes";
 import marketingPublicRouter from "../modules/admin/marketing/marketing-public.routes";
 import promotionPackagesRouter from "../modules/promotion-packages/promotion-packages.routes";
+import { promotionMarketingReportsUserRouter } from "../modules/promotions/promotion-marketing-reports.routes";
 import settingsRouter from "../modules/settings/settings.routes";
 import supportUserRouter from "./support-user";
 import contactRouter from "./contact";
@@ -83,6 +84,9 @@ router.use("/marketing", marketingPublicRouter);
 
 // Promotion packages feed for organizer/exhibitor dashboards
 router.use("/", promotionPackagesRouter);
+
+// Promotion marketing lead reports (organizer / exhibitor download)
+router.use("/promotions", promotionMarketingReportsUserRouter);
 
 // Events & search routes
 router.use("/", eventsRouter);

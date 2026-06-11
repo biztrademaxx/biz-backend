@@ -30,6 +30,7 @@ const location_routes_1 = __importDefault(require("../modules/location/location.
 const geo_routes_1 = __importDefault(require("../modules/geo/geo.routes"));
 const marketing_public_routes_1 = __importDefault(require("../modules/admin/marketing/marketing-public.routes"));
 const promotion_packages_routes_1 = __importDefault(require("../modules/promotion-packages/promotion-packages.routes"));
+const promotion_marketing_reports_routes_1 = require("../modules/promotions/promotion-marketing-reports.routes");
 const settings_routes_1 = __importDefault(require("../modules/settings/settings.routes"));
 const support_user_1 = __importDefault(require("./support-user"));
 const contact_1 = __importDefault(require("./contact"));
@@ -71,6 +72,8 @@ router.use("/geo", geo_routes_1.default);
 router.use("/marketing", marketing_public_routes_1.default);
 // Promotion packages feed for organizer/exhibitor dashboards
 router.use("/", promotion_packages_routes_1.default);
+// Promotion marketing lead reports (organizer / exhibitor download)
+router.use("/promotions", promotion_marketing_reports_routes_1.promotionMarketingReportsUserRouter);
 // Events & search routes
 router.use("/", events_routes_1.default);
 // Organizers routes
