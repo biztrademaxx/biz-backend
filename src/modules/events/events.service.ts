@@ -1,5 +1,13 @@
 import type { Prisma } from "@prisma/client";
 import prisma from "../../config/prisma";
+import {
+  cached,
+  CACHE_KEYS,
+  CACHE_TTL,
+  eventsListCacheKey,
+  eventsStatsCacheKey,
+  invalidateEventCaches,
+} from "../../config/redis";
 import { applyPostponedOnOrganizerDateChange } from "./event-schedule";
 import {
   publicPublishedEventWhere,
@@ -40,6 +48,11 @@ export interface ListEventsParams {
 }
 
 export async function listEvents(params: ListEventsParams) {
+  const key = await eventsListCacheKey(params as Record<string, unknown>);
+  return cached(key, CACHE_TTL.EVENTS_LIST, () => listEventsFromDb(params));
+}
+
+async function listEventsFromDb(params: ListEventsParams) {
   const page = params.page && params.page > 0 ? params.page : 1;
   const limit = params.limit && params.limit > 0 ? params.limit : 12;
   const skip = (page - 1) * limit;
@@ -276,6 +289,10 @@ export async function listEvents(params: ListEventsParams) {
 
 // Featured events — same venue/location shape as listEvents so home cards get city/country.
 export async function getFeaturedEvents() {
+  return cached(CACHE_KEYS.eventsFeatured(), CACHE_TTL.EVENTS_FEATURED, getFeaturedEventsFromDb);
+}
+
+async function getFeaturedEventsFromDb() {
   const events = await prisma.event.findMany({
     where: {
       AND: [{ isFeatured: true }, publicPublishedEventWhere()],
@@ -628,6 +645,27 @@ export async function getEventStats(options: EventStatsOptions) {
   const includeCities = options.includeCities ?? false;
   const includeCountries = options.includeCountries ?? false;
 
+  const includeKey = [
+    includeCategories ? "categories" : null,
+    includeCities ? "cities" : null,
+    includeCountries ? "countries" : null,
+  ]
+    .filter(Boolean)
+    .join(",");
+
+  const key = await eventsStatsCacheKey(includeKey || "none");
+  return cached(key, CACHE_TTL.EVENTS_STATS, () =>
+    getEventStatsFromDb({ includeCategories, includeCities, includeCountries }),
+  );
+}
+
+async function getEventStatsFromDb(options: {
+  includeCategories: boolean;
+  includeCities: boolean;
+  includeCountries: boolean;
+}) {
+  const { includeCategories, includeCities, includeCountries } = options;
+
   const result: any = {
     success: true,
   };
@@ -841,13 +879,15 @@ export async function listRecentEvents(limit = 10) {
 }
 
 export async function listVipEvents(limit = 10) {
-  const result = await listEvents({
-    page: 1,
-    limit,
-    sort: "newest",
-    vip: true,
+  return cached(CACHE_KEYS.eventsVip(), CACHE_TTL.EVENTS_VIP, async () => {
+    const result = await listEventsFromDb({
+      page: 1,
+      limit,
+      sort: "newest",
+      vip: true,
+    });
+    return result.events;
   });
-  return result.events;
 }
 
 // ----- Event sub-resources (leads, exhibitors, speakers, brochure, layout, space-costs) -----
@@ -1339,11 +1379,12 @@ export async function updateEventFields(
     });
   }
 
-  return prisma.event.update({
+  const updated = await prisma.event.update({
     where: { id: eventId },
     data,
     select: {
       id: true,
+      slug: true,
       description: true,
       tags: true,
       images: true,
@@ -1351,6 +1392,9 @@ export async function updateEventFields(
       layoutPlan: true,
     },
   });
+
+  await invalidateEventCaches({ slug: updated.slug });
+  return updated;
 }
 
 export async function listEventSpaceCosts(eventId: string) {
@@ -1894,6 +1938,8 @@ export async function updateEventByOrganizer(
     },
   });
 
+  await invalidateEventCaches({ slug: updatedEvent.slug });
+
   return {
     event: {
       ...updatedEvent,
@@ -1916,6 +1962,7 @@ export async function deleteEventByOrganizer(organizerId: string, eventId: strin
     where: { id: organizerId },
     data: { totalEvents: { decrement: 1 } },
   });
+  await invalidateEventCaches({ slug: existingEvent.slug });
   return { deleted: true };
 }
 

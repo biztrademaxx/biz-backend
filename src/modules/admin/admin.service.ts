@@ -1,4 +1,5 @@
 import prisma from "../../config/prisma";
+import { cached, CACHE_KEYS, CACHE_TTL, invalidateEventCaches } from "../../config/redis";
 import { EventStatus } from "@prisma/client";
 import { applyPostponedOnOrganizerDateChange } from "../events/event-schedule";
 import { normalizeYoutubeVideoUrlForStorage } from "../../utils/youtube-url";
@@ -378,6 +379,10 @@ export async function adminListEvents(params: AdminListEventsParams) {
 }
 
 export async function adminGetEventStats() {
+  return cached(CACHE_KEYS.adminEventsStats(), CACHE_TTL.ADMIN_EVENTS_STATS, adminGetEventStatsFromDb);
+}
+
+async function adminGetEventStatsFromDb() {
   const { startOfToday, endOfToday } = adminEventDayBounds();
   const [total, approved, rejected, pending, featured, vip, live, upcoming, ended] = await Promise.all([
     prisma.event.count(),
@@ -611,6 +616,7 @@ export async function adminUpdateEvent(
     data: updateData as any,
   });
 
+  await invalidateEventCaches({ slug: event.slug });
   return { event };
 }
 
@@ -638,6 +644,7 @@ export async function adminVerifyEvent(
         verifiedBadgeImage: null,
       },
     });
+    await invalidateEventCaches({ slug: event.slug });
     return { event };
   }
 
@@ -657,13 +664,14 @@ export async function adminVerifyEvent(
     },
   });
 
+  await invalidateEventCaches({ slug: event.slug });
   return { event };
 }
 
 export async function adminDeleteEvent(id: string) {
   const existing = await prisma.event.findUnique({
     where: { id },
-    select: { id: true },
+    select: { id: true, slug: true },
   });
 
   if (!existing) {
@@ -674,6 +682,7 @@ export async function adminDeleteEvent(id: string) {
     where: { id },
   });
 
+  await invalidateEventCaches({ slug: existing.slug });
   return { deleted: true as const };
 }
 
@@ -702,6 +711,7 @@ export async function adminApproveEvent(eventId: string, adminId: string) {
     },
   });
 
+  await invalidateEventCaches({ slug: event.slug });
   return { event };
 }
 
@@ -734,6 +744,7 @@ export async function adminRejectEvent(
     },
   });
 
+  await invalidateEventCaches({ slug: event.slug });
   return { event };
 }
 

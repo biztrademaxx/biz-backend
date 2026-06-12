@@ -1,4 +1,5 @@
 import prisma from "../../config/prisma";
+import { cached, CACHE_KEYS, CACHE_TTL } from "../../config/redis";
 import { Prisma } from "@prisma/client";
 import {
   activePublicProfileUserWhere,
@@ -488,6 +489,10 @@ export async function listOrganizers(options: ListOrganizersOptions = {}): Promi
 }
 
 export async function listOrganizerFilterFacets() {
+  return cached(CACHE_KEYS.organizersFacets(), CACHE_TTL.ORGANIZERS_FACETS, listOrganizerFilterFacetsFromDb);
+}
+
+async function listOrganizerFilterFacetsFromDb() {
   const rows = await prisma.user.findMany({
     where: publicOrganizerListingWhere(),
     select: {

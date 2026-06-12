@@ -1,4 +1,5 @@
 import prisma from "../../config/prisma";
+import { invalidateEventCaches } from "../../config/redis";
 
 function toDate(value: unknown): Date | null {
   if (value == null) return null;
@@ -81,6 +82,7 @@ export async function updateEventSchedule(
     data,
     select: {
       id: true,
+      slug: true,
       startDate: true,
       endDate: true,
       previousStartDate: true,
@@ -90,6 +92,7 @@ export async function updateEventSchedule(
     },
   });
 
+  await invalidateEventCaches({ slug: updated.slug });
   return { event: updated };
 }
 

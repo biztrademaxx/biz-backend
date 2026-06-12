@@ -26,6 +26,7 @@ exports.listOrganizerMessages = listOrganizerMessages;
 exports.createOrganizerMessage = createOrganizerMessage;
 exports.deleteOrganizerMessage = deleteOrganizerMessage;
 const prisma_1 = __importDefault(require("../../config/prisma"));
+const redis_1 = require("../../config/redis");
 const client_1 = require("@prisma/client");
 const public_profile_1 = require("../../utils/public-profile");
 const profile_image_1 = require("../../utils/profile-image");
@@ -417,6 +418,9 @@ async function listOrganizers(options = {}) {
     };
 }
 async function listOrganizerFilterFacets() {
+    return (0, redis_1.cached)(redis_1.CACHE_KEYS.organizersFacets(), redis_1.CACHE_TTL.ORGANIZERS_FACETS, listOrganizerFilterFacetsFromDb);
+}
+async function listOrganizerFilterFacetsFromDb() {
     const rows = await prisma_1.default.user.findMany({
         where: (0, public_profile_1.publicOrganizerListingWhere)(),
         select: {
