@@ -1,5 +1,6 @@
 import type { AdminContentType, Prisma } from "@prisma/client";
 import prisma from "../../../config/prisma";
+import { bannersCacheKey, cached, CACHE_TTL, invalidateBannerCaches } from "../../../config/redis";
 
 const bannerSelect = {
   id: true,
@@ -63,6 +64,11 @@ export async function listBannersAdmin() {
 }
 
 export async function listBannersPublic(params: { page?: string; position?: string }) {
+  const key = await bannersCacheKey(params.page, params.position);
+  return cached(key, CACHE_TTL.BANNERS, () => listBannersPublicFromDb(params));
+}
+
+async function listBannersPublicFromDb(params: { page?: string; position?: string }) {
   const where: Prisma.AdminContentWhereInput = {
     type: "BANNER",
     published: true,
@@ -109,6 +115,7 @@ export async function createBanner(input: {
     },
     select: bannerSelect,
   });
+  await invalidateBannerCaches();
   return mapBannerRow(row);
 }
 
@@ -150,11 +157,13 @@ export async function patchBanner(
     },
     select: bannerSelect,
   });
+  await invalidateBannerCaches();
   return mapBannerRow(row);
 }
 
 export async function deleteBanner(id: string) {
   const r = await prisma.adminContent.deleteMany({ where: { id, type: "BANNER" } });
+  if (r.count > 0) await invalidateBannerCaches();
   return r.count > 0;
 }
 

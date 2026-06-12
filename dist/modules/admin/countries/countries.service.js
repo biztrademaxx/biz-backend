@@ -10,6 +10,7 @@ exports.createCountry = createCountry;
 exports.updateCountry = updateCountry;
 exports.deleteCountry = deleteCountry;
 const prisma_1 = __importDefault(require("../../../config/prisma"));
+const redis_1 = require("../../../config/redis");
 async function listStateStats(countryCode) {
     const countries = await prisma_1.default.country.findMany({
         select: { name: true, code: true },
@@ -196,6 +197,7 @@ async function createCountry(data) {
             isPermitted: !!data.isPermitted,
         },
     });
+    await (0, redis_1.invalidateGeoCaches)();
     return {
         ...country,
         createdAt: country.createdAt.toISOString(),
@@ -218,9 +220,11 @@ async function updateCountry(id, data) {
             ...(typeof data.isPermitted === "boolean" && { isPermitted: data.isPermitted }),
         },
     });
+    await (0, redis_1.invalidateGeoCaches)();
     return await getCountryById(country.id);
 }
 async function deleteCountry(id) {
     await prisma_1.default.country.delete({ where: { id } });
+    await (0, redis_1.invalidateGeoCaches)();
     return { deleted: true };
 }

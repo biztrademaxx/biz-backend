@@ -12,6 +12,7 @@ exports.updateVenue = updateVenue;
 exports.deleteVenue = deleteVenue;
 exports.sendVenueAccountEmail = sendVenueAccountEmail;
 const prisma_1 = __importDefault(require("../../../config/prisma"));
+const redis_1 = require("../../../config/redis");
 const admin_response_1 = require("../../../lib/admin-response");
 const crypto_1 = require("crypto");
 const email_service_1 = require("../../../services/email.service");
@@ -363,6 +364,7 @@ async function createVenue(body) {
         venueState: body.venueState,
         venueCity: body.venueCity,
     });
+    await (0, redis_1.invalidateVenueCaches)();
     return getVenueById(user.id);
 }
 async function updateVenue(id, body) {
@@ -416,6 +418,7 @@ async function updateVenue(id, body) {
         venueState: data.venueState,
         venueCity: data.venueCity,
     });
+    await (0, redis_1.invalidateVenueCaches)();
     return getVenueById(id);
 }
 async function deleteVenue(id) {
@@ -423,6 +426,7 @@ async function deleteVenue(id) {
     if (!existing)
         return null;
     await prisma_1.default.user.delete({ where: { id } });
+    await (0, redis_1.invalidateVenueCaches)();
     return { deleted: true };
 }
 async function sendVenueAccountEmail(input) {

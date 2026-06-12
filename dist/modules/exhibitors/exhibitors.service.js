@@ -20,6 +20,7 @@ exports.createExhibitorProduct = createExhibitorProduct;
 exports.updateExhibitorProduct = updateExhibitorProduct;
 exports.deleteExhibitorProduct = deleteExhibitorProduct;
 const prisma_1 = __importDefault(require("../../config/prisma"));
+const redis_1 = require("../../config/redis");
 const public_profile_1 = require("../../utils/public-profile");
 const display_name_1 = require("../../utils/display-name");
 const profile_slug_1 = require("../../utils/profile-slug");
@@ -213,7 +214,7 @@ async function updateExhibitorProfile(id, body, viewerUserId, viewerRole) {
         data.location = body.location === "" ? null : body.location;
     }
     if (Object.keys(data).length === 0 && !hasProfileLocUpdate) {
-        return getExhibitorById(resolvedId, resolvedId);
+        return getExhibitorByIdFromDb(resolvedId, resolvedId);
     }
     if (hasProfileLocUpdate) {
         const current = await prisma_1.default.user.findUnique({
@@ -228,11 +229,26 @@ async function updateExhibitorProfile(id, body, viewerUserId, viewerRole) {
         data.profileCountry = mergedCountry;
         data.location = [mergedCity, mergedState, mergedCountry].filter(Boolean).join(", ") || null;
     }
-    await prisma_1.default.user.update({
+    const updated = await prisma_1.default.user.update({
         where: { id: resolvedId },
         data: data,
+        select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            organizationName: true,
+            company: true,
+        },
     });
-    return getExhibitorById(resolvedId, resolvedId);
+    const publicSlug = (0, profile_slug_1.getPublicProfileSlug)({
+        role: "EXHIBITOR",
+        firstName: updated.firstName,
+        lastName: updated.lastName,
+        organizationName: updated.organizationName,
+        company: updated.company,
+    }, "EXHIBITOR");
+    await (0, redis_1.invalidateExhibitorCaches)({ id: resolvedId, slug: publicSlug });
+    return getExhibitorByIdFromDb(resolvedId, resolvedId);
 }
 // Single exhibitor (read-only) – shape for public exhibitor page
 async function resolveExhibitorId(identifier, viewerUserId, viewerRole) {
@@ -303,6 +319,13 @@ async function resolveExhibitorId(identifier, viewerUserId, viewerRole) {
     return exhibitorSelfIdFromStaleSlug(raw, viewerUserId, viewerRole);
 }
 async function getExhibitorById(identifier, viewerUserId, viewerRole) {
+    if (viewerUserId) {
+        return getExhibitorByIdFromDb(identifier, viewerUserId, viewerRole);
+    }
+    const key = redis_1.CACHE_KEYS.exhibitorProfile(identifier);
+    return (0, redis_1.cached)(key, redis_1.CACHE_TTL.EXHIBITOR_PROFILE, () => getExhibitorByIdFromDb(identifier, null, viewerRole));
+}
+async function getExhibitorByIdFromDb(identifier, viewerUserId, viewerRole) {
     const id = await resolveExhibitorId(identifier, viewerUserId, viewerRole);
     if (!id || id === "undefined") {
         throw new Error("Invalid exhibitor ID");

@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import prisma from "../../config/prisma";
+import { cached, CACHE_TTL, venuesListCacheKey } from "../../config/redis";
 import {
   canUserViewOwnPrivateProfile,
   publicPublishedEventWhere,
@@ -15,6 +16,11 @@ export interface ListVenuesParams {
 }
 
 export async function listVenues(params: ListVenuesParams) {
+  const key = await venuesListCacheKey(params as Record<string, unknown>);
+  return cached(key, CACHE_TTL.VENUES_LIST, () => listVenuesFromDb(params));
+}
+
+async function listVenuesFromDb(params: ListVenuesParams) {
   const page = params.page && params.page > 0 ? params.page : 1;
   const limit = params.limit && params.limit > 0 ? params.limit : 10;
   const skip = (page - 1) * limit;

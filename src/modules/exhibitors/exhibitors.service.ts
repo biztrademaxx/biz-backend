@@ -1,4 +1,5 @@
 import prisma from "../../config/prisma";
+import { cached, CACHE_KEYS, CACHE_TTL, invalidateExhibitorCaches } from "../../config/redis";
 import type { Prisma } from "@prisma/client";
 import {
   activePublicProfileUserWhere,
@@ -263,7 +264,7 @@ export async function updateExhibitorProfile(
   }
 
   if (Object.keys(data).length === 0 && !hasProfileLocUpdate) {
-    return getExhibitorById(resolvedId, resolvedId);
+    return getExhibitorByIdFromDb(resolvedId, resolvedId);
   }
 
   if (hasProfileLocUpdate) {
@@ -283,12 +284,30 @@ export async function updateExhibitorProfile(
     data.location = [mergedCity, mergedState, mergedCountry].filter(Boolean).join(", ") || null;
   }
 
-  await prisma.user.update({
+  const updated = await prisma.user.update({
     where: { id: resolvedId },
     data: data as any,
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      organizationName: true,
+      company: true,
+    },
   });
 
-  return getExhibitorById(resolvedId, resolvedId);
+  const publicSlug = getPublicProfileSlug(
+    {
+      role: "EXHIBITOR",
+      firstName: updated.firstName,
+      lastName: updated.lastName,
+      organizationName: updated.organizationName,
+      company: updated.company,
+    },
+    "EXHIBITOR",
+  );
+  await invalidateExhibitorCaches({ id: resolvedId, slug: publicSlug });
+  return getExhibitorByIdFromDb(resolvedId, resolvedId);
 }
 
 // Single exhibitor (read-only) – shape for public exhibitor page
@@ -366,6 +385,21 @@ async function resolveExhibitorId(
 }
 
 export async function getExhibitorById(
+  identifier: string,
+  viewerUserId?: string | null,
+  viewerRole?: string | null,
+) {
+  if (viewerUserId) {
+    return getExhibitorByIdFromDb(identifier, viewerUserId, viewerRole);
+  }
+
+  const key = CACHE_KEYS.exhibitorProfile(identifier);
+  return cached(key, CACHE_TTL.EXHIBITOR_PROFILE, () =>
+    getExhibitorByIdFromDb(identifier, null, viewerRole),
+  );
+}
+
+async function getExhibitorByIdFromDb(
   identifier: string,
   viewerUserId?: string | null,
   viewerRole?: string | null,

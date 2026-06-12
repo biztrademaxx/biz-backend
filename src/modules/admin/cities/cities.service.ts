@@ -1,4 +1,5 @@
 import prisma from "../../../config/prisma";
+import { invalidateGeoCaches } from "../../../config/redis";
 
 export async function listCities(includeCounts: boolean) {
   const cities = await prisma.city.findMany({
@@ -99,6 +100,7 @@ export async function createCity(data: {
     },
     include: { country: { select: { id: true, name: true, code: true } } },
   });
+  await invalidateGeoCaches();
   return {
     ...city,
     createdAt: city.createdAt.toISOString(),
@@ -138,10 +140,12 @@ export async function updateCity(
     },
     include: { country: { select: { id: true, name: true, code: true } } },
   });
+  await invalidateGeoCaches();
   return getCityById(city.id);
 }
 
 export async function deleteCity(id: string) {
   await prisma.city.delete({ where: { id } });
+  await invalidateGeoCaches();
   return { deleted: true };
 }

@@ -727,7 +727,7 @@ export async function createEventAdmin(params: CreateEventAdminParams) {
     },
   );
 
-  await invalidateEventCaches({ slug: createdEvent.slug });
+  await invalidateEventCaches({ slug: createdEvent.slug, id: createdEvent.id });
 
   return {
     success: true,

@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import prisma from "../../config/prisma";
+import { cached, CACHE_TTL, invalidateSpeakerCaches, speakersListCacheKey } from "../../config/redis";
 import {
   activePublicProfileUserWhere,
   canUserViewOwnPrivateProfile,
@@ -12,7 +13,11 @@ import { getPublicProfileSlug, isUuidLike, publicSlugRequestMatches } from "../.
 // List speakers
 export async function listSpeakers(options?: { requireProfileImage?: boolean }) {
   const requireProfileImage = options?.requireProfileImage ?? false;
+  const key = await speakersListCacheKey(requireProfileImage);
+  return cached(key, CACHE_TTL.SPEAKERS_LIST, () => listSpeakersFromDb(requireProfileImage));
+}
 
+async function listSpeakersFromDb(requireProfileImage: boolean) {
   await prisma.$connect();
 
   const speakers = await prisma.user.findMany({
@@ -416,6 +421,8 @@ export async function updateSpeakerProfile(
       speakingExperience: true,
     },
   });
+
+  await invalidateSpeakerCaches();
 
   return {
     fullName: `${updated.firstName} ${updated.lastName}`.trim(),

@@ -685,7 +685,7 @@ async function createEventAdmin(params) {
             status: createdEvent.status,
         },
     });
-    await (0, redis_1.invalidateEventCaches)({ slug: createdEvent.slug });
+    await (0, redis_1.invalidateEventCaches)({ slug: createdEvent.slug, id: createdEvent.id });
     return {
         success: true,
         message: "Event created successfully with nested entities",

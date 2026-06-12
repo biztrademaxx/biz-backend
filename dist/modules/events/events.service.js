@@ -376,6 +376,13 @@ async function getEventByIdentifier(id, viewerUserId) {
     if (!id?.trim()) {
         throw new Error("Invalid event identifier");
     }
+    if (viewerUserId) {
+        return getEventByIdentifierFromDb(id, viewerUserId);
+    }
+    const key = redis_1.CACHE_KEYS.eventDetail(id);
+    return (0, redis_1.cached)(key, redis_1.CACHE_TTL.EVENT_DETAIL, () => getEventByIdentifierFromDb(id, null));
+}
+async function getEventByIdentifierFromDb(id, viewerUserId) {
     const trimmed = id.trim();
     const include = {
         organizer: {
@@ -722,6 +729,10 @@ async function searchEntities(query, limit = 5) {
             allResults: [],
         };
     }
+    const key = await (0, redis_1.searchCacheKey)(trimmed, limit);
+    return (0, redis_1.cached)(key, redis_1.CACHE_TTL.SEARCH, () => searchEntitiesFromDb(trimmed, limit));
+}
+async function searchEntitiesFromDb(trimmed, limit) {
     const [events, venues, speakers] = await Promise.all([
         prisma_1.default.event.findMany({
             where: {
@@ -1272,7 +1283,7 @@ async function updateEventFields(eventId, body) {
             layoutPlan: true,
         },
     });
-    await (0, redis_1.invalidateEventCaches)({ slug: updated.slug });
+    await (0, redis_1.invalidateEventCaches)({ slug: updated.slug, id: updated.id });
     return updated;
 }
 async function listEventSpaceCosts(eventId) {
@@ -1718,7 +1729,7 @@ async function updateEventByOrganizer(organizerId, eventId, body) {
             },
         },
     });
-    await (0, redis_1.invalidateEventCaches)({ slug: updatedEvent.slug });
+    await (0, redis_1.invalidateEventCaches)({ slug: updatedEvent.slug, id: updatedEvent.id });
     return {
         event: {
             ...updatedEvent,
@@ -1740,6 +1751,6 @@ async function deleteEventByOrganizer(organizerId, eventId) {
         where: { id: organizerId },
         data: { totalEvents: { decrement: 1 } },
     });
-    await (0, redis_1.invalidateEventCaches)({ slug: existingEvent.slug });
+    await (0, redis_1.invalidateEventCaches)({ slug: existingEvent.slug, id: existingEvent.id });
     return { deleted: true };
 }

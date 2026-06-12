@@ -1,4 +1,5 @@
 import prisma from "../../../config/prisma";
+import { invalidateSpeakerCaches } from "../../../config/redis";
 import { parseListQuery } from "../../../lib/admin-response";
 import type { UserRole } from "@prisma/client";
 
@@ -134,6 +135,7 @@ export async function createSpeaker(body: Record<string, unknown>) {
       isActive: body.isActive !== false,
     },
   });
+  await invalidateSpeakerCaches();
   return getSpeakerById(user.id);
 }
 
@@ -168,6 +170,7 @@ export async function updateSpeaker(id: string, body: Record<string, unknown>) {
   }
   if (body.email !== undefined) data.email = String(body.email).trim().toLowerCase();
   await prisma.user.update({ where: { id }, data: data as any });
+  await invalidateSpeakerCaches();
   return getSpeakerById(id);
 }
 
@@ -175,5 +178,6 @@ export async function deleteSpeaker(id: string) {
   const existing = await prisma.user.findFirst({ where: { id, role: ROLE } });
   if (!existing) return null;
   await prisma.user.delete({ where: { id } });
+  await invalidateSpeakerCaches();
   return { deleted: true };
 }

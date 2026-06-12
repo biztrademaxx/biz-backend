@@ -13,6 +13,7 @@ exports.listExhibitorFeedbackForAdmin = listExhibitorFeedbackForAdmin;
 exports.updateExhibitorFeedbackById = updateExhibitorFeedbackById;
 exports.listExhibitorAppointmentsForAdmin = listExhibitorAppointmentsForAdmin;
 const prisma_1 = __importDefault(require("../../../config/prisma"));
+const redis_1 = require("../../../config/redis");
 const admin_response_1 = require("../../../lib/admin-response");
 const ROLE = "EXHIBITOR";
 async function listExhibitors(query) {
@@ -137,6 +138,7 @@ async function createExhibitor(body) {
             isActive: body.isActive !== false,
         },
     });
+    await (0, redis_1.invalidateExhibitorCaches)({ id: user.id });
     return getExhibitorById(user.id);
 }
 async function updateExhibitor(id, body) {
@@ -169,6 +171,7 @@ async function updateExhibitor(id, body) {
     if (body.email !== undefined)
         data.email = String(body.email).trim().toLowerCase();
     await prisma_1.default.user.update({ where: { id }, data: data });
+    await (0, redis_1.invalidateExhibitorCaches)({ id });
     return getExhibitorById(id);
 }
 async function deleteExhibitor(id) {
@@ -176,6 +179,7 @@ async function deleteExhibitor(id) {
     if (!existing)
         return null;
     await prisma_1.default.user.delete({ where: { id } });
+    await (0, redis_1.invalidateExhibitorCaches)({ id });
     return { deleted: true };
 }
 async function getExhibitorStats() {

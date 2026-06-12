@@ -1,5 +1,11 @@
 import prisma from "../../config/prisma";
-import { cached, CACHE_KEYS, CACHE_TTL, invalidateEventCaches } from "../../config/redis";
+import {
+  adminEventsListCacheKey,
+  cached,
+  CACHE_KEYS,
+  CACHE_TTL,
+  invalidateEventCaches,
+} from "../../config/redis";
 import { EventStatus } from "@prisma/client";
 import { applyPostponedOnOrganizerDateChange } from "../events/event-schedule";
 import { normalizeYoutubeVideoUrlForStorage } from "../../utils/youtube-url";
@@ -206,6 +212,11 @@ export interface AdminListEventsParams {
 }
 
 export async function adminListEvents(params: AdminListEventsParams) {
+  const key = await adminEventsListCacheKey(params as Record<string, unknown>);
+  return cached(key, CACHE_TTL.ADMIN_EVENTS_LIST, () => adminListEventsFromDb(params));
+}
+
+async function adminListEventsFromDb(params: AdminListEventsParams) {
   const page = params.page && params.page > 0 ? params.page : 1;
   const limit = params.limit && params.limit > 0 ? params.limit : 15;
   const skip = (page - 1) * limit;
@@ -616,7 +627,7 @@ export async function adminUpdateEvent(
     data: updateData as any,
   });
 
-  await invalidateEventCaches({ slug: event.slug });
+  await invalidateEventCaches({ slug: event.slug, id: event.id });
   return { event };
 }
 
@@ -644,7 +655,7 @@ export async function adminVerifyEvent(
         verifiedBadgeImage: null,
       },
     });
-    await invalidateEventCaches({ slug: event.slug });
+    await invalidateEventCaches({ slug: event.slug, id: event.id });
     return { event };
   }
 
@@ -664,7 +675,7 @@ export async function adminVerifyEvent(
     },
   });
 
-  await invalidateEventCaches({ slug: event.slug });
+  await invalidateEventCaches({ slug: event.slug, id: event.id });
   return { event };
 }
 
@@ -682,7 +693,7 @@ export async function adminDeleteEvent(id: string) {
     where: { id },
   });
 
-  await invalidateEventCaches({ slug: existing.slug });
+  await invalidateEventCaches({ slug: existing.slug, id: existing.id });
   return { deleted: true as const };
 }
 
@@ -711,7 +722,7 @@ export async function adminApproveEvent(eventId: string, adminId: string) {
     },
   });
 
-  await invalidateEventCaches({ slug: event.slug });
+  await invalidateEventCaches({ slug: event.slug, id: event.id });
   return { event };
 }
 
@@ -744,7 +755,7 @@ export async function adminRejectEvent(
     },
   });
 
-  await invalidateEventCaches({ slug: event.slug });
+  await invalidateEventCaches({ slug: event.slug, id: event.id });
   return { event };
 }
 
@@ -928,6 +939,12 @@ function buildEventOverviewTrend(
 }
 
 export async function adminGetEventOverviewTrend(range: EventOverviewRange = "1m") {
+  return cached(CACHE_KEYS.adminEventOverview(range), CACHE_TTL.ADMIN_EVENT_OVERVIEW, () =>
+    adminGetEventOverviewTrendFromDb(range),
+  );
+}
+
+async function adminGetEventOverviewTrendFromDb(range: EventOverviewRange = "1m") {
   const start = new Date();
   start.setDate(start.getDate() - eventOverviewRangeDays(range));
   start.setHours(0, 0, 0, 0);
@@ -961,6 +978,12 @@ const EVENT_STATUS_DONUT_COLORS: Record<string, string> = {
 }
 
 export async function adminGetDashboardSummary(eventRange: EventOverviewRange = "1m") {
+  return cached(CACHE_KEYS.adminDashboard(eventRange), CACHE_TTL.ADMIN_DASHBOARD, () =>
+    adminGetDashboardSummaryFromDb(eventRange),
+  );
+}
+
+async function adminGetDashboardSummaryFromDb(eventRange: EventOverviewRange = "1m") {
   const rangeStart = new Date()
   rangeStart.setDate(rangeStart.getDate() - eventOverviewRangeDays(eventRange))
   rangeStart.setHours(0, 0, 0, 0)

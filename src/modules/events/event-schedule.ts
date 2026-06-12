@@ -92,7 +92,7 @@ export async function updateEventSchedule(
     },
   });
 
-  await invalidateEventCaches({ slug: updated.slug });
+  await invalidateEventCaches({ slug: updated.slug, id: updated.id });
   return { event: updated };
 }
 

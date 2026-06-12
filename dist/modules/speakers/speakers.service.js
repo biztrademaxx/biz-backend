@@ -11,6 +11,7 @@ exports.createSpeaker = createSpeaker;
 exports.updateSpeakerProfile = updateSpeakerProfile;
 exports.getSpeakerEvents = getSpeakerEvents;
 const prisma_1 = __importDefault(require("../../config/prisma"));
+const redis_1 = require("../../config/redis");
 const public_profile_1 = require("../../utils/public-profile");
 const profile_image_1 = require("../../utils/profile-image");
 const display_name_1 = require("../../utils/display-name");
@@ -18,6 +19,10 @@ const profile_slug_1 = require("../../utils/profile-slug");
 // List speakers
 async function listSpeakers(options) {
     const requireProfileImage = options?.requireProfileImage ?? false;
+    const key = await (0, redis_1.speakersListCacheKey)(requireProfileImage);
+    return (0, redis_1.cached)(key, redis_1.CACHE_TTL.SPEAKERS_LIST, () => listSpeakersFromDb(requireProfileImage));
+}
+async function listSpeakersFromDb(requireProfileImage) {
     await prisma_1.default.$connect();
     const speakers = await prisma_1.default.user.findMany({
         where: {
@@ -359,6 +364,7 @@ async function updateSpeakerProfile(id, body) {
             speakingExperience: true,
         },
     });
+    await (0, redis_1.invalidateSpeakerCaches)();
     return {
         fullName: `${updated.firstName} ${updated.lastName}`.trim(),
         designation: updated.jobTitle || "",

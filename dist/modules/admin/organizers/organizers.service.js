@@ -15,6 +15,7 @@ exports.listVenueBookingsForAdmin = listVenueBookingsForAdmin;
 exports.listOrganizerEventFeedbackForAdmin = listOrganizerEventFeedbackForAdmin;
 exports.updateOrganizerEventFeedbackById = updateOrganizerEventFeedbackById;
 const prisma_1 = __importDefault(require("../../../config/prisma"));
+const redis_1 = require("../../../config/redis");
 const admin_response_1 = require("../../../lib/admin-response");
 const crypto_1 = require("crypto");
 const email_service_1 = require("../../../services/email.service");
@@ -146,6 +147,10 @@ function mapOrganizerForAdmin(u) {
     };
 }
 async function listOrganizers(query) {
+    const key = await (0, redis_1.adminOrganizersListCacheKey)(query);
+    return (0, redis_1.cached)(key, redis_1.CACHE_TTL.ADMIN_ORGANIZERS_LIST, () => listOrganizersFromDb(query));
+}
+async function listOrganizersFromDb(query) {
     const { page, limit, search, skip, sort, order } = (0, admin_response_1.parseListQuery)(query);
     const country = String(query.country ?? "").trim();
     const where = { role: ROLE };
@@ -239,6 +244,8 @@ async function createOrganizer(body) {
             isVerified: body.isVerified === true,
         },
     });
+    await (0, redis_1.invalidateOrganizerCaches)({ id: user.id });
+    await (0, redis_1.invalidateAdminOrganizerCaches)();
     return getOrganizerById(user.id);
 }
 async function updateOrganizer(id, body) {
@@ -295,6 +302,8 @@ async function updateOrganizer(id, body) {
     if (body.email !== undefined)
         data.email = String(body.email).trim().toLowerCase();
     await prisma_1.default.user.update({ where: { id }, data: data });
+    await (0, redis_1.invalidateOrganizerCaches)({ id });
+    await (0, redis_1.invalidateAdminOrganizerCaches)();
     return getOrganizerById(id);
 }
 async function deleteOrganizer(id) {
@@ -302,6 +311,8 @@ async function deleteOrganizer(id) {
     if (!existing)
         return null;
     await prisma_1.default.user.delete({ where: { id } });
+    await (0, redis_1.invalidateOrganizerCaches)({ id });
+    await (0, redis_1.invalidateAdminOrganizerCaches)();
     return { deleted: true };
 }
 async function sendOrganizerAccountEmail(input) {

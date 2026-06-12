@@ -339,6 +339,10 @@ async function mapOrganizerListRows(rows, requireProfileImage) {
     });
 }
 async function listOrganizers(options = {}) {
+    const key = await (0, redis_1.organizersListCacheKey)(options);
+    return (0, redis_1.cached)(key, redis_1.CACHE_TTL.ORGANIZERS_LIST, () => listOrganizersFromDb(options));
+}
+async function listOrganizersFromDb(options = {}) {
     const requireProfileImage = options.requireProfileImage ?? false;
     /** Directory listing is always paginated unless this is the small featured-home subset. */
     const paginate = options.paginate ?? (options.page != null || options.limit != null || !requireProfileImage);
@@ -523,6 +527,13 @@ async function resolveOrganizerId(identifier) {
     return null;
 }
 async function getOrganizerById(identifier, viewerUserId) {
+    if (viewerUserId) {
+        return getOrganizerByIdFromDb(identifier, viewerUserId);
+    }
+    const key = redis_1.CACHE_KEYS.organizerProfile(identifier);
+    return (0, redis_1.cached)(key, redis_1.CACHE_TTL.ORGANIZER_PROFILE, () => getOrganizerByIdFromDb(identifier, null));
+}
+async function getOrganizerByIdFromDb(identifier, viewerUserId) {
     const id = await resolveOrganizerId(identifier);
     if (!id)
         return null;
@@ -773,11 +784,26 @@ async function updateOrganizerProfile(organizerId, body) {
     if (body.avatar !== undefined) {
         data.avatar = body.avatar != null ? String(body.avatar) : null;
     }
-    await prisma_1.default.user.update({
+    const updated = await prisma_1.default.user.update({
         where: { id: organizerId },
         data: data,
+        select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            organizationName: true,
+            company: true,
+        },
     });
-    return getOrganizerById(organizerId);
+    const publicSlug = (0, profile_slug_1.getPublicProfileSlug)({
+        role: "ORGANIZER",
+        firstName: updated.firstName,
+        lastName: updated.lastName,
+        organizationName: updated.organizationName,
+        company: updated.company,
+    }, "ORGANIZER");
+    await (0, redis_1.invalidateOrganizerCaches)({ id: organizerId, slug: publicSlug });
+    return getOrganizerByIdFromDb(organizerId, organizerId);
 }
 // ---------- Organizer analytics ----------
 function getColorForCategory(category) {
@@ -997,6 +1023,13 @@ const eventStatusMap = {
     COMPLETED: "Approved",
 };
 async function listOrganizerEvents(organizerId, page = 1, limit = 50, viewerUserId) {
+    if (viewerUserId) {
+        return listOrganizerEventsFromDb(organizerId, page, limit, viewerUserId);
+    }
+    const key = await (0, redis_1.organizerEventsCacheKey)(organizerId, page, limit);
+    return (0, redis_1.cached)(key, redis_1.CACHE_TTL.ORGANIZER_EVENTS, () => listOrganizerEventsFromDb(organizerId, page, limit, null));
+}
+async function listOrganizerEventsFromDb(organizerId, page = 1, limit = 50, viewerUserId) {
     organizerId = (await resolveOrganizerId(organizerId)) ?? "";
     if (!organizerId) {
         return {

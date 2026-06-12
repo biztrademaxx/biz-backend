@@ -1,5 +1,12 @@
 import prisma from "../../config/prisma";
-import { cached, CACHE_KEYS, CACHE_TTL } from "../../config/redis";
+import {
+  cached,
+  CACHE_KEYS,
+  CACHE_TTL,
+  invalidateOrganizerCaches,
+  organizerEventsCacheKey,
+  organizersListCacheKey,
+} from "../../config/redis";
 import { Prisma } from "@prisma/client";
 import {
   activePublicProfileUserWhere,
@@ -392,6 +399,11 @@ async function mapOrganizerListRows(
 }
 
 export async function listOrganizers(options: ListOrganizersOptions = {}): Promise<ListOrganizersResult> {
+  const key = await organizersListCacheKey(options as Record<string, unknown>);
+  return cached(key, CACHE_TTL.ORGANIZERS_LIST, () => listOrganizersFromDb(options));
+}
+
+async function listOrganizersFromDb(options: ListOrganizersOptions = {}): Promise<ListOrganizersResult> {
   const requireProfileImage = options.requireProfileImage ?? false;
   /** Directory listing is always paginated unless this is the small featured-home subset. */
   const paginate =
@@ -604,6 +616,15 @@ async function resolveOrganizerId(identifier: string): Promise<string | null> {
 }
 
 export async function getOrganizerById(identifier: string, viewerUserId?: string | null) {
+  if (viewerUserId) {
+    return getOrganizerByIdFromDb(identifier, viewerUserId);
+  }
+
+  const key = CACHE_KEYS.organizerProfile(identifier);
+  return cached(key, CACHE_TTL.ORGANIZER_PROFILE, () => getOrganizerByIdFromDb(identifier, null));
+}
+
+async function getOrganizerByIdFromDb(identifier: string, viewerUserId?: string | null) {
   const id = await resolveOrganizerId(identifier);
   if (!id) return null;
   const organizer = await prisma.user.findFirst({
@@ -900,12 +921,31 @@ export async function updateOrganizerProfile(
     data.avatar = body.avatar != null ? String(body.avatar) : null;
   }
 
-  await prisma.user.update({
+  const updated = await prisma.user.update({
     where: { id: organizerId },
     data: data as any,
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      organizationName: true,
+      company: true,
+    },
   });
 
-  return getOrganizerById(organizerId);
+  const publicSlug = getPublicProfileSlug(
+    {
+      role: "ORGANIZER",
+      firstName: updated.firstName,
+      lastName: updated.lastName,
+      organizationName: updated.organizationName,
+      company: updated.company,
+    },
+    "ORGANIZER",
+  );
+
+  await invalidateOrganizerCaches({ id: organizerId, slug: publicSlug });
+  return getOrganizerByIdFromDb(organizerId, organizerId);
 }
 
 // ---------- Organizer analytics ----------
@@ -1172,6 +1212,20 @@ const eventStatusMap: Record<string, string> = {
 };
 
 export async function listOrganizerEvents(organizerId: string, page = 1, limit = 50, viewerUserId?: string | null) {
+  if (viewerUserId) {
+    return listOrganizerEventsFromDb(organizerId, page, limit, viewerUserId);
+  }
+
+  const key = await organizerEventsCacheKey(organizerId, page, limit);
+  return cached(key, CACHE_TTL.ORGANIZER_EVENTS, () => listOrganizerEventsFromDb(organizerId, page, limit, null));
+}
+
+async function listOrganizerEventsFromDb(
+  organizerId: string,
+  page = 1,
+  limit = 50,
+  viewerUserId?: string | null,
+) {
   organizerId = (await resolveOrganizerId(organizerId)) ?? "";
   if (!organizerId) {
     return {

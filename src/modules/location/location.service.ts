@@ -1,4 +1,10 @@
 import prisma from "../../config/prisma";
+import {
+  cached,
+  CACHE_TTL,
+  geoCitiesCacheKey,
+  geoCountriesCacheKey,
+} from "../../config/redis";
 
 /**
  * Run async work in small batches so we do not open dozens of Prisma queries at once
@@ -34,6 +40,11 @@ async function countEventsForCountryVenue(country: { name: string; code: string 
 
 /** Public browse + forms: active countries with active cities, `isPermitted`, and event counts (no auth). */
 export async function listPublicCountries() {
+  const key = await geoCountriesCacheKey();
+  return cached(key, CACHE_TTL.GEO, listPublicCountriesFromDb);
+}
+
+async function listPublicCountriesFromDb() {
   const rows = await prisma.country.findMany({
     where: { isActive: true },
     orderBy: { name: "asc" },
@@ -88,6 +99,11 @@ export type PublicCityBrowseRow = {
 
 /** Public browse + forms: active cities with country, `isPermitted`, and event counts (no auth). */
 export async function listPublicCities(countryId?: string): Promise<PublicCityBrowseRow[]> {
+  const key = await geoCitiesCacheKey(countryId);
+  return cached(key, CACHE_TTL.GEO, () => listPublicCitiesFromDb(countryId));
+}
+
+async function listPublicCitiesFromDb(countryId?: string): Promise<PublicCityBrowseRow[]> {
   const where: { isActive: boolean; countryId?: string } = { isActive: true };
   if (countryId) where.countryId = countryId;
 

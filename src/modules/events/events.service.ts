@@ -7,6 +7,7 @@ import {
   eventsListCacheKey,
   eventsStatsCacheKey,
   invalidateEventCaches,
+  searchCacheKey,
 } from "../../config/redis";
 import { applyPostponedOnOrganizerDateChange } from "./event-schedule";
 import {
@@ -358,6 +359,15 @@ export async function getEventByIdentifier(id: string, viewerUserId?: string | n
     throw new Error("Invalid event identifier");
   }
 
+  if (viewerUserId) {
+    return getEventByIdentifierFromDb(id, viewerUserId);
+  }
+
+  const key = CACHE_KEYS.eventDetail(id);
+  return cached(key, CACHE_TTL.EVENT_DETAIL, () => getEventByIdentifierFromDb(id, null));
+}
+
+async function getEventByIdentifierFromDb(id: string, viewerUserId?: string | null) {
   const trimmed = id.trim();
 
   const include = {
@@ -769,6 +779,11 @@ export async function searchEntities(query: string, limit = 5) {
     };
   }
 
+  const key = await searchCacheKey(trimmed, limit);
+  return cached(key, CACHE_TTL.SEARCH, () => searchEntitiesFromDb(trimmed, limit));
+}
+
+async function searchEntitiesFromDb(trimmed: string, limit: number) {
   const [events, venues, speakers] = await Promise.all([
     prisma.event.findMany({
       where: {
@@ -1393,7 +1408,7 @@ export async function updateEventFields(
     },
   });
 
-  await invalidateEventCaches({ slug: updated.slug });
+  await invalidateEventCaches({ slug: updated.slug, id: updated.id });
   return updated;
 }
 
@@ -1938,7 +1953,7 @@ export async function updateEventByOrganizer(
     },
   });
 
-  await invalidateEventCaches({ slug: updatedEvent.slug });
+  await invalidateEventCaches({ slug: updatedEvent.slug, id: updatedEvent.id });
 
   return {
     event: {
@@ -1962,7 +1977,7 @@ export async function deleteEventByOrganizer(organizerId: string, eventId: strin
     where: { id: organizerId },
     data: { totalEvents: { decrement: 1 } },
   });
-  await invalidateEventCaches({ slug: existingEvent.slug });
+  await invalidateEventCaches({ slug: existingEvent.slug, id: existingEvent.id });
   return { deleted: true };
 }
 
