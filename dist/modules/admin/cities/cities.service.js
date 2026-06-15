@@ -9,6 +9,7 @@ exports.createCity = createCity;
 exports.updateCity = updateCity;
 exports.deleteCity = deleteCity;
 const prisma_1 = __importDefault(require("../../../config/prisma"));
+const redis_1 = require("../../../config/redis");
 async function listCities(includeCounts) {
     const cities = await prisma_1.default.city.findMany({
         include: {
@@ -92,6 +93,7 @@ async function createCity(data) {
         },
         include: { country: { select: { id: true, name: true, code: true } } },
     });
+    await (0, redis_1.invalidateGeoCaches)();
     return {
         ...city,
         createdAt: city.createdAt.toISOString(),
@@ -116,9 +118,11 @@ async function updateCity(id, data) {
         },
         include: { country: { select: { id: true, name: true, code: true } } },
     });
+    await (0, redis_1.invalidateGeoCaches)();
     return getCityById(city.id);
 }
 async function deleteCity(id) {
     await prisma_1.default.city.delete({ where: { id } });
+    await (0, redis_1.invalidateGeoCaches)();
     return { deleted: true };
 }

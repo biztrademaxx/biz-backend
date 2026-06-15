@@ -1,4 +1,5 @@
 import prisma from "../../../config/prisma";
+import { cached, CACHE_KEYS, CACHE_TTL, invalidateEventCaches } from "../../../config/redis";
 import { publicPublishedEventWhere } from "../../../utils/public-profile";
 
 /** Active categories for public / organizer pickers (no counts). */
@@ -12,6 +13,14 @@ export async function listActiveEventCategoriesPublic() {
 
 /** Active categories with counts of published public events (category name in Event.category[]). */
 export async function listActiveEventCategoriesWithEventCounts() {
+  return cached(
+    CACHE_KEYS.eventsCategoriesBrowse(),
+    CACHE_TTL.EVENTS_CATEGORIES_BROWSE,
+    listActiveEventCategoriesWithEventCountsFromDb,
+  );
+}
+
+async function listActiveEventCategoriesWithEventCountsFromDb() {
   const categories = await prisma.eventCategory.findMany({
     where: { isActive: true },
     orderBy: { name: "asc" },
@@ -74,7 +83,9 @@ export async function createEventCategory(input: UpsertCategoryInput) {
     isActive: typeof input.isActive === "boolean" ? input.isActive : true,
   };
 
-  return prisma.eventCategory.create({ data });
+  const created = await prisma.eventCategory.create({ data });
+  await invalidateEventCaches();
+  return created;
 }
 
 export async function updateEventCategory(id: string, input: UpsertCategoryInput) {
@@ -93,14 +104,17 @@ export async function updateEventCategory(id: string, input: UpsertCategoryInput
     data.isActive = input.isActive;
   }
 
-  return prisma.eventCategory.update({
+  const updated = await prisma.eventCategory.update({
     where: { id },
     data,
   });
+  await invalidateEventCaches();
+  return updated;
 }
 
 export async function deleteEventCategory(id: string) {
   await prisma.eventCategory.delete({
     where: { id },
   });
+  await invalidateEventCaches();
 }

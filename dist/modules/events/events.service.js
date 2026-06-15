@@ -69,6 +69,7 @@ exports.createPromotion = createPromotion;
 exports.updateEventByOrganizer = updateEventByOrganizer;
 exports.deleteEventByOrganizer = deleteEventByOrganizer;
 const prisma_1 = __importDefault(require("../../config/prisma"));
+const redis_1 = require("../../config/redis");
 const event_schedule_1 = require("./event-schedule");
 const public_profile_1 = require("../../utils/public-profile");
 const profile_slug_1 = require("../../utils/profile-slug");
@@ -88,6 +89,10 @@ function trimOrganizerEventText(v) {
     return s.length > 0 ? s : null;
 }
 async function listEvents(params) {
+    const key = await (0, redis_1.eventsListCacheKey)(params);
+    return (0, redis_1.cached)(key, redis_1.CACHE_TTL.EVENTS_LIST, () => listEventsFromDb(params));
+}
+async function listEventsFromDb(params) {
     const page = params.page && params.page > 0 ? params.page : 1;
     const limit = params.limit && params.limit > 0 ? params.limit : 12;
     const skip = (page - 1) * limit;
@@ -308,6 +313,9 @@ async function listEvents(params) {
 }
 // Featured events — same venue/location shape as listEvents so home cards get city/country.
 async function getFeaturedEvents() {
+    return (0, redis_1.cached)(redis_1.CACHE_KEYS.eventsFeatured(), redis_1.CACHE_TTL.EVENTS_FEATURED, getFeaturedEventsFromDb);
+}
+async function getFeaturedEventsFromDb() {
     const events = await prisma_1.default.event.findMany({
         where: {
             AND: [{ isFeatured: true }, (0, public_profile_1.publicPublishedEventWhere)()],
@@ -368,6 +376,13 @@ async function getEventByIdentifier(id, viewerUserId) {
     if (!id?.trim()) {
         throw new Error("Invalid event identifier");
     }
+    if (viewerUserId) {
+        return getEventByIdentifierFromDb(id, viewerUserId);
+    }
+    const key = redis_1.CACHE_KEYS.eventDetail(id);
+    return (0, redis_1.cached)(key, redis_1.CACHE_TTL.EVENT_DETAIL, () => getEventByIdentifierFromDb(id, null));
+}
+async function getEventByIdentifierFromDb(id, viewerUserId) {
     const trimmed = id.trim();
     const include = {
         organizer: {
@@ -614,6 +629,18 @@ async function getEventStats(options) {
     const includeCategories = options.includeCategories ?? true;
     const includeCities = options.includeCities ?? false;
     const includeCountries = options.includeCountries ?? false;
+    const includeKey = [
+        includeCategories ? "categories" : null,
+        includeCities ? "cities" : null,
+        includeCountries ? "countries" : null,
+    ]
+        .filter(Boolean)
+        .join(",");
+    const key = await (0, redis_1.eventsStatsCacheKey)(includeKey || "none");
+    return (0, redis_1.cached)(key, redis_1.CACHE_TTL.EVENTS_STATS, () => getEventStatsFromDb({ includeCategories, includeCities, includeCountries }));
+}
+async function getEventStatsFromDb(options) {
+    const { includeCategories, includeCities, includeCountries } = options;
     const result = {
         success: true,
     };
@@ -702,6 +729,10 @@ async function searchEntities(query, limit = 5) {
             allResults: [],
         };
     }
+    const key = await (0, redis_1.searchCacheKey)(trimmed, limit);
+    return (0, redis_1.cached)(key, redis_1.CACHE_TTL.SEARCH, () => searchEntitiesFromDb(trimmed, limit));
+}
+async function searchEntitiesFromDb(trimmed, limit) {
     const [events, venues, speakers] = await Promise.all([
         prisma_1.default.event.findMany({
             where: {
@@ -802,13 +833,15 @@ async function listRecentEvents(limit = 10) {
     return result.events;
 }
 async function listVipEvents(limit = 10) {
-    const result = await listEvents({
-        page: 1,
-        limit,
-        sort: "newest",
-        vip: true,
+    return (0, redis_1.cached)(redis_1.CACHE_KEYS.eventsVip(), redis_1.CACHE_TTL.EVENTS_VIP, async () => {
+        const result = await listEventsFromDb({
+            page: 1,
+            limit,
+            sort: "newest",
+            vip: true,
+        });
+        return result.events;
     });
-    return result.events;
 }
 // ----- Event sub-resources (leads, exhibitors, speakers, brochure, layout, space-costs) -----
 async function listEventLeads(eventId) {
@@ -1237,11 +1270,12 @@ async function updateEventFields(eventId, body) {
             select: { id: true, description: true, tags: true, images: true, brochure: true, layoutPlan: true },
         });
     }
-    return prisma_1.default.event.update({
+    const updated = await prisma_1.default.event.update({
         where: { id: eventId },
         data,
         select: {
             id: true,
+            slug: true,
             description: true,
             tags: true,
             images: true,
@@ -1249,6 +1283,8 @@ async function updateEventFields(eventId, body) {
             layoutPlan: true,
         },
     });
+    await (0, redis_1.invalidateEventCaches)({ slug: updated.slug, id: updated.id });
+    return updated;
 }
 async function listEventSpaceCosts(eventId) {
     const spaces = await prisma_1.default.exhibitionSpace.findMany({
@@ -1693,6 +1729,7 @@ async function updateEventByOrganizer(organizerId, eventId, body) {
             },
         },
     });
+    await (0, redis_1.invalidateEventCaches)({ slug: updatedEvent.slug, id: updatedEvent.id });
     return {
         event: {
             ...updatedEvent,
@@ -1714,5 +1751,6 @@ async function deleteEventByOrganizer(organizerId, eventId) {
         where: { id: organizerId },
         data: { totalEvents: { decrement: 1 } },
     });
+    await (0, redis_1.invalidateEventCaches)({ slug: existingEvent.slug, id: existingEvent.id });
     return { deleted: true };
 }

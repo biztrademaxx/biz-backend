@@ -1,4 +1,5 @@
 import prisma from "../../../config/prisma";
+import { invalidateVenueCaches } from "../../../config/redis";
 import { parseListQuery } from "../../../lib/admin-response";
 import type { UserRole } from "@prisma/client";
 import { randomBytes } from "crypto";
@@ -391,6 +392,7 @@ export async function createVenue(body: Record<string, unknown>) {
     venueState: body.venueState,
     venueCity: body.venueCity,
   });
+  await invalidateVenueCaches();
   return getVenueById(user.id);
 }
 
@@ -441,6 +443,7 @@ export async function updateVenue(id: string, body: Record<string, unknown>) {
     venueState: data.venueState,
     venueCity: data.venueCity,
   });
+  await invalidateVenueCaches();
   return getVenueById(id);
 }
 
@@ -448,6 +451,7 @@ export async function deleteVenue(id: string) {
   const existing = await prisma.user.findFirst({ where: { id, role: ROLE } });
   if (!existing) return null;
   await prisma.user.delete({ where: { id } });
+  await invalidateVenueCaches();
   return { deleted: true };
 }
 

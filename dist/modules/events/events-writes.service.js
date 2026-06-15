@@ -14,6 +14,7 @@ exports.createSpeakerSession = createSpeakerSession;
 const crypto_1 = require("crypto");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const prisma_1 = __importDefault(require("../../config/prisma"));
+const redis_1 = require("../../config/redis");
 const admin_activity_log_service_1 = require("../../services/admin-activity-log.service");
 const youtube_url_1 = require("../../utils/youtube-url");
 function trimTextField(v) {
@@ -684,6 +685,7 @@ async function createEventAdmin(params) {
             status: createdEvent.status,
         },
     });
+    await (0, redis_1.invalidateEventCaches)({ slug: createdEvent.slug, id: createdEvent.id });
     return {
         success: true,
         message: "Event created successfully with nested entities",

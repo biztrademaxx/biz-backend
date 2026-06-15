@@ -16,6 +16,7 @@ exports.deleteContentItem = deleteContentItem;
 exports.listPublishedBlogs = listPublishedBlogs;
 exports.getPublishedBlogBySlug = getPublishedBlogBySlug;
 const prisma_1 = __importDefault(require("../../../config/prisma"));
+const redis_1 = require("../../../config/redis");
 const bannerSelect = {
     id: true,
     title: true,
@@ -65,6 +66,10 @@ async function listBannersAdmin() {
     return rows.map(mapBannerRow);
 }
 async function listBannersPublic(params) {
+    const key = await (0, redis_1.bannersCacheKey)(params.page, params.position);
+    return (0, redis_1.cached)(key, redis_1.CACHE_TTL.BANNERS, () => listBannersPublicFromDb(params));
+}
+async function listBannersPublicFromDb(params) {
     const where = {
         type: "BANNER",
         published: true,
@@ -101,6 +106,7 @@ async function createBanner(input) {
         },
         select: bannerSelect,
     });
+    await (0, redis_1.invalidateBannerCaches)();
     return mapBannerRow(row);
 }
 async function patchBanner(id, patch) {
@@ -135,10 +141,13 @@ async function patchBanner(id, patch) {
         },
         select: bannerSelect,
     });
+    await (0, redis_1.invalidateBannerCaches)();
     return mapBannerRow(row);
 }
 async function deleteBanner(id) {
     const r = await prisma_1.default.adminContent.deleteMany({ where: { id, type: "BANNER" } });
+    if (r.count > 0)
+        await (0, redis_1.invalidateBannerCaches)();
     return r.count > 0;
 }
 function mapContentItem(row) {

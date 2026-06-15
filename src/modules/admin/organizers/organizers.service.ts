@@ -1,4 +1,11 @@
 import prisma from "../../../config/prisma";
+import {
+  adminOrganizersListCacheKey,
+  cached,
+  CACHE_TTL,
+  invalidateAdminOrganizerCaches,
+  invalidateOrganizerCaches,
+} from "../../../config/redis";
 import { parseListQuery } from "../../../lib/admin-response";
 import type { Prisma, UserRole } from "@prisma/client";
 import { randomBytes } from "crypto";
@@ -182,6 +189,11 @@ function mapOrganizerForAdmin(u: OrganizerAdminRow) {
 }
 
 export async function listOrganizers(query: Record<string, unknown>) {
+  const key = await adminOrganizersListCacheKey(query);
+  return cached(key, CACHE_TTL.ADMIN_ORGANIZERS_LIST, () => listOrganizersFromDb(query));
+}
+
+async function listOrganizersFromDb(query: Record<string, unknown>) {
   const { page, limit, search, skip, sort, order } = parseListQuery(query);
   const country = String(query.country ?? "").trim();
   const where: any = { role: ROLE };
@@ -280,6 +292,8 @@ export async function createOrganizer(body: Record<string, unknown>) {
       isVerified: body.isVerified === true,
     },
   });
+  await invalidateOrganizerCaches({ id: user.id });
+  await invalidateAdminOrganizerCaches();
   return getOrganizerById(user.id);
 }
 
@@ -339,6 +353,8 @@ export async function updateOrganizer(id: string, body: Record<string, unknown>)
   }
   if (body.email !== undefined) data.email = String(body.email).trim().toLowerCase();
   await prisma.user.update({ where: { id }, data: data as any });
+  await invalidateOrganizerCaches({ id });
+  await invalidateAdminOrganizerCaches();
   return getOrganizerById(id);
 }
 
@@ -346,6 +362,8 @@ export async function deleteOrganizer(id: string) {
   const existing = await prisma.user.findFirst({ where: { id, role: ROLE } });
   if (!existing) return null;
   await prisma.user.delete({ where: { id } });
+  await invalidateOrganizerCaches({ id });
+  await invalidateAdminOrganizerCaches();
   return { deleted: true };
 }
 

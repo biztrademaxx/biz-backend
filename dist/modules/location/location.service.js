@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.listPublicCountries = listPublicCountries;
 exports.listPublicCities = listPublicCities;
 const prisma_1 = __importDefault(require("../../config/prisma"));
+const redis_1 = require("../../config/redis");
 /**
  * Run async work in small batches so we do not open dozens of Prisma queries at once
  * (Neon/serverless pools often cap concurrent connections — unbounded `Promise.all` exhausts them).
@@ -37,6 +38,10 @@ async function countEventsForCountryVenue(country) {
 }
 /** Public browse + forms: active countries with active cities, `isPermitted`, and event counts (no auth). */
 async function listPublicCountries() {
+    const key = await (0, redis_1.geoCountriesCacheKey)();
+    return (0, redis_1.cached)(key, redis_1.CACHE_TTL.GEO, listPublicCountriesFromDb);
+}
+async function listPublicCountriesFromDb() {
     const rows = await prisma_1.default.country.findMany({
         where: { isActive: true },
         orderBy: { name: "asc" },
@@ -74,6 +79,10 @@ async function countEventsForCityVenue(cityName) {
 }
 /** Public browse + forms: active cities with country, `isPermitted`, and event counts (no auth). */
 async function listPublicCities(countryId) {
+    const key = await (0, redis_1.geoCitiesCacheKey)(countryId);
+    return (0, redis_1.cached)(key, redis_1.CACHE_TTL.GEO, () => listPublicCitiesFromDb(countryId));
+}
+async function listPublicCitiesFromDb(countryId) {
     const where = { isActive: true };
     if (countryId)
         where.countryId = countryId;

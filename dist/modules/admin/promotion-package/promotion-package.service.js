@@ -7,6 +7,7 @@ exports.updatePromotionPackage = updatePromotionPackage;
 exports.deletePromotionPackage = deletePromotionPackage;
 const crypto_1 = require("crypto");
 const admin_app_setting_1 = require("../../../lib/admin-app-setting");
+const redis_1 = require("../../../config/redis");
 function asJsonInput(v) {
     return JSON.parse(JSON.stringify(v));
 }
@@ -218,8 +219,10 @@ async function savePackages(list) {
     await (0, admin_app_setting_1.setAppSettingJson)(KEY, asJsonInput(list));
 }
 async function listPromotionPackages() {
-    const list = await loadPackages();
-    return [...list].sort((a, b) => (a.order - b.order) || a.name.localeCompare(b.name));
+    return (0, redis_1.cached)(redis_1.CACHE_KEYS.promotionPackages(), redis_1.CACHE_TTL.PROMOTION_PACKAGES, async () => {
+        const list = await loadPackages();
+        return [...list].sort((a, b) => (a.order - b.order) || a.name.localeCompare(b.name));
+    });
 }
 async function createPromotionPackage(input) {
     const list = await loadPackages();
@@ -245,6 +248,7 @@ async function createPromotionPackage(input) {
     };
     list.push(item);
     await savePackages(list);
+    await (0, redis_1.invalidatePromotionPackageCaches)();
     return item;
 }
 async function updatePromotionPackage(id, input) {
@@ -270,6 +274,7 @@ async function updatePromotionPackage(id, input) {
     };
     list[idx] = updated;
     await savePackages(list);
+    await (0, redis_1.invalidatePromotionPackageCaches)();
     return updated;
 }
 async function deletePromotionPackage(id) {
@@ -281,5 +286,6 @@ async function deletePromotionPackage(id) {
         return false;
     list.splice(idx, 1);
     await savePackages(list);
+    await (0, redis_1.invalidatePromotionPackageCaches)();
     return true;
 }

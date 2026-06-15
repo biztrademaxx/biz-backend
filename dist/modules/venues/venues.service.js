@@ -10,8 +10,13 @@ exports.createVenueReview = createVenueReview;
 exports.createVenueReviewReply = createVenueReviewReply;
 exports.deleteVenueReviewReply = deleteVenueReviewReply;
 const prisma_1 = __importDefault(require("../../config/prisma"));
+const redis_1 = require("../../config/redis");
 const public_profile_1 = require("../../utils/public-profile");
 async function listVenues(params) {
+    const key = await (0, redis_1.venuesListCacheKey)(params);
+    return (0, redis_1.cached)(key, redis_1.CACHE_TTL.VENUES_LIST, () => listVenuesFromDb(params));
+}
+async function listVenuesFromDb(params) {
     const page = params.page && params.page > 0 ? params.page : 1;
     const limit = params.limit && params.limit > 0 ? params.limit : 10;
     const skip = (page - 1) * limit;

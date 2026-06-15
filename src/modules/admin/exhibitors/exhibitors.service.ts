@@ -1,4 +1,5 @@
 import prisma from "../../../config/prisma";
+import { invalidateExhibitorCaches } from "../../../config/redis";
 import { parseListQuery } from "../../../lib/admin-response";
 import type { UserRole } from "@prisma/client";
 
@@ -127,6 +128,7 @@ export async function createExhibitor(body: Record<string, unknown>) {
       isActive: body.isActive !== false,
     },
   });
+  await invalidateExhibitorCaches({ id: user.id });
   return getExhibitorById(user.id);
 }
 
@@ -157,6 +159,7 @@ export async function updateExhibitor(id: string, body: Record<string, unknown>)
   }
   if (body.email !== undefined) data.email = String(body.email).trim().toLowerCase();
   await prisma.user.update({ where: { id }, data: data as any });
+  await invalidateExhibitorCaches({ id });
   return getExhibitorById(id);
 }
 
@@ -164,6 +167,7 @@ export async function deleteExhibitor(id: string) {
   const existing = await prisma.user.findFirst({ where: { id, role: ROLE } });
   if (!existing) return null;
   await prisma.user.delete({ where: { id } });
+  await invalidateExhibitorCaches({ id });
   return { deleted: true };
 }
 

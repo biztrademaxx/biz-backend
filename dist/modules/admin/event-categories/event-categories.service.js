@@ -10,6 +10,7 @@ exports.createEventCategory = createEventCategory;
 exports.updateEventCategory = updateEventCategory;
 exports.deleteEventCategory = deleteEventCategory;
 const prisma_1 = __importDefault(require("../../../config/prisma"));
+const redis_1 = require("../../../config/redis");
 const public_profile_1 = require("../../../utils/public-profile");
 /** Active categories for public / organizer pickers (no counts). */
 async function listActiveEventCategoriesPublic() {
@@ -21,6 +22,9 @@ async function listActiveEventCategoriesPublic() {
 }
 /** Active categories with counts of published public events (category name in Event.category[]). */
 async function listActiveEventCategoriesWithEventCounts() {
+    return (0, redis_1.cached)(redis_1.CACHE_KEYS.eventsCategoriesBrowse(), redis_1.CACHE_TTL.EVENTS_CATEGORIES_BROWSE, listActiveEventCategoriesWithEventCountsFromDb);
+}
+async function listActiveEventCategoriesWithEventCountsFromDb() {
     const categories = await prisma_1.default.eventCategory.findMany({
         where: { isActive: true },
         orderBy: { name: "asc" },
@@ -65,7 +69,9 @@ async function createEventCategory(input) {
         color: input.color ?? "#3B82F6",
         isActive: typeof input.isActive === "boolean" ? input.isActive : true,
     };
-    return prisma_1.default.eventCategory.create({ data });
+    const created = await prisma_1.default.eventCategory.create({ data });
+    await (0, redis_1.invalidateEventCaches)();
+    return created;
 }
 async function updateEventCategory(id, input) {
     const data = {};
@@ -81,13 +87,16 @@ async function updateEventCategory(id, input) {
     if (typeof input.isActive === "boolean") {
         data.isActive = input.isActive;
     }
-    return prisma_1.default.eventCategory.update({
+    const updated = await prisma_1.default.eventCategory.update({
         where: { id },
         data,
     });
+    await (0, redis_1.invalidateEventCaches)();
+    return updated;
 }
 async function deleteEventCategory(id) {
     await prisma_1.default.eventCategory.delete({
         where: { id },
     });
+    await (0, redis_1.invalidateEventCaches)();
 }

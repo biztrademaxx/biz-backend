@@ -1,4 +1,5 @@
 import prisma from "../../../config/prisma";
+import { invalidateGeoCaches } from "../../../config/redis";
 
 export async function listStateStats(countryCode?: string) {
   const countries = await prisma.country.findMany({
@@ -200,6 +201,7 @@ export async function createCountry(data: {
       isPermitted: !!data.isPermitted,
     },
   });
+  await invalidateGeoCaches();
   return {
     ...country,
     createdAt: country.createdAt.toISOString(),
@@ -235,10 +237,12 @@ export async function updateCountry(
       ...(typeof data.isPermitted === "boolean" && { isPermitted: data.isPermitted }),
     },
   });
+  await invalidateGeoCaches();
   return await getCountryById(country.id);
 }
 
 export async function deleteCountry(id: string) {
   await prisma.country.delete({ where: { id } });
+  await invalidateGeoCaches();
   return { deleted: true };
 }

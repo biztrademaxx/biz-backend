@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import type { Prisma } from "@prisma/client";
 import { getAppSettingJson, setAppSettingJson } from "../../../lib/admin-app-setting";
+import { cached, CACHE_KEYS, CACHE_TTL, invalidatePromotionPackageCaches } from "../../../config/redis";
 
 function asJsonInput<T>(v: T): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(v)) as Prisma.InputJsonValue;
@@ -249,8 +250,10 @@ async function savePackages(list: PromotionPackageItem[]) {
 }
 
 export async function listPromotionPackages(): Promise<PromotionPackageItem[]> {
-  const list = await loadPackages();
-  return [...list].sort((a, b) => (a.order - b.order) || a.name.localeCompare(b.name));
+  return cached(CACHE_KEYS.promotionPackages(), CACHE_TTL.PROMOTION_PACKAGES, async () => {
+    const list = await loadPackages();
+    return [...list].sort((a, b) => (a.order - b.order) || a.name.localeCompare(b.name));
+  });
 }
 
 export async function createPromotionPackage(input: Partial<PromotionPackageItem>): Promise<PromotionPackageItem> {
@@ -277,6 +280,7 @@ export async function createPromotionPackage(input: Partial<PromotionPackageItem
   };
   list.push(item);
   await savePackages(list);
+  await invalidatePromotionPackageCaches();
   return item;
 }
 
@@ -308,6 +312,7 @@ export async function updatePromotionPackage(
   };
   list[idx] = updated;
   await savePackages(list);
+  await invalidatePromotionPackageCaches();
   return updated;
 }
 
@@ -318,5 +323,6 @@ export async function deletePromotionPackage(id: string): Promise<boolean> {
   if (idx === -1) return false;
   list.splice(idx, 1);
   await savePackages(list);
+  await invalidatePromotionPackageCaches();
   return true;
 }

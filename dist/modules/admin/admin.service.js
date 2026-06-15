@@ -22,6 +22,7 @@ exports.adminListEventCategories = adminListEventCategories;
 exports.adminGetEventMailCandidates = adminGetEventMailCandidates;
 exports.adminSendEventListingEmail = adminSendEventListingEmail;
 const prisma_1 = __importDefault(require("../../config/prisma"));
+const redis_1 = require("../../config/redis");
 const client_1 = require("@prisma/client");
 const event_schedule_1 = require("../events/event-schedule");
 const youtube_url_1 = require("../../utils/youtube-url");
@@ -198,6 +199,10 @@ function applyAdminCountryFilter(where, country) {
     }
 }
 async function adminListEvents(params) {
+    const key = await (0, redis_1.adminEventsListCacheKey)(params);
+    return (0, redis_1.cached)(key, redis_1.CACHE_TTL.ADMIN_EVENTS_LIST, () => adminListEventsFromDb(params));
+}
+async function adminListEventsFromDb(params) {
     const page = params.page && params.page > 0 ? params.page : 1;
     const limit = params.limit && params.limit > 0 ? params.limit : 15;
     const skip = (page - 1) * limit;
@@ -362,6 +367,9 @@ async function adminListEvents(params) {
     };
 }
 async function adminGetEventStats() {
+    return (0, redis_1.cached)(redis_1.CACHE_KEYS.adminEventsStats(), redis_1.CACHE_TTL.ADMIN_EVENTS_STATS, adminGetEventStatsFromDb);
+}
+async function adminGetEventStatsFromDb() {
     const { startOfToday, endOfToday } = adminEventDayBounds();
     const [total, approved, rejected, pending, featured, vip, live, upcoming, ended] = await Promise.all([
         prisma_1.default.event.count(),
@@ -587,6 +595,7 @@ async function adminUpdateEvent(id, data) {
         where: { id },
         data: updateData,
     });
+    await (0, redis_1.invalidateEventCaches)({ slug: event.slug, id: event.id });
     return { event };
 }
 /** Toggle verification; optional new badge file uploads to Cloudinary and sets `verifiedBadgeImage` (no default dummy asset). */
@@ -608,6 +617,7 @@ async function adminVerifyEvent(eventId, params) {
                 verifiedBadgeImage: null,
             },
         });
+        await (0, redis_1.invalidateEventCaches)({ slug: event.slug, id: event.id });
         return { event };
     }
     let verifiedBadgeImage = existing.verifiedBadgeImage ?? null;
@@ -624,12 +634,13 @@ async function adminVerifyEvent(eventId, params) {
             verifiedBadgeImage,
         },
     });
+    await (0, redis_1.invalidateEventCaches)({ slug: event.slug, id: event.id });
     return { event };
 }
 async function adminDeleteEvent(id) {
     const existing = await prisma_1.default.event.findUnique({
         where: { id },
-        select: { id: true },
+        select: { id: true, slug: true },
     });
     if (!existing) {
         return { error: "NOT_FOUND" };
@@ -637,6 +648,7 @@ async function adminDeleteEvent(id) {
     await prisma_1.default.event.delete({
         where: { id },
     });
+    await (0, redis_1.invalidateEventCaches)({ slug: existing.slug, id: existing.id });
     return { deleted: true };
 }
 async function adminApproveEvent(eventId, adminId) {
@@ -660,6 +672,7 @@ async function adminApproveEvent(eventId, adminId) {
             verifiedBy: adminId,
         },
     });
+    await (0, redis_1.invalidateEventCaches)({ slug: event.slug, id: event.id });
     return { event };
 }
 async function adminRejectEvent(eventId, adminId, reason) {
@@ -683,6 +696,7 @@ async function adminRejectEvent(eventId, adminId, reason) {
             verifiedBy: null,
         },
     });
+    await (0, redis_1.invalidateEventCaches)({ slug: event.slug, id: event.id });
     return { event };
 }
 async function adminListVenues() {
@@ -846,6 +860,9 @@ function buildEventOverviewTrend(events, regs, range) {
     return buckets;
 }
 async function adminGetEventOverviewTrend(range = "1m") {
+    return (0, redis_1.cached)(redis_1.CACHE_KEYS.adminEventOverview(range), redis_1.CACHE_TTL.ADMIN_EVENT_OVERVIEW, () => adminGetEventOverviewTrendFromDb(range));
+}
+async function adminGetEventOverviewTrendFromDb(range = "1m") {
     const start = new Date();
     start.setDate(start.getDate() - eventOverviewRangeDays(range));
     start.setHours(0, 0, 0, 0);
@@ -875,6 +892,9 @@ const EVENT_STATUS_DONUT_COLORS = {
     COMPLETED: "#3b82f6",
 };
 async function adminGetDashboardSummary(eventRange = "1m") {
+    return (0, redis_1.cached)(redis_1.CACHE_KEYS.adminDashboard(eventRange), redis_1.CACHE_TTL.ADMIN_DASHBOARD, () => adminGetDashboardSummaryFromDb(eventRange));
+}
+async function adminGetDashboardSummaryFromDb(eventRange = "1m") {
     const rangeStart = new Date();
     rangeStart.setDate(rangeStart.getDate() - eventOverviewRangeDays(eventRange));
     rangeStart.setHours(0, 0, 0, 0);
