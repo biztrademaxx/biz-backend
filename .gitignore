@@ -10,5 +10,6 @@ coverage
 .cache
 /storage/database-backups
 .DS_Store
+scripts/create-super-admin.js
 
 
