@@ -271,6 +271,7 @@ router.post("/register", async (req, res) => {
       website,
       userType,
       selectedPlan,
+      venueName,
     } = req.body as {
       fullName?: string;
       email?: string;
@@ -281,9 +282,25 @@ router.post("/register", async (req, res) => {
       website?: string;
       userType?: string;
       selectedPlan?: string;
+      venueName?: string;
     };
 
-    if (!fullName || !email || !password) {
+    const roleMapping: Record<string, string> = {
+      visitor: "ATTENDEE",
+      exhibitor: "EXHIBITOR",
+      organiser: "ORGANIZER",
+      speaker: "SPEAKER",
+      venue: "VENUE_MANAGER",
+    };
+    const role = roleMapping[userType ?? ""] || "ATTENDEE";
+
+    if (!email || !password) {
+      return res.status(400).json({
+        error: "email and password are required",
+      });
+    }
+
+    if (role !== "VENUE_MANAGER" && !fullName?.trim()) {
       return res.status(400).json({
         error: "fullName, email and password are required",
       });
@@ -298,30 +315,34 @@ router.post("/register", async (req, res) => {
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    // Name parsing (same logic as Next.js route)
-    const nameParts = fullName.trim().split(" ");
     let firstName = "";
     let lastName = "";
+    let resolvedVenueName: string | undefined;
 
-    if (nameParts.length === 1) {
-      firstName = nameParts[0];
-      lastName = "User";
-    } else if (nameParts.length === 2) {
-      firstName = nameParts[0];
-      lastName = nameParts[1];
+    if (role === "VENUE_MANAGER") {
+      const venueNameRaw = String(venueName ?? fullName ?? "").trim();
+      if (!venueNameRaw) {
+        return res.status(400).json({
+          error: "Venue name is required",
+        });
+      }
+      resolvedVenueName = venueNameRaw;
+      firstName = "Venue";
+      lastName = "Manager";
     } else {
-      firstName = nameParts[0];
-      lastName = nameParts.slice(1).join(" ");
+      // Name parsing (same logic as Next.js route)
+      const nameParts = fullName!.trim().split(" ");
+      if (nameParts.length === 1) {
+        firstName = nameParts[0];
+        lastName = "User";
+      } else if (nameParts.length === 2) {
+        firstName = nameParts[0];
+        lastName = nameParts[1];
+      } else {
+        firstName = nameParts[0];
+        lastName = nameParts.slice(1).join(" ");
+      }
     }
-
-    const roleMapping: Record<string, string> = {
-      visitor: "ATTENDEE",
-      exhibitor: "EXHIBITOR",
-      organiser: "ORGANIZER",
-      speaker: "SPEAKER",
-      venue: "VENUE_MANAGER",
-    };
-    const role = roleMapping[userType ?? ""] || "ATTENDEE";
 
     const existingUser = await prisma.user.findUnique({
       where: { email: normalizedEmail },
@@ -345,6 +366,7 @@ router.post("/register", async (req, res) => {
         company: companyName || undefined,
         jobTitle: designation || undefined,
         website: website || undefined,
+        ...(resolvedVenueName ? { venueName: resolvedVenueName } : {}),
         ...(role === "VENUE_MANAGER" ? { isVerified: false, isActive: true } : {}),
         ...(role === "ORGANIZER" ? { isVerified: false } : {}),
       },

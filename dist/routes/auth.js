@@ -234,8 +234,21 @@ router.post("/verify-otp", async (req, res) => {
 // POST /api/auth/register – user registration (shared with Next.js route)
 router.post("/register", async (req, res) => {
     try {
-        const { fullName, email, password, phone, companyName, designation, website, userType, selectedPlan, } = req.body;
-        if (!fullName || !email || !password) {
+        const { fullName, email, password, phone, companyName, designation, website, userType, selectedPlan, venueName, } = req.body;
+        const roleMapping = {
+            visitor: "ATTENDEE",
+            exhibitor: "EXHIBITOR",
+            organiser: "ORGANIZER",
+            speaker: "SPEAKER",
+            venue: "VENUE_MANAGER",
+        };
+        const role = roleMapping[userType ?? ""] || "ATTENDEE";
+        if (!email || !password) {
+            return res.status(400).json({
+                error: "email and password are required",
+            });
+        }
+        if (role !== "VENUE_MANAGER" && !fullName?.trim()) {
             return res.status(400).json({
                 error: "fullName, email and password are required",
             });
@@ -247,30 +260,36 @@ router.post("/register", async (req, res) => {
             });
         }
         const normalizedEmail = email.trim().toLowerCase();
-        // Name parsing (same logic as Next.js route)
-        const nameParts = fullName.trim().split(" ");
         let firstName = "";
         let lastName = "";
-        if (nameParts.length === 1) {
-            firstName = nameParts[0];
-            lastName = "User";
-        }
-        else if (nameParts.length === 2) {
-            firstName = nameParts[0];
-            lastName = nameParts[1];
+        let resolvedVenueName;
+        if (role === "VENUE_MANAGER") {
+            const venueNameRaw = String(venueName ?? fullName ?? "").trim();
+            if (!venueNameRaw) {
+                return res.status(400).json({
+                    error: "Venue name is required",
+                });
+            }
+            resolvedVenueName = venueNameRaw;
+            firstName = "Venue";
+            lastName = "Manager";
         }
         else {
-            firstName = nameParts[0];
-            lastName = nameParts.slice(1).join(" ");
+            // Name parsing (same logic as Next.js route)
+            const nameParts = fullName.trim().split(" ");
+            if (nameParts.length === 1) {
+                firstName = nameParts[0];
+                lastName = "User";
+            }
+            else if (nameParts.length === 2) {
+                firstName = nameParts[0];
+                lastName = nameParts[1];
+            }
+            else {
+                firstName = nameParts[0];
+                lastName = nameParts.slice(1).join(" ");
+            }
         }
-        const roleMapping = {
-            visitor: "ATTENDEE",
-            exhibitor: "EXHIBITOR",
-            organiser: "ORGANIZER",
-            speaker: "SPEAKER",
-            venue: "VENUE_MANAGER",
-        };
-        const role = roleMapping[userType ?? ""] || "ATTENDEE";
         const existingUser = await prisma_1.default.user.findUnique({
             where: { email: normalizedEmail },
         });
@@ -291,6 +310,7 @@ router.post("/register", async (req, res) => {
                 company: companyName || undefined,
                 jobTitle: designation || undefined,
                 website: website || undefined,
+                ...(resolvedVenueName ? { venueName: resolvedVenueName } : {}),
                 ...(role === "VENUE_MANAGER" ? { isVerified: false, isActive: true } : {}),
                 ...(role === "ORGANIZER" ? { isVerified: false } : {}),
             },
