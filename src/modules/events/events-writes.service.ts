@@ -839,3 +839,24 @@ export async function createSpeakerSession(body: {
 
   return session;
 }
+
+/** Remove a speaker session from an event (delete by session id). */
+export async function deleteSpeakerSession(eventId: string, sessionId: string) {
+  const session = await prisma.speakerSession.findFirst({
+    where: { id: sessionId, eventId },
+    select: {
+      id: true,
+      event: { select: { id: true, slug: true } },
+    },
+  });
+
+  if (!session) {
+    return { error: "NOT_FOUND" as const };
+  }
+
+  await prisma.speakerSession.delete({ where: { id: sessionId } });
+  await invalidateSpeakerCaches();
+  await invalidateEventCaches({ slug: session.event.slug, id: session.event.id });
+
+  return { deleted: true as const };
+}

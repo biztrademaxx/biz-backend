@@ -7,6 +7,7 @@ exports.listOrganizers = listOrganizers;
 exports.getOrganizerById = getOrganizerById;
 exports.createOrganizer = createOrganizer;
 exports.updateOrganizer = updateOrganizer;
+exports.rejectOrganizer = rejectOrganizer;
 exports.deleteOrganizer = deleteOrganizer;
 exports.sendOrganizerAccountEmail = sendOrganizerAccountEmail;
 exports.listOrganizerConnectionsForAdmin = listOrganizerConnectionsForAdmin;
@@ -150,11 +151,33 @@ async function listOrganizers(query) {
     const key = await (0, redis_1.adminOrganizersListCacheKey)(query);
     return (0, redis_1.cached)(key, redis_1.CACHE_TTL.ADMIN_ORGANIZERS_LIST, () => listOrganizersFromDb(query));
 }
+function parseBoolQuery(value) {
+    if (value === undefined || value === null || value === "")
+        return undefined;
+    const s = String(value).toLowerCase();
+    if (s === "true" || s === "1")
+        return true;
+    if (s === "false" || s === "0")
+        return false;
+    return undefined;
+}
 async function listOrganizersFromDb(query) {
-    const { page, limit, search, skip, sort, order } = (0, admin_response_1.parseListQuery)(query);
+    const { page, search, sort, order } = (0, admin_response_1.parseListQuery)(query);
+    const limit = Math.min(1000, Math.max(1, Number(query.limit) || 20));
+    const skip = (page - 1) * limit;
     const country = String(query.country ?? "").trim();
     const where = { role: ROLE };
     const filters = [];
+    const verified = parseBoolQuery(query.verified);
+    if (verified === true)
+        filters.push({ isVerified: true });
+    else if (verified === false)
+        filters.push({ isVerified: false });
+    const isActive = parseBoolQuery(query.isActive);
+    if (isActive === true)
+        filters.push({ isActive: true });
+    else if (isActive === false)
+        filters.push({ isActive: false });
     if (search) {
         filters.push({
             OR: [
@@ -305,6 +328,25 @@ async function updateOrganizer(id, body) {
     await (0, redis_1.invalidateOrganizerCaches)({ id });
     await (0, redis_1.invalidateAdminOrganizerCaches)();
     return getOrganizerById(id);
+}
+async function rejectOrganizer(id, reason) {
+    const existing = await prisma_1.default.user.findFirst({ where: { id, role: ROLE } });
+    if (!existing)
+        return null;
+    await prisma_1.default.user.update({
+        where: { id },
+        data: {
+            isVerified: false,
+            isActive: false,
+        },
+    });
+    await (0, redis_1.invalidateOrganizerCaches)({ id });
+    await (0, redis_1.invalidateAdminOrganizerCaches)();
+    return {
+        id,
+        rejected: true,
+        reason: reason?.trim() || null,
+    };
 }
 async function deleteOrganizer(id) {
     const existing = await prisma_1.default.user.findFirst({ where: { id, role: ROLE } });

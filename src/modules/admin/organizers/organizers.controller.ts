@@ -50,6 +50,26 @@ export async function create(req: Request, res: Response) {
   }
 }
 
+export async function reject(req: Request, res: Response) {
+  try {
+    const reason =
+      typeof (req.body as { reason?: string })?.reason === "string"
+        ? (req.body as { reason: string }).reason
+        : undefined;
+    const result = await service.rejectOrganizer(req.params.id, reason);
+    if (!result) return sendError(res, 404, "Organizer not found");
+    await recordAdminActivity(req.auth, {
+      action: "ADMIN_ORGANIZER_REJECTED",
+      resource: "ORGANIZER",
+      resourceId: req.params.id,
+      details: { reason: reason ?? null },
+    });
+    return sendOne(res, result);
+  } catch (e: any) {
+    return sendError(res, 500, "Failed to reject organizer", e?.message);
+  }
+}
+
 export async function update(req: Request, res: Response) {
   try {
     const item = await service.updateOrganizer(req.params.id, req.body ?? {});

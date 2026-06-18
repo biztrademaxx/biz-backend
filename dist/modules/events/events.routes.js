@@ -35,6 +35,7 @@ router.get("/events/:id/attendees", events_controller_1.getEventAttendeesHandler
 router.post("/events/:id/leads", auth_middleware_1.requireUser, events_controller_1.createEventLeadHandler);
 router.get("/events/:id/exhibitors", events_controller_1.getEventExhibitorsHandler);
 router.get("/events/:id/speakers", events_controller_1.getEventSpeakersHandler);
+router.delete("/events/:id/speakers/:speakerId", auth_middleware_1.requireUser, events_controller_1.deleteSpeakerSessionHandler);
 router.get("/events/:id/brochure", events_controller_1.getEventBrochureHandler);
 router.put("/events/:id/layout", auth_middleware_1.requireUser, events_controller_1.updateEventLayoutHandler);
 router.delete("/events/:id/layout", auth_middleware_1.requireUser, events_controller_1.deleteEventLayoutHandler);

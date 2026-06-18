@@ -8,6 +8,8 @@ exports.adminUpdateEventHandler = adminUpdateEventHandler;
 exports.adminDeleteEventHandler = adminDeleteEventHandler;
 exports.adminApproveEventHandler = adminApproveEventHandler;
 exports.adminRejectEventHandler = adminRejectEventHandler;
+exports.adminBulkApproveEventsHandler = adminBulkApproveEventsHandler;
+exports.adminBulkRejectEventsHandler = adminBulkRejectEventsHandler;
 exports.adminGetVenuesHandler = adminGetVenuesHandler;
 exports.adminGetVisitorsHandler = adminGetVisitorsHandler;
 exports.adminGetDashboardHandler = adminGetDashboardHandler;
@@ -297,6 +299,44 @@ async function adminRejectEventHandler(req, res) {
         return res.status(500).json({
             success: false,
             error: "Failed to reject event",
+            details: error.message,
+        });
+    }
+}
+async function adminBulkApproveEventsHandler(req, res) {
+    try {
+        const auth = req.auth;
+        const { eventIds } = req.body;
+        if (!Array.isArray(eventIds) || eventIds.length === 0) {
+            return res.status(400).json({ success: false, error: "eventIds array is required" });
+        }
+        const result = await (0, admin_service_1.adminBulkApproveEvents)(eventIds, auth.sub);
+        return res.json({ success: true, ...result });
+    }
+    catch (error) {
+        console.error("Admin bulk approve events error (backend):", error);
+        return res.status(500).json({
+            success: false,
+            error: "Failed to bulk approve events",
+            details: error.message,
+        });
+    }
+}
+async function adminBulkRejectEventsHandler(req, res) {
+    try {
+        const auth = req.auth;
+        const { eventIds, reason } = req.body;
+        if (!Array.isArray(eventIds) || eventIds.length === 0) {
+            return res.status(400).json({ success: false, error: "eventIds array is required" });
+        }
+        const result = await (0, admin_service_1.adminBulkRejectEvents)(eventIds, auth.sub, reason);
+        return res.json({ success: true, ...result });
+    }
+    catch (error) {
+        console.error("Admin bulk reject events error (backend):", error);
+        return res.status(500).json({
+            success: false,
+            error: "Failed to bulk reject events",
             details: error.message,
         });
     }

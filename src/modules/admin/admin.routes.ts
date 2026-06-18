@@ -9,6 +9,8 @@ import {
   adminDeleteEventHandler,
   adminApproveEventHandler,
   adminRejectEventHandler,
+  adminBulkApproveEventsHandler,
+  adminBulkRejectEventsHandler,
   adminGetDashboardHandler,
   adminGetEventOverviewHandler,
   adminVerifyEventHandler,
@@ -85,6 +87,8 @@ router.delete("/events/:id", requireAdmin, adminDeleteEventHandler);
 router.post("/events", requireAdmin, createEventAdminHandler);
 router.post("/events/approve", requireAdmin, requirePermission("approve_events"), adminApproveEventHandler);
 router.post("/events/reject", requireAdmin, requirePermission("approve_events"), adminRejectEventHandler);
+router.post("/events/bulk-approve", requireAdmin, requirePermission("approve_events"), adminBulkApproveEventsHandler);
+router.post("/events/bulk-reject", requireAdmin, requirePermission("approve_events"), adminBulkRejectEventsHandler);
 
 // ─── Dashboard ─────────────────────────────────────────────────────────────
 router.get("/dashboard/event-overview", requireAdmin, adminGetEventOverviewHandler);

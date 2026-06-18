@@ -62,6 +62,8 @@ router.delete("/events/:id", auth_middleware_1.requireAdmin, admin_controller_1.
 router.post("/events", auth_middleware_1.requireAdmin, events_controller_1.createEventAdminHandler);
 router.post("/events/approve", auth_middleware_1.requireAdmin, (0, auth_middleware_1.requirePermission)("approve_events"), admin_controller_1.adminApproveEventHandler);
 router.post("/events/reject", auth_middleware_1.requireAdmin, (0, auth_middleware_1.requirePermission)("approve_events"), admin_controller_1.adminRejectEventHandler);
+router.post("/events/bulk-approve", auth_middleware_1.requireAdmin, (0, auth_middleware_1.requirePermission)("approve_events"), admin_controller_1.adminBulkApproveEventsHandler);
+router.post("/events/bulk-reject", auth_middleware_1.requireAdmin, (0, auth_middleware_1.requirePermission)("approve_events"), admin_controller_1.adminBulkRejectEventsHandler);
 // ─── Dashboard ─────────────────────────────────────────────────────────────
 router.get("/dashboard/event-overview", auth_middleware_1.requireAdmin, admin_controller_1.adminGetEventOverviewHandler);
 router.get("/dashboard", auth_middleware_1.requireAdmin, admin_controller_1.adminGetDashboardHandler);

@@ -66,6 +66,7 @@ router.get("/:id", auth_middleware_1.requireAdmin, ctrl.getById);
 router.post("/", auth_middleware_1.requireAdmin, ctrl.create);
 router.post("/import", auth_middleware_1.requireAdmin, upload.single("file"), ctrl.importBulk);
 router.post("/send-account-email", auth_middleware_1.requireAdmin, ctrl.sendAccountEmail);
+router.post("/:id/reject", auth_middleware_1.requireAdmin, ctrl.reject);
 router.patch("/:id", auth_middleware_1.requireAdmin, ctrl.update);
 router.delete("/:id", auth_middleware_1.requireAdmin, ctrl.remove);
 exports.default = router;

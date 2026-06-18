@@ -59,6 +59,7 @@ exports.createExhibitionSpaceHandler = createExhibitionSpaceHandler;
 exports.updateExhibitionSpaceHandler = updateExhibitionSpaceHandler;
 exports.addExhibitorToEventHandler = addExhibitorToEventHandler;
 exports.removeExhibitorFromEventHandler = removeExhibitorFromEventHandler;
+exports.deleteSpeakerSessionHandler = deleteSpeakerSessionHandler;
 exports.getEventsStatsHandler = getEventsStatsHandler;
 exports.searchHandler = searchHandler;
 exports.saveEventHandler = saveEventHandler;
@@ -634,6 +635,27 @@ async function removeExhibitorFromEventHandler(req, res) {
         return res.status(500).json({
             success: false,
             error: "Failed to remove exhibitor from event",
+            details: error.message,
+        });
+    }
+}
+async function deleteSpeakerSessionHandler(req, res) {
+    try {
+        const { id: eventId, speakerId: sessionId } = req.params;
+        if (!sessionId) {
+            return res.status(400).json({ success: false, error: "Speaker session ID required" });
+        }
+        const result = await (0, events_writes_service_1.deleteSpeakerSession)(eventId, sessionId);
+        if ("error" in result && result.error === "NOT_FOUND") {
+            return res.status(404).json({ success: false, error: "Speaker session not found for this event" });
+        }
+        return res.status(200).json({ success: true, message: "Speaker removed successfully" });
+    }
+    catch (error) {
+        console.error("Error deleting speaker session (backend):", error);
+        return res.status(500).json({
+            success: false,
+            error: "Failed to delete speaker",
             details: error.message,
         });
     }

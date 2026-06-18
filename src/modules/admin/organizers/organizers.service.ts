@@ -193,11 +193,29 @@ export async function listOrganizers(query: Record<string, unknown>) {
   return cached(key, CACHE_TTL.ADMIN_ORGANIZERS_LIST, () => listOrganizersFromDb(query));
 }
 
+function parseBoolQuery(value: unknown): boolean | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const s = String(value).toLowerCase();
+  if (s === "true" || s === "1") return true;
+  if (s === "false" || s === "0") return false;
+  return undefined;
+}
+
 async function listOrganizersFromDb(query: Record<string, unknown>) {
-  const { page, limit, search, skip, sort, order } = parseListQuery(query);
+  const { page, search, sort, order } = parseListQuery(query);
+  const limit = Math.min(1000, Math.max(1, Number(query.limit) || 20));
+  const skip = (page - 1) * limit;
   const country = String(query.country ?? "").trim();
   const where: any = { role: ROLE };
   const filters: Record<string, unknown>[] = [];
+
+  const verified = parseBoolQuery(query.verified);
+  if (verified === true) filters.push({ isVerified: true });
+  else if (verified === false) filters.push({ isVerified: false });
+
+  const isActive = parseBoolQuery(query.isActive);
+  if (isActive === true) filters.push({ isActive: true });
+  else if (isActive === false) filters.push({ isActive: false });
 
   if (search) {
     filters.push({
@@ -356,6 +374,25 @@ export async function updateOrganizer(id: string, body: Record<string, unknown>)
   await invalidateOrganizerCaches({ id });
   await invalidateAdminOrganizerCaches();
   return getOrganizerById(id);
+}
+
+export async function rejectOrganizer(id: string, reason?: string) {
+  const existing = await prisma.user.findFirst({ where: { id, role: ROLE } });
+  if (!existing) return null;
+  await prisma.user.update({
+    where: { id },
+    data: {
+      isVerified: false,
+      isActive: false,
+    },
+  });
+  await invalidateOrganizerCaches({ id });
+  await invalidateAdminOrganizerCaches();
+  return {
+    id,
+    rejected: true,
+    reason: reason?.trim() || null,
+  };
 }
 
 export async function deleteOrganizer(id: string) {

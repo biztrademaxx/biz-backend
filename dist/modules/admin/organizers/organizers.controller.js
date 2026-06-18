@@ -39,6 +39,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.list = list;
 exports.getById = getById;
 exports.create = create;
+exports.reject = reject;
 exports.update = update;
 exports.remove = remove;
 exports.listOrganizerConnections = listOrganizerConnections;
@@ -101,6 +102,26 @@ async function create(req, res) {
         if (e?.message?.includes("already exists"))
             return (0, admin_response_1.sendError)(res, 400, e.message);
         return (0, admin_response_1.sendError)(res, 500, "Failed to create organizer", e?.message);
+    }
+}
+async function reject(req, res) {
+    try {
+        const reason = typeof req.body?.reason === "string"
+            ? req.body.reason
+            : undefined;
+        const result = await service.rejectOrganizer(req.params.id, reason);
+        if (!result)
+            return (0, admin_response_1.sendError)(res, 404, "Organizer not found");
+        await (0, admin_activity_log_service_1.recordAdminActivity)(req.auth, {
+            action: "ADMIN_ORGANIZER_REJECTED",
+            resource: "ORGANIZER",
+            resourceId: req.params.id,
+            details: { reason: reason ?? null },
+        });
+        return (0, admin_response_1.sendOne)(res, result);
+    }
+    catch (e) {
+        return (0, admin_response_1.sendError)(res, 500, "Failed to reject organizer", e?.message);
     }
 }
 async function update(req, res) {

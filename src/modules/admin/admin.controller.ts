@@ -7,6 +7,8 @@ import {
   adminDeleteEvent,
   adminApproveEvent,
   adminRejectEvent,
+  adminBulkApproveEvents,
+  adminBulkRejectEvents,
   adminGetEventStats,
   adminListVenues,
   adminListVisitors,
@@ -326,6 +328,44 @@ export async function adminRejectEventHandler(req: Request, res: Response) {
     return res.status(500).json({
       success: false,
       error: "Failed to reject event",
+      details: error.message,
+    });
+  }
+}
+
+export async function adminBulkApproveEventsHandler(req: Request, res: Response) {
+  try {
+    const auth = req.auth!;
+    const { eventIds } = req.body as { eventIds?: string[] };
+    if (!Array.isArray(eventIds) || eventIds.length === 0) {
+      return res.status(400).json({ success: false, error: "eventIds array is required" });
+    }
+    const result = await adminBulkApproveEvents(eventIds, auth.sub);
+    return res.json({ success: true, ...result });
+  } catch (error: any) {
+    console.error("Admin bulk approve events error (backend):", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to bulk approve events",
+      details: error.message,
+    });
+  }
+}
+
+export async function adminBulkRejectEventsHandler(req: Request, res: Response) {
+  try {
+    const auth = req.auth!;
+    const { eventIds, reason } = req.body as { eventIds?: string[]; reason?: string };
+    if (!Array.isArray(eventIds) || eventIds.length === 0) {
+      return res.status(400).json({ success: false, error: "eventIds array is required" });
+    }
+    const result = await adminBulkRejectEvents(eventIds, auth.sub, reason);
+    return res.json({ success: true, ...result });
+  } catch (error: any) {
+    console.error("Admin bulk reject events error (backend):", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to bulk reject events",
       details: error.message,
     });
   }

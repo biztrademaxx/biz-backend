@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.findOrCreateUser = findOrCreateUser;
 exports.createEventAdmin = createEventAdmin;
 exports.createSpeakerSession = createSpeakerSession;
+exports.deleteSpeakerSession = deleteSpeakerSession;
 /**
  * Admin event create and helpers.
  * Mirrors app/api/admin/events/route.ts POST logic.
@@ -751,4 +752,21 @@ async function createSpeakerSession(body) {
     });
     await (0, redis_1.invalidateSpeakerCaches)();
     return session;
+}
+/** Remove a speaker session from an event (delete by session id). */
+async function deleteSpeakerSession(eventId, sessionId) {
+    const session = await prisma_1.default.speakerSession.findFirst({
+        where: { id: sessionId, eventId },
+        select: {
+            id: true,
+            event: { select: { id: true, slug: true } },
+        },
+    });
+    if (!session) {
+        return { error: "NOT_FOUND" };
+    }
+    await prisma_1.default.speakerSession.delete({ where: { id: sessionId } });
+    await (0, redis_1.invalidateSpeakerCaches)();
+    await (0, redis_1.invalidateEventCaches)({ slug: session.event.slug, id: session.event.id });
+    return { deleted: true };
 }
