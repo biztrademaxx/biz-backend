@@ -1154,6 +1154,7 @@ export async function listEventExhibitors(eventId: string) {
           phone: true,
           avatar: true,
           company: true,
+          organizationName: true,
           jobTitle: true,
           role: true,
           profileCity: true,
@@ -1242,6 +1243,16 @@ export async function listEventExhibitors(eventId: string) {
     const exhibitor = booth.exhibitor
       ? {
           ...booth.exhibitor,
+          publicSlug: getPublicProfileSlug(
+            {
+              role: "EXHIBITOR",
+              firstName: booth.exhibitor.firstName,
+              lastName: booth.exhibitor.lastName,
+              organizationName: booth.exhibitor.organizationName,
+              company: booth.exhibitor.company,
+            },
+            "EXHIBITOR",
+          ),
           city: loc.city || undefined,
           country: loc.country || undefined,
           locationDisplay: loc.display || undefined,
