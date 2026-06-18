@@ -1131,6 +1131,25 @@ export async function createExhibitorReview(
 
 // --- Exhibitor products ---
 
+async function assertExhibitorOwnsProducts(
+  resolvedExhibitorId: string,
+  viewerUserId?: string | null,
+  viewerRole?: string | null,
+) {
+  const viewer = String(viewerUserId ?? "").trim();
+  if (!viewer) {
+    throw new Error("Authentication required");
+  }
+  if (viewerRole === "SUPER_ADMIN" || viewerRole === "SUB_ADMIN") {
+    return;
+  }
+  const viewerResolved =
+    (await resolveExhibitorId(viewer, viewer, viewerRole)) ?? viewer;
+  if (viewerResolved !== resolvedExhibitorId) {
+    throw new Error("Access denied");
+  }
+}
+
 export async function listExhibitorProducts(
   exhibitorId: string,
   viewerUserId?: string | null,
@@ -1180,15 +1199,20 @@ export async function createExhibitorProduct(
   if (!resolved) {
     throw new Error("exhibitorId is required");
   }
+  await assertExhibitorOwnsProducts(resolved, viewerUserId, viewerRole);
+  const name = String(body.name ?? "").trim();
+  if (!name) {
+    throw new Error("Product name is required");
+  }
   const youtubeArr = Array.isArray(body.youtube)
-    ? body.youtube
+    ? body.youtube.filter((v) => String(v ?? "").trim())
     : body.youtube
-      ? [body.youtube]
+      ? [String(body.youtube).trim()].filter(Boolean)
       : [];
   const product = await prisma.product.create({
     data: {
       exhibitorId: resolved,
-      name: body.name ?? "",
+      name,
       category: body.category ?? null,
       description: body.description ?? null,
       price: body.price ?? null,
@@ -1221,6 +1245,7 @@ export async function updateExhibitorProduct(
   if (!resolved) {
     return null;
   }
+  await assertExhibitorOwnsProducts(resolved, viewerUserId, viewerRole);
   const existing = await prisma.product.findFirst({
     where: { id: productId, exhibitorId: resolved },
   });
@@ -1261,6 +1286,7 @@ export async function deleteExhibitorProduct(
   if (!resolved) {
     return false;
   }
+  await assertExhibitorOwnsProducts(resolved, viewerUserId, viewerRole);
   const existing = await prisma.product.findFirst({
     where: { id: productId, exhibitorId: resolved },
   });

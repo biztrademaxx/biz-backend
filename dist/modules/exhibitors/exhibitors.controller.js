@@ -306,9 +306,15 @@ async function createExhibitorProductHandler(req, res) {
         return res.status(201).json({ product });
     }
     catch (error) {
-        // eslint-disable-next-line no-console
         console.error("Error creating exhibitor product (backend):", error);
-        return res.status(500).json({ error: "Internal server error" });
+        const msg = error?.message ?? "Internal server error";
+        if (msg === "Authentication required" || msg === "Access denied") {
+            return res.status(403).json({ error: msg });
+        }
+        if (msg === "Product name is required" || msg === "exhibitorId is required") {
+            return res.status(400).json({ error: msg });
+        }
+        return res.status(500).json({ error: msg });
     }
 }
 async function updateExhibitorProductHandler(req, res) {

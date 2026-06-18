@@ -24,9 +24,9 @@ router.get("/exhibitors/:id/leads-count", exhibitors_controller_1.getExhibitorLe
 router.get("/exhibitors/:id/reviews", exhibitors_controller_1.getExhibitorReviewsHandler);
 router.post("/exhibitors/:id/reviews/:reviewId/replies", auth_middleware_1.requireUser, exhibitors_controller_1.createExhibitorReviewReplyHandler);
 router.post("/exhibitors/:id/reviews", auth_middleware_1.optionalUser, exhibitors_controller_1.createExhibitorReviewHandler);
-// Exhibitor products (list, create, update, delete); optional JWT so slug URLs resolve like GET /exhibitors/:id
+// Exhibitor products (list, create, update, delete)
 router.get("/exhibitors/:id/products", auth_middleware_1.optionalUser, exhibitors_controller_1.getExhibitorProductsHandler);
-router.post("/exhibitors/:id/products", auth_middleware_1.optionalUser, exhibitors_controller_1.createExhibitorProductHandler);
-router.put("/exhibitors/:id/products/:productId", auth_middleware_1.optionalUser, exhibitors_controller_1.updateExhibitorProductHandler);
-router.delete("/exhibitors/:id/products/:productId", auth_middleware_1.optionalUser, exhibitors_controller_1.deleteExhibitorProductHandler);
+router.post("/exhibitors/:id/products", auth_middleware_1.requireUser, exhibitors_controller_1.createExhibitorProductHandler);
+router.put("/exhibitors/:id/products/:productId", auth_middleware_1.requireUser, exhibitors_controller_1.updateExhibitorProductHandler);
+router.delete("/exhibitors/:id/products/:productId", auth_middleware_1.requireUser, exhibitors_controller_1.deleteExhibitorProductHandler);
 exports.default = router;

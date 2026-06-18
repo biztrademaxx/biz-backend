@@ -48,11 +48,11 @@ router.get("/exhibitors/:id/reviews", getExhibitorReviewsHandler);
 router.post("/exhibitors/:id/reviews/:reviewId/replies", requireUser, createExhibitorReviewReplyHandler);
 router.post("/exhibitors/:id/reviews", optionalUser, createExhibitorReviewHandler);
 
-// Exhibitor products (list, create, update, delete); optional JWT so slug URLs resolve like GET /exhibitors/:id
+// Exhibitor products (list, create, update, delete)
 router.get("/exhibitors/:id/products", optionalUser, getExhibitorProductsHandler);
-router.post("/exhibitors/:id/products", optionalUser, createExhibitorProductHandler);
-router.put("/exhibitors/:id/products/:productId", optionalUser, updateExhibitorProductHandler);
-router.delete("/exhibitors/:id/products/:productId", optionalUser, deleteExhibitorProductHandler);
+router.post("/exhibitors/:id/products", requireUser, createExhibitorProductHandler);
+router.put("/exhibitors/:id/products/:productId", requireUser, updateExhibitorProductHandler);
+router.delete("/exhibitors/:id/products/:productId", requireUser, deleteExhibitorProductHandler);
 
 export default router;
 
