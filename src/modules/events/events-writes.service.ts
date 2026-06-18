@@ -6,7 +6,7 @@
 import { randomBytes, randomUUID } from "crypto";
 import bcrypt from "bcryptjs";
 import prisma from "../../config/prisma";
-import { invalidateEventCaches } from "../../config/redis";
+import { invalidateEventCaches, invalidateSpeakerCaches } from "../../config/redis";
 import { recordAdminActivity } from "../../services/admin-activity-log.service";
 import { normalizeYoutubeVideoUrlForStorage } from "../../utils/youtube-url";
 import type { EventStatus, SessionType, SessionStatus, User } from "@prisma/client";
@@ -728,6 +728,9 @@ export async function createEventAdmin(params: CreateEventAdminParams) {
   );
 
   await invalidateEventCaches({ slug: createdEvent.slug, id: createdEvent.id });
+  if ((createdEvent.speakerSessions?.length ?? 0) > 0) {
+    await invalidateSpeakerCaches();
+  }
 
   return {
     success: true,
@@ -813,6 +816,8 @@ export async function createSpeakerSession(body: {
       },
     },
   });
+
+  await invalidateSpeakerCaches();
 
   return session;
 }

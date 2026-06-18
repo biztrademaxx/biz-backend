@@ -686,6 +686,9 @@ async function createEventAdmin(params) {
         },
     });
     await (0, redis_1.invalidateEventCaches)({ slug: createdEvent.slug, id: createdEvent.id });
+    if ((createdEvent.speakerSessions?.length ?? 0) > 0) {
+        await (0, redis_1.invalidateSpeakerCaches)();
+    }
     return {
         success: true,
         message: "Event created successfully with nested entities",
@@ -738,5 +741,6 @@ async function createSpeakerSession(body) {
             },
         },
     });
+    await (0, redis_1.invalidateSpeakerCaches)();
     return session;
 }
