@@ -12,6 +12,8 @@ exports.adminUpdateEvent = adminUpdateEvent;
 exports.adminVerifyEvent = adminVerifyEvent;
 exports.adminDeleteEvent = adminDeleteEvent;
 exports.adminApproveEvent = adminApproveEvent;
+exports.adminBulkApproveEvents = adminBulkApproveEvents;
+exports.adminBulkRejectEvents = adminBulkRejectEvents;
 exports.adminRejectEvent = adminRejectEvent;
 exports.adminListVenues = adminListVenues;
 exports.adminListVisitors = adminListVisitors;
@@ -664,6 +666,7 @@ async function adminApproveEvent(eventId, adminId) {
         where: { id: eventId },
         data: {
             status: "PUBLISHED",
+            isPublic: true,
             rejectionReason: null,
             rejectedAt: null,
             rejectedById: null,
@@ -674,6 +677,34 @@ async function adminApproveEvent(eventId, adminId) {
     });
     await (0, redis_1.invalidateEventCaches)({ slug: event.slug, id: event.id });
     return { event };
+}
+async function adminBulkApproveEvents(eventIds, adminId) {
+    const ids = [...new Set(eventIds.map((id) => String(id).trim()).filter(Boolean))];
+    const results = [];
+    for (const eventId of ids) {
+        const result = await adminApproveEvent(eventId, adminId);
+        if ("error" in result && result.error === "NOT_FOUND") {
+            results.push({ eventId, ok: false, error: "NOT_FOUND" });
+        }
+        else {
+            results.push({ eventId, ok: true });
+        }
+    }
+    return { results, approved: results.filter((r) => r.ok).length };
+}
+async function adminBulkRejectEvents(eventIds, adminId, reason) {
+    const ids = [...new Set(eventIds.map((id) => String(id).trim()).filter(Boolean))];
+    const results = [];
+    for (const eventId of ids) {
+        const result = await adminRejectEvent(eventId, adminId, reason);
+        if ("error" in result && result.error === "NOT_FOUND") {
+            results.push({ eventId, ok: false, error: "NOT_FOUND" });
+        }
+        else {
+            results.push({ eventId, ok: true });
+        }
+    }
+    return { results, rejected: results.filter((r) => r.ok).length };
 }
 async function adminRejectEvent(eventId, adminId, reason) {
     const existing = await prisma_1.default.event.findUnique({
@@ -688,6 +719,7 @@ async function adminRejectEvent(eventId, adminId, reason) {
         where: { id: eventId },
         data: {
             status: "REJECTED",
+            isPublic: false,
             rejectionReason: reason ?? "Rejected by admin",
             rejectedAt: now,
             rejectedById: adminId,

@@ -30,6 +30,7 @@ import {
   updateExhibitionSpaceHandler,
   addExhibitorToEventHandler,
   removeExhibitorFromEventHandler,
+  deleteSpeakerSessionHandler,
   getEventFollowersHandler,
   getEventReviewsHandler,
   createEventReviewHandler,
@@ -81,6 +82,7 @@ router.get("/events/:id/attendees", getEventAttendeesHandler);
 router.post("/events/:id/leads", requireUser, createEventLeadHandler);
 router.get("/events/:id/exhibitors", getEventExhibitorsHandler);
 router.get("/events/:id/speakers", getEventSpeakersHandler);
+router.delete("/events/:id/speakers/:speakerId", requireUser, deleteSpeakerSessionHandler);
 router.get("/events/:id/brochure", getEventBrochureHandler);
 router.put("/events/:id/layout", requireUser, updateEventLayoutHandler);
 router.delete("/events/:id/layout", requireUser, deleteEventLayoutHandler);

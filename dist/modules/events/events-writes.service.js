@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.findOrCreateUser = findOrCreateUser;
 exports.createEventAdmin = createEventAdmin;
 exports.createSpeakerSession = createSpeakerSession;
+exports.deleteSpeakerSession = deleteSpeakerSession;
 /**
  * Admin event create and helpers.
  * Mirrors app/api/admin/events/route.ts POST logic.
@@ -153,40 +154,52 @@ function parseTicketTypesFromSummary(body, capacityBase) {
     return out;
 }
 function parseSpaceCosts(spaceCosts, currency = "USD") {
-    return spaceCosts.map((space, index) => {
-        const raw = (space.spaceType || space.type || "CUSTOM").toString().toLowerCase();
-        let spaceType = SPACE_TYPE_MAP[raw] || "CUSTOM";
-        if (!VALID_SPACE_TYPES.includes(spaceType))
-            spaceType = "CUSTOM";
-        const pricePerSqm = Number(space.pricePerSqm ?? space.pricePerUnit ?? 0) || 0;
-        const minArea = Number(space.minArea ?? space.area ?? 0) || 0;
-        const computedTotal = pricePerSqm * minArea;
-        const basePrice = space.basePrice != null && Number(space.basePrice) > 0
-            ? Number(space.basePrice)
-            : computedTotal;
-        return {
-            id: space.id || (0, crypto_1.randomUUID)(),
-            spaceType,
-            name: space.name || space.type || `Space ${index + 1}`,
-            description: space.description ?? "",
-            basePrice,
-            pricePerSqm: pricePerSqm || null,
-            minArea: minArea || null,
-            isFixed: space.isFixed ?? false,
-            additionalPowerRate: space.additionalPowerRate ?? 0,
-            compressedAirRate: space.compressedAirRate ?? 0,
-            unit: space.unit ?? null,
-            area: space.area ?? minArea ?? 0,
-            dimensions: space.dimensions ?? (space.area ? `${space.area} sq.m` : "3x3"),
-            location: space.location ?? null,
-            isAvailable: true,
-            maxBooths: space.maxBooths ?? null,
-            bookedBooths: 0,
-            setupRequirements: space.setupRequirements ?? null,
-            currency,
-            powerIncluded: space.powerIncluded ?? false,
-        };
-    });
+    return spaceCosts.map((space, index) => normalizeExhibitionSpaceRecord(space, index, currency));
+}
+function normalizeExhibitionSpaceRecord(space, index, currency = "USD") {
+    const raw = (space.spaceType || space.type || "CUSTOM").toString();
+    const mapped = SPACE_TYPE_MAP[raw.toLowerCase()];
+    let spaceType = mapped || raw.toUpperCase();
+    if (!VALID_SPACE_TYPES.includes(spaceType))
+        spaceType = "CUSTOM";
+    const pricePerSqm = Number(space.pricePerSqm ?? space.pricePerUnit ?? 0) || 0;
+    const minArea = Number(space.minArea ?? space.area ?? 0) || 0;
+    const computedTotal = pricePerSqm * minArea;
+    const basePrice = space.basePrice != null && Number(space.basePrice) > 0
+        ? Number(space.basePrice)
+        : computedTotal;
+    return {
+        id: space.id || (0, crypto_1.randomUUID)(),
+        spaceType,
+        name: space.name || space.type || `Space ${index + 1}`,
+        description: space.description ?? "",
+        basePrice,
+        pricePerSqm: pricePerSqm || null,
+        minArea: minArea || null,
+        isFixed: space.isFixed ?? false,
+        additionalPowerRate: space.additionalPowerRate ?? null,
+        compressedAirRate: space.compressedAirRate ?? null,
+        unit: space.unit ?? null,
+        pricePerUnit: space.pricePerUnit ?? null,
+        area: Number(space.area) || minArea || 0,
+        dimensions: space.dimensions ?? (minArea ? `${minArea} sq.m` : "3x3"),
+        location: space.location ?? null,
+        isAvailable: space.isAvailable !== false,
+        maxBooths: space.maxBooths ?? null,
+        bookedBooths: space.bookedBooths ?? 0,
+        setupRequirements: space.setupRequirements ?? null,
+        currency: space.currency || currency,
+        powerIncluded: space.powerIncluded ?? false,
+    };
+}
+function parseExhibitionSpacesForCreate(body, currency = "USD") {
+    if (Array.isArray(body.exhibitionSpaces) && body.exhibitionSpaces.length > 0) {
+        return body.exhibitionSpaces.map((space, index) => normalizeExhibitionSpaceRecord(space, index, currency));
+    }
+    if (Array.isArray(body.spaceCosts) && body.spaceCosts.length > 0) {
+        return parseSpaceCosts(body.spaceCosts, currency);
+    }
+    return [];
 }
 async function findOrCreateUser(userData) {
     const { email, role, ...data } = userData;
@@ -541,12 +554,8 @@ async function createEventAdmin(params) {
             isActive: true,
         });
     }
-    const hasProvidedSpaces = Array.isArray(body.spaceCosts) && body.spaceCosts.length > 0;
-    let spacesToCreate = [];
-    if (hasProvidedSpaces) {
-        spacesToCreate = parseSpaceCosts(body.spaceCosts, eventData.currency);
-    }
-    else if (processedExhibitors.length > 0) {
+    let spacesToCreate = parseExhibitionSpacesForCreate(body, eventData.currency);
+    if (spacesToCreate.length === 0 && processedExhibitors.length > 0) {
         spacesToCreate = [
             {
                 id: (0, crypto_1.randomUUID)(),
@@ -686,6 +695,9 @@ async function createEventAdmin(params) {
         },
     });
     await (0, redis_1.invalidateEventCaches)({ slug: createdEvent.slug, id: createdEvent.id });
+    if ((createdEvent.speakerSessions?.length ?? 0) > 0) {
+        await (0, redis_1.invalidateSpeakerCaches)();
+    }
     return {
         success: true,
         message: "Event created successfully with nested entities",
@@ -738,5 +750,23 @@ async function createSpeakerSession(body) {
             },
         },
     });
+    await (0, redis_1.invalidateSpeakerCaches)();
     return session;
+}
+/** Remove a speaker session from an event (delete by session id). */
+async function deleteSpeakerSession(eventId, sessionId) {
+    const session = await prisma_1.default.speakerSession.findFirst({
+        where: { id: sessionId, eventId },
+        select: {
+            id: true,
+            event: { select: { id: true, slug: true } },
+        },
+    });
+    if (!session) {
+        return { error: "NOT_FOUND" };
+    }
+    await prisma_1.default.speakerSession.delete({ where: { id: sessionId } });
+    await (0, redis_1.invalidateSpeakerCaches)();
+    await (0, redis_1.invalidateEventCaches)({ slug: session.event.slug, id: session.event.id });
+    return { deleted: true };
 }

@@ -713,6 +713,7 @@ export async function adminApproveEvent(eventId: string, adminId: string) {
     where: { id: eventId },
     data: {
       status: "PUBLISHED",
+      isPublic: true,
       rejectionReason: null,
       rejectedAt: null,
       rejectedById: null,
@@ -724,6 +725,38 @@ export async function adminApproveEvent(eventId: string, adminId: string) {
 
   await invalidateEventCaches({ slug: event.slug, id: event.id });
   return { event };
+}
+
+export async function adminBulkApproveEvents(eventIds: string[], adminId: string) {
+  const ids = [...new Set(eventIds.map((id) => String(id).trim()).filter(Boolean))];
+  const results: { eventId: string; ok: boolean; error?: string }[] = [];
+  for (const eventId of ids) {
+    const result = await adminApproveEvent(eventId, adminId);
+    if ("error" in result && result.error === "NOT_FOUND") {
+      results.push({ eventId, ok: false, error: "NOT_FOUND" });
+    } else {
+      results.push({ eventId, ok: true });
+    }
+  }
+  return { results, approved: results.filter((r) => r.ok).length };
+}
+
+export async function adminBulkRejectEvents(
+  eventIds: string[],
+  adminId: string,
+  reason?: string
+) {
+  const ids = [...new Set(eventIds.map((id) => String(id).trim()).filter(Boolean))];
+  const results: { eventId: string; ok: boolean; error?: string }[] = [];
+  for (const eventId of ids) {
+    const result = await adminRejectEvent(eventId, adminId, reason);
+    if ("error" in result && result.error === "NOT_FOUND") {
+      results.push({ eventId, ok: false, error: "NOT_FOUND" });
+    } else {
+      results.push({ eventId, ok: true });
+    }
+  }
+  return { results, rejected: results.filter((r) => r.ok).length };
 }
 
 export async function adminRejectEvent(
@@ -746,6 +779,7 @@ export async function adminRejectEvent(
     where: { id: eventId },
     data: {
       status: "REJECTED",
+      isPublic: false,
       rejectionReason: reason ?? "Rejected by admin",
       rejectedAt: now,
       rejectedById: adminId,

@@ -32,7 +32,7 @@ import {
   addExhibitorToEvent,
   removeExhibitorFromEvent,
 } from "./events.service";
-import { createEventAdmin, createSpeakerSession } from "./events-writes.service";
+import { createEventAdmin, createSpeakerSession, deleteSpeakerSession } from "./events-writes.service";
 import prisma from "../../config/prisma";
 import {
   listActiveEventCategoriesPublic,
@@ -641,6 +641,27 @@ export async function removeExhibitorFromEventHandler(req: Request, res: Respons
     return res.status(500).json({
       success: false,
       error: "Failed to remove exhibitor from event",
+      details: error.message,
+    });
+  }
+}
+
+export async function deleteSpeakerSessionHandler(req: Request, res: Response) {
+  try {
+    const { id: eventId, speakerId: sessionId } = req.params;
+    if (!sessionId) {
+      return res.status(400).json({ success: false, error: "Speaker session ID required" });
+    }
+    const result = await deleteSpeakerSession(eventId, sessionId);
+    if ("error" in result && result.error === "NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Speaker session not found for this event" });
+    }
+    return res.status(200).json({ success: true, message: "Speaker removed successfully" });
+  } catch (error: any) {
+    console.error("Error deleting speaker session (backend):", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to delete speaker",
       details: error.message,
     });
   }

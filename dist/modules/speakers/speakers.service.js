@@ -22,6 +22,54 @@ async function listSpeakers(options) {
     const key = await (0, redis_1.speakersListCacheKey)(requireProfileImage);
     return (0, redis_1.cached)(key, redis_1.CACHE_TTL.SPEAKERS_LIST, () => listSpeakersFromDb(requireProfileImage));
 }
+async function getSpeakerEventCountsBySpeakerIds(speakerIds) {
+    const result = new Map();
+    if (speakerIds.length === 0)
+        return result;
+    for (const id of speakerIds) {
+        result.set(id, {
+            totalEvents: 0,
+            activeEvents: 0,
+            upcomingEventsCount: 0,
+            pastEventsCount: 0,
+        });
+    }
+    const sessions = await prisma_1.default.speakerSession.findMany({
+        where: {
+            speakerId: { in: speakerIds },
+            event: { is: (0, public_profile_1.publicPublishedEventWhere)() },
+        },
+        select: {
+            speakerId: true,
+            eventId: true,
+            event: { select: { endDate: true } },
+        },
+    });
+    const now = new Date();
+    const totalBySpeaker = new Map();
+    const upcomingBySpeaker = new Map();
+    for (const session of sessions) {
+        if (!totalBySpeaker.has(session.speakerId)) {
+            totalBySpeaker.set(session.speakerId, new Set());
+            upcomingBySpeaker.set(session.speakerId, new Set());
+        }
+        totalBySpeaker.get(session.speakerId).add(session.eventId);
+        if (session.event && new Date(session.event.endDate) >= now) {
+            upcomingBySpeaker.get(session.speakerId).add(session.eventId);
+        }
+    }
+    for (const id of speakerIds) {
+        const total = totalBySpeaker.get(id)?.size ?? 0;
+        const upcoming = upcomingBySpeaker.get(id)?.size ?? 0;
+        result.set(id, {
+            totalEvents: total,
+            activeEvents: upcoming,
+            upcomingEventsCount: upcoming,
+            pastEventsCount: Math.max(0, total - upcoming),
+        });
+    }
+    return result;
+}
 async function listSpeakersFromDb(requireProfileImage) {
     await prisma_1.default.$connect();
     const speakers = await prisma_1.default.user.findMany({
@@ -64,13 +112,24 @@ async function listSpeakersFromDb(requireProfileImage) {
     const filtered = requireProfileImage
         ? speakers.filter((s) => (0, profile_image_1.hasPublicProfileImage)(s.avatar))
         : speakers;
+    const eventCounts = await getSpeakerEventCountsBySpeakerIds(filtered.map((s) => s.id));
     return filtered.map((s) => {
         const city = s.profileCity?.trim() || "";
         const state = s.profileState?.trim() || "";
         const country = s.profileCountry?.trim() || "";
         const structuredLocation = [city, state, country].filter(Boolean).join(", ");
+        const counts = eventCounts.get(s.id) ?? {
+            totalEvents: 0,
+            activeEvents: 0,
+            upcomingEventsCount: 0,
+            pastEventsCount: 0,
+        };
         return {
             ...s,
+            totalEvents: counts.totalEvents,
+            activeEvents: counts.activeEvents,
+            upcomingEventsCount: counts.upcomingEventsCount,
+            pastEventsCount: counts.pastEventsCount,
             city,
             state,
             country,

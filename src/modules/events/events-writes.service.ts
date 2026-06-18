@@ -6,7 +6,7 @@
 import { randomBytes, randomUUID } from "crypto";
 import bcrypt from "bcryptjs";
 import prisma from "../../config/prisma";
-import { invalidateEventCaches } from "../../config/redis";
+import { invalidateEventCaches, invalidateSpeakerCaches } from "../../config/redis";
 import { recordAdminActivity } from "../../services/admin-activity-log.service";
 import { normalizeYoutubeVideoUrlForStorage } from "../../utils/youtube-url";
 import type { EventStatus, SessionType, SessionStatus, User } from "@prisma/client";
@@ -149,40 +149,61 @@ function parseTicketTypesFromSummary(body: Record<string, any>, capacityBase: nu
 }
 
 function parseSpaceCosts(spaceCosts: any[], currency = "USD"): any[] {
-  return spaceCosts.map((space, index) => {
-    const raw = (space.spaceType || space.type || "CUSTOM").toString().toLowerCase();
-    let spaceType = SPACE_TYPE_MAP[raw] || "CUSTOM";
-    if (!VALID_SPACE_TYPES.includes(spaceType)) spaceType = "CUSTOM";
-    const pricePerSqm = Number(space.pricePerSqm ?? space.pricePerUnit ?? 0) || 0;
-    const minArea = Number(space.minArea ?? space.area ?? 0) || 0;
-    const computedTotal = pricePerSqm * minArea;
-    const basePrice =
-      space.basePrice != null && Number(space.basePrice) > 0
-        ? Number(space.basePrice)
-        : computedTotal;
-    return {
-      id: space.id || randomUUID(),
-      spaceType,
-      name: space.name || space.type || `Space ${index + 1}`,
-      description: space.description ?? "",
-      basePrice,
-      pricePerSqm: pricePerSqm || null,
-      minArea: minArea || null,
-      isFixed: space.isFixed ?? false,
-      additionalPowerRate: space.additionalPowerRate ?? 0,
-      compressedAirRate: space.compressedAirRate ?? 0,
-      unit: space.unit ?? null,
-      area: space.area ?? minArea ?? 0,
-      dimensions: space.dimensions ?? (space.area ? `${space.area} sq.m` : "3x3"),
-      location: space.location ?? null,
-      isAvailable: true,
-      maxBooths: space.maxBooths ?? null,
-      bookedBooths: 0,
-      setupRequirements: space.setupRequirements ?? null,
-      currency,
-      powerIncluded: space.powerIncluded ?? false,
-    };
-  });
+  return spaceCosts.map((space, index) => normalizeExhibitionSpaceRecord(space, index, currency));
+}
+
+function normalizeExhibitionSpaceRecord(space: any, index: number, currency = "USD") {
+  const raw = (space.spaceType || space.type || "CUSTOM").toString();
+  const mapped = SPACE_TYPE_MAP[raw.toLowerCase()];
+  let spaceType = mapped || raw.toUpperCase();
+  if (!VALID_SPACE_TYPES.includes(spaceType)) spaceType = "CUSTOM";
+
+  const pricePerSqm = Number(space.pricePerSqm ?? space.pricePerUnit ?? 0) || 0;
+  const minArea = Number(space.minArea ?? space.area ?? 0) || 0;
+  const computedTotal = pricePerSqm * minArea;
+  const basePrice =
+    space.basePrice != null && Number(space.basePrice) > 0
+      ? Number(space.basePrice)
+      : computedTotal;
+
+  return {
+    id: space.id || randomUUID(),
+    spaceType,
+    name: space.name || space.type || `Space ${index + 1}`,
+    description: space.description ?? "",
+    basePrice,
+    pricePerSqm: pricePerSqm || null,
+    minArea: minArea || null,
+    isFixed: space.isFixed ?? false,
+    additionalPowerRate: space.additionalPowerRate ?? null,
+    compressedAirRate: space.compressedAirRate ?? null,
+    unit: space.unit ?? null,
+    pricePerUnit: space.pricePerUnit ?? null,
+    area: Number(space.area) || minArea || 0,
+    dimensions: space.dimensions ?? (minArea ? `${minArea} sq.m` : "3x3"),
+    location: space.location ?? null,
+    isAvailable: space.isAvailable !== false,
+    maxBooths: space.maxBooths ?? null,
+    bookedBooths: space.bookedBooths ?? 0,
+    setupRequirements: space.setupRequirements ?? null,
+    currency: space.currency || currency,
+    powerIncluded: space.powerIncluded ?? false,
+  };
+}
+
+function parseExhibitionSpacesForCreate(
+  body: { spaceCosts?: unknown; exhibitionSpaces?: unknown },
+  currency = "USD",
+): any[] {
+  if (Array.isArray(body.exhibitionSpaces) && body.exhibitionSpaces.length > 0) {
+    return body.exhibitionSpaces.map((space, index) =>
+      normalizeExhibitionSpaceRecord(space, index, currency),
+    );
+  }
+  if (Array.isArray(body.spaceCosts) && body.spaceCosts.length > 0) {
+    return parseSpaceCosts(body.spaceCosts, currency);
+  }
+  return [];
 }
 
 export async function findOrCreateUser(userData: {
@@ -575,11 +596,8 @@ export async function createEventAdmin(params: CreateEventAdminParams) {
     });
   }
 
-  const hasProvidedSpaces = Array.isArray(body.spaceCosts) && body.spaceCosts.length > 0;
-  let spacesToCreate: any[] = [];
-  if (hasProvidedSpaces) {
-    spacesToCreate = parseSpaceCosts(body.spaceCosts, eventData.currency);
-  } else if (processedExhibitors.length > 0) {
+  let spacesToCreate = parseExhibitionSpacesForCreate(body, eventData.currency);
+  if (spacesToCreate.length === 0 && processedExhibitors.length > 0) {
     spacesToCreate = [
       {
         id: randomUUID(),
@@ -728,6 +746,9 @@ export async function createEventAdmin(params: CreateEventAdminParams) {
   );
 
   await invalidateEventCaches({ slug: createdEvent.slug, id: createdEvent.id });
+  if ((createdEvent.speakerSessions?.length ?? 0) > 0) {
+    await invalidateSpeakerCaches();
+  }
 
   return {
     success: true,
@@ -814,5 +835,28 @@ export async function createSpeakerSession(body: {
     },
   });
 
+  await invalidateSpeakerCaches();
+
   return session;
+}
+
+/** Remove a speaker session from an event (delete by session id). */
+export async function deleteSpeakerSession(eventId: string, sessionId: string) {
+  const session = await prisma.speakerSession.findFirst({
+    where: { id: sessionId, eventId },
+    select: {
+      id: true,
+      event: { select: { id: true, slug: true } },
+    },
+  });
+
+  if (!session) {
+    return { error: "NOT_FOUND" as const };
+  }
+
+  await prisma.speakerSession.delete({ where: { id: sessionId } });
+  await invalidateSpeakerCaches();
+  await invalidateEventCaches({ slug: session.event.slug, id: session.event.id });
+
+  return { deleted: true as const };
 }
