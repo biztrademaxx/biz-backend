@@ -50,6 +50,7 @@ async function getAppointmentsHandler(req, res) {
                 locationDisplay: eventLocation.display,
                 city: eventLocation.city,
                 country: eventLocation.country,
+                visitorId: apt.requester?.id || apt.requesterId || "",
                 visitorName: apt.requester
                     ? `${apt.requester.firstName || ""} ${apt.requester.lastName || ""}`.trim()
                     : "Unknown Visitor",
