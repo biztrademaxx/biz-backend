@@ -140,6 +140,11 @@ async function listEventsFromDb(params) {
     if (params.vip) {
         andParts.push({ isVIP: true });
     }
+    if (params.excludePast) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        andParts.push({ endDate: { gte: today } });
+    }
     const where = { AND: andParts };
     let orderBy = {};
     switch (params.sort) {

@@ -46,6 +46,7 @@ export interface ListEventsParams {
   sort?: string;
   verified?: boolean;
   vip?: boolean;
+  excludePast?: boolean;
 }
 
 export async function listEvents(params: ListEventsParams) {
@@ -109,6 +110,12 @@ async function listEventsFromDb(params: ListEventsParams) {
 
   if (params.vip) {
     andParts.push({ isVIP: true });
+  }
+
+  if (params.excludePast) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    andParts.push({ endDate: { gte: today } });
   }
 
   const where: Prisma.EventWhereInput = { AND: andParts };

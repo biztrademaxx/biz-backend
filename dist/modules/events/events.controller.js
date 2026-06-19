@@ -107,7 +107,7 @@ async function getEventCategoriesBrowseHandler(_req, res) {
 }
 async function getEventsHandler(req, res) {
     try {
-        const { page, limit, category, search, location, startDate, endDate, featured, sort, verified, vip, stats, } = req.query;
+        const { page, limit, category, search, location, startDate, endDate, featured, sort, verified, vip, stats, excludePast, } = req.query;
         // If stats=true, return category stats (backward-compatible behavior)
         if (stats === "true") {
             const data = await (0, events_service_1.getCategoryStats)();
@@ -130,6 +130,7 @@ async function getEventsHandler(req, res) {
             sort: sort ?? "newest",
             verified: verified === "true",
             vip: vip === "true",
+            excludePast: excludePast === "true",
         });
         return res.json({
             success: true,

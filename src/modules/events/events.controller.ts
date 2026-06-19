@@ -80,6 +80,7 @@ export async function getEventsHandler(req: Request, res: Response) {
       verified,
       vip,
       stats,
+      excludePast,
     } = req.query;
 
     // If stats=true, return category stats (backward-compatible behavior)
@@ -106,6 +107,7 @@ export async function getEventsHandler(req: Request, res: Response) {
       sort: (sort as string | undefined) ?? "newest",
       verified: verified === "true",
       vip: vip === "true",
+      excludePast: excludePast === "true",
     });
 
     return res.json({
