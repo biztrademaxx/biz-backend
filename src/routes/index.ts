@@ -35,7 +35,10 @@ const router = Router();
 
 // Placeholder root route for the backend API
 router.get("/", (_req, res) => {
-  res.json({ message: "Biz backend API root" });
+  res.json({
+    service: "BizTradeFairs API",
+    status: "healthy",
+  });
 });
 
 // Example API health endpoint
