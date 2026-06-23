@@ -382,6 +382,7 @@ model User {
   products         Product[]
   organizerPromotions Promotion[] @relation("OrganizerPromotions")
   exhibitorPromotions Promotion[] @relation("ExhibitorPromotions")
+  paymentTransactions PaymentTransaction[]
   savedEvents       SavedEvent[]
   reviews           Review[]
   leads             EventLead[]
@@ -888,12 +889,56 @@ model Promotion {
   conversionExhibitors Int @default(0)
   conversionSpeakers   Int @default(0)
 
+  paymentTransaction PaymentTransaction?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   marketingReports PromotionMarketingReport[]
 
   @@map("promotions")
+}
+
+/// Razorpay (and future gateway) payment records for promotion checkout.
+model PaymentTransaction {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  provider String @default("RAZORPAY")
+  purpose  String @default("PROMOTION")
+
+  razorpayOrderId   String  @unique
+  razorpayPaymentId String? @unique
+  razorpaySignature String?
+
+  amountPaise Int
+  currency    String @default("INR")
+  /// CREATED | PAID | FAILED | CONSUMED
+  status      String @default("CREATED")
+
+  receipt String
+
+  /// EVENT | ORGANIZER | EXHIBITOR
+  promotionChannel String
+  eventId          String?  @db.Uuid
+  organizerId      String?  @db.Uuid
+  exhibitorId      String?  @db.Uuid
+  packageType      String
+  targetCategories String[] @default([])
+  durationDays     Int
+  amountInr        Float
+
+  promotionId String?    @unique @db.Uuid
+  promotion   Promotion? @relation(fields: [promotionId], references: [id], onDelete: SetNull)
+
+  paidAt    DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([promotionChannel, eventId])
+  @@map("payment_transactions")
 }
 
 /// Daily social / offline marketing lead reports uploaded by admin for a promotion.

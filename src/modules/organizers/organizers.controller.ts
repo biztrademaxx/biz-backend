@@ -607,17 +607,17 @@ export async function createOrganizerPromotionHandler(req: Request, res: Respons
       });
     }
 
-    const body = req.body as {
-      eventId?: string | null;
-      packageType?: string;
-      targetCategories?: string[];
-      amount?: number;
-      duration?: number;
-    };
+    const body = req.body as { paymentTransactionId?: string };
 
-    const result = await createOrganizerPromotion(id, body);
+    const result = await createOrganizerPromotion(id, auth.sub, body);
 
     if ("error" in result) {
+      if (result.error === "PAYMENT_REQUIRED") {
+        return res.status(402).json({ success: false, error: "Verified payment is required" });
+      }
+      if (result.error === "PAYMENT_INVALID") {
+        return res.status(result.status ?? 402).json({ success: false, error: result.message });
+      }
       if (result.error === "EVENT_REQUIRED") {
         return res.status(400).json({
           success: false,
@@ -630,6 +630,7 @@ export async function createOrganizerPromotionHandler(req: Request, res: Respons
           error: "Event not found or access denied",
         });
       }
+      return res.status(400).json({ success: false, error: result.error });
     }
 
     return res.status(201).json({

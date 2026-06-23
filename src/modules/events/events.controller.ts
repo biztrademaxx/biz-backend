@@ -818,25 +818,24 @@ export async function trackEventMetricsHandler(req: Request, res: Response) {
 
 export async function createPromotionHandler(req: Request, res: Response) {
   try {
+    const userId = req.auth?.sub;
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
     const eventId = req.params.id!;
-    const body = req.body as {
-      packageType?: string;
-      targetCategories?: string[];
-      amount?: number;
-      duration?: number;
-    };
-    const packageType = body.packageType ?? "";
-    const targetCategories = Array.isArray(body.targetCategories) ? body.targetCategories : [];
-    const amount = Number(body.amount) || 0;
-    const duration = Number(body.duration) || 0;
-    const result = await createPromotion(eventId, {
-      packageType,
-      targetCategories,
-      amount,
-      duration,
+    const body = req.body as { paymentTransactionId?: string };
+    const result = await createPromotion(eventId, userId, {
+      paymentTransactionId: body.paymentTransactionId ?? "",
     });
     if ("error" in result && result.error === "NOT_FOUND") {
       return res.status(404).json({ error: "Event not found" });
+    }
+    if ("error" in result && result.error === "PAYMENT_REQUIRED") {
+      return res.status(402).json({ error: "Verified payment is required" });
+    }
+    if ("error" in result && result.error === "PAYMENT_INVALID") {
+      return res.status(result.status ?? 402).json({ error: result.message });
     }
     return res.status(201).json(result.promotion);
   } catch (err: any) {

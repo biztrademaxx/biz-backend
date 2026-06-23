@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -795,21 +828,26 @@ async function getExhibitorPromotionsMarketingForSelf(exhibitorId, viewerUserId)
         events: Array.from(eventsMap.values()),
     };
 }
-/** Logged-in exhibitor only: create promotion if they have a booth for the event. */
+/** Logged-in exhibitor only: create promotion after verified Razorpay payment. */
 async function createExhibitorPromotionForSelf(viewerUserId, body) {
     const resolved = (await resolveExhibitorId(body.exhibitorId)) ?? body.exhibitorId;
     if (!resolved || viewerUserId !== resolved) {
         return { error: "FORBIDDEN" };
     }
-    const eventId = body.eventId?.trim();
-    const packageType = body.packageType?.trim();
-    const targetCategories = Array.isArray(body.targetCategories) ? body.targetCategories : [];
-    if (!eventId || !packageType || targetCategories.length === 0) {
-        return { error: "INVALID" };
+    const paymentTransactionId = body.paymentTransactionId?.trim();
+    if (!paymentTransactionId) {
+        return { error: "PAYMENT_REQUIRED" };
     }
-    const amount = Number(body.amount);
-    const duration = Number(body.duration);
-    if (!Number.isFinite(amount) || amount <= 0 || !Number.isFinite(duration) || duration <= 0) {
+    const { loadPaidPromotionPayment, linkPaymentToPromotion } = await Promise.resolve().then(() => __importStar(require("../payments/payments.service")));
+    const payment = await loadPaidPromotionPayment(paymentTransactionId, viewerUserId, {
+        channel: "EXHIBITOR",
+        exhibitorId: resolved,
+    });
+    if ("error" in payment) {
+        return { error: "PAYMENT_INVALID", message: payment.error, status: payment.status };
+    }
+    const eventId = payment.eventId?.trim();
+    if (!eventId || payment.targetCategories.length === 0) {
         return { error: "INVALID" };
     }
     const booth = await prisma_1.default.exhibitorBooth.findFirst({
@@ -828,16 +866,16 @@ async function createExhibitorPromotionForSelf(viewerUserId, body) {
     }
     const startDate = new Date();
     const endDate = new Date();
-    endDate.setDate(endDate.getDate() + Math.floor(duration));
+    endDate.setDate(endDate.getDate() + payment.durationDays);
     const promotion = await prisma_1.default.promotion.create({
         data: {
             exhibitorId: resolved,
             eventId,
             organizerId: null,
-            packageType,
-            targetCategories,
-            amount,
-            duration: Math.floor(duration),
+            packageType: payment.packageType,
+            targetCategories: payment.targetCategories,
+            amount: payment.amountInr,
+            duration: payment.durationDays,
             startDate,
             endDate,
             status: "PENDING",
@@ -846,6 +884,7 @@ async function createExhibitorPromotionForSelf(viewerUserId, body) {
             conversions: 0,
         },
     });
+    await linkPaymentToPromotion(payment.id, promotion.id);
     return { promotion };
 }
 // --- Exhibitor reviews ---

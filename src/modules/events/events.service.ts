@@ -1784,26 +1784,46 @@ export async function getEventPromotions(
 
 export async function createPromotion(
   eventId: string,
-  body: { packageType: string; targetCategories: string[]; amount: number; duration: number }
+  userId: string,
+  body: { paymentTransactionId: string },
 ) {
+  const paymentTransactionId = body.paymentTransactionId?.trim();
+  if (!paymentTransactionId) {
+    return { error: "PAYMENT_REQUIRED" as const };
+  }
+
   const event = await prisma.event.findUnique({
     where: { id: eventId },
     select: { id: true, organizerId: true },
   });
   if (!event) return { error: "NOT_FOUND" as const };
 
+  const { loadPaidPromotionPayment, linkPaymentToPromotion } = await import(
+    "../payments/payments.service"
+  );
+
+  const payment = await loadPaidPromotionPayment(paymentTransactionId, userId, {
+    channel: "EVENT",
+    eventId,
+    organizerId: event.organizerId,
+  });
+
+  if ("error" in payment) {
+    return { error: "PAYMENT_INVALID" as const, message: payment.error, status: payment.status };
+  }
+
   const startDate = new Date();
   const endDate = new Date();
-  endDate.setDate(endDate.getDate() + body.duration);
+  endDate.setDate(endDate.getDate() + payment.durationDays);
 
   const promotion = await prisma.promotion.create({
     data: {
       eventId,
       organizerId: event.organizerId,
-      packageType: body.packageType,
-      targetCategories: body.targetCategories ?? [],
-      amount: body.amount,
-      duration: body.duration,
+      packageType: payment.packageType,
+      targetCategories: payment.targetCategories,
+      amount: payment.amountInr,
+      duration: payment.durationDays,
       startDate,
       endDate,
       status: "ACTIVE",
@@ -1814,6 +1834,9 @@ export async function createPromotion(
       },
     },
   });
+
+  await linkPaymentToPromotion(payment.id, promotion.id);
+
   return { promotion };
 }
 

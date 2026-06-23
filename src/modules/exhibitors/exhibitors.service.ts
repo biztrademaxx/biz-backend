@@ -963,36 +963,42 @@ export async function getExhibitorPromotionsMarketingForSelf(
 
 export type CreateExhibitorPromotionBody = {
   exhibitorId: string;
-  eventId: string;
-  packageType: string;
-  targetCategories: string[];
-  amount: number;
-  duration: number;
+  paymentTransactionId: string;
 };
 
-/** Logged-in exhibitor only: create promotion if they have a booth for the event. */
+/** Logged-in exhibitor only: create promotion after verified Razorpay payment. */
 export async function createExhibitorPromotionForSelf(
   viewerUserId: string,
   body: CreateExhibitorPromotionBody,
 ): Promise<
   | { promotion: Awaited<ReturnType<typeof prisma.promotion.create>> }
-  | { error: "FORBIDDEN" | "NOT_FOUND" | "NOT_BOOTH" | "INVALID" }
+  | { error: "FORBIDDEN" | "NOT_FOUND" | "NOT_BOOTH" | "INVALID" | "PAYMENT_REQUIRED" | "PAYMENT_INVALID"; message?: string; status?: number }
 > {
   const resolved = (await resolveExhibitorId(body.exhibitorId)) ?? body.exhibitorId;
   if (!resolved || viewerUserId !== resolved) {
     return { error: "FORBIDDEN" };
   }
 
-  const eventId = body.eventId?.trim();
-  const packageType = body.packageType?.trim();
-  const targetCategories = Array.isArray(body.targetCategories) ? body.targetCategories : [];
-  if (!eventId || !packageType || targetCategories.length === 0) {
-    return { error: "INVALID" };
+  const paymentTransactionId = body.paymentTransactionId?.trim();
+  if (!paymentTransactionId) {
+    return { error: "PAYMENT_REQUIRED" };
   }
 
-  const amount = Number(body.amount);
-  const duration = Number(body.duration);
-  if (!Number.isFinite(amount) || amount <= 0 || !Number.isFinite(duration) || duration <= 0) {
+  const { loadPaidPromotionPayment, linkPaymentToPromotion } = await import(
+    "../payments/payments.service"
+  );
+
+  const payment = await loadPaidPromotionPayment(paymentTransactionId, viewerUserId, {
+    channel: "EXHIBITOR",
+    exhibitorId: resolved,
+  });
+
+  if ("error" in payment) {
+    return { error: "PAYMENT_INVALID", message: payment.error, status: payment.status };
+  }
+
+  const eventId = payment.eventId?.trim();
+  if (!eventId || payment.targetCategories.length === 0) {
     return { error: "INVALID" };
   }
 
@@ -1014,17 +1020,17 @@ export async function createExhibitorPromotionForSelf(
 
   const startDate = new Date();
   const endDate = new Date();
-  endDate.setDate(endDate.getDate() + Math.floor(duration));
+  endDate.setDate(endDate.getDate() + payment.durationDays);
 
   const promotion = await prisma.promotion.create({
     data: {
       exhibitorId: resolved,
       eventId,
       organizerId: null,
-      packageType,
-      targetCategories,
-      amount,
-      duration: Math.floor(duration),
+      packageType: payment.packageType,
+      targetCategories: payment.targetCategories,
+      amount: payment.amountInr,
+      duration: payment.durationDays,
       startDate,
       endDate,
       status: "PENDING",
@@ -1033,6 +1039,8 @@ export async function createExhibitorPromotionForSelf(
       conversions: 0,
     },
   });
+
+  await linkPaymentToPromotion(payment.id, promotion.id);
 
   return { promotion };
 }
