@@ -168,11 +168,20 @@ export async function loadPaidPromotionPayment(
     return { error: "Payment event mismatch", status: 400 };
   }
 
-  if (expected.organizerId && payment.organizerId !== expected.organizerId) {
+  // Optional IDs: only enforce when stored on the payment record at checkout time.
+  if (
+    expected.organizerId &&
+    payment.organizerId &&
+    payment.organizerId !== expected.organizerId
+  ) {
     return { error: "Payment organizer mismatch", status: 400 };
   }
 
-  if (expected.exhibitorId && payment.exhibitorId !== expected.exhibitorId) {
+  if (
+    expected.exhibitorId &&
+    payment.exhibitorId &&
+    payment.exhibitorId !== expected.exhibitorId
+  ) {
     return { error: "Payment exhibitor mismatch", status: 400 };
   }
 

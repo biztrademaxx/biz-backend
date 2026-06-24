@@ -1805,7 +1805,6 @@ export async function createPromotion(
   const payment = await loadPaidPromotionPayment(paymentTransactionId, userId, {
     channel: "EVENT",
     eventId,
-    organizerId: event.organizerId,
   });
 
   if ("error" in payment) {

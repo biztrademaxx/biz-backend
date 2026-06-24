@@ -1590,7 +1590,6 @@ async function createPromotion(eventId, userId, body) {
     const payment = await loadPaidPromotionPayment(paymentTransactionId, userId, {
         channel: "EVENT",
         eventId,
-        organizerId: event.organizerId,
     });
     if ("error" in payment) {
         return { error: "PAYMENT_INVALID", message: payment.error, status: payment.status };
