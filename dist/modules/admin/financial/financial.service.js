@@ -10,6 +10,7 @@ exports.listInvoices = listInvoices;
 exports.listPromotionPackages = listPromotionPackages;
 const prisma_1 = __importDefault(require("../../../config/prisma"));
 const admin_response_1 = require("../../../lib/admin-response");
+const plan_catalog_1 = require("../../subscriptions/plan-catalog");
 /** Admin financial UIs filter client-side; allow larger page sizes. */
 function parseFinancialListQuery(query) {
     const base = (0, admin_response_1.parseListQuery)(query);
@@ -46,57 +47,213 @@ function userDisplayName(u) {
     const n = `${u.firstName} ${u.lastName}`.trim();
     return n || u.email || "User";
 }
+function mapPaymentTxStatus(status) {
+    const u = status.toUpperCase();
+    if (u === "PAID" || u === "CONSUMED")
+        return "COMPLETED";
+    if (u === "FAILED")
+        return "FAILED";
+    if (u === "CREATED")
+        return "PENDING";
+    return "PENDING";
+}
+function mapPaymentTxInvoiceStatus(p) {
+    const u = p.status.toUpperCase();
+    if (u === "PAID" || u === "CONSUMED")
+        return "paid";
+    if (u === "FAILED")
+        return "cancelled";
+    if (u === "CREATED") {
+        const due = new Date(p.createdAt.getTime() + 7 * 24 * 60 * 60 * 1000);
+        if (due < new Date())
+            return "overdue";
+        return "pending";
+    }
+    return "pending";
+}
+function paymentTxDescription(p) {
+    if (p.purpose === "SUBSCRIPTION") {
+        const name = p.planName ?? p.planSlug ?? "Dashboard plan";
+        const role = p.subscriptionRole ? ` (${p.subscriptionRole})` : "";
+        return `${name}${role}`;
+    }
+    if (p.purpose === "PROMOTION") {
+        const pkg = p.packageType ?? "Promotion package";
+        const channel = p.promotionChannel ? ` — ${p.promotionChannel}` : "";
+        return `${pkg}${channel}`;
+    }
+    return "Payment";
+}
+function paymentTxType(p) {
+    if (p.purpose === "SUBSCRIPTION")
+        return "SUBSCRIPTION";
+    if (p.purpose === "PROMOTION")
+        return "PROMOTION";
+    return p.purpose.toUpperCase();
+}
+function buildPaymentTxSearchWhere(search) {
+    if (!search.length)
+        return {};
+    return {
+        OR: [
+            { user: { email: { contains: search, mode: "insensitive" } } },
+            { user: { firstName: { contains: search, mode: "insensitive" } } },
+            { user: { lastName: { contains: search, mode: "insensitive" } } },
+            { razorpayOrderId: { contains: search, mode: "insensitive" } },
+            { razorpayPaymentId: { contains: search, mode: "insensitive" } },
+            { planName: { contains: search, mode: "insensitive" } },
+            { planSlug: { contains: search, mode: "insensitive" } },
+            { packageType: { contains: search, mode: "insensitive" } },
+        ],
+    };
+}
+function mapPaymentTxToTransaction(p) {
+    const u = p.user;
+    const st = mapPaymentTxStatus(p.status);
+    return {
+        id: p.id,
+        transactionId: p.razorpayPaymentId ?? p.razorpayOrderId ?? `TXN-${p.id.slice(0, 8).toUpperCase()}`,
+        userId: p.userId,
+        userName: userDisplayName(u),
+        userEmail: u.email ?? "",
+        amount: p.amountInr,
+        currency: p.currency ?? "INR",
+        status: st,
+        gateway: (p.provider ?? "RAZORPAY").toUpperCase(),
+        gatewayTransactionId: p.razorpayPaymentId ?? p.razorpayOrderId,
+        description: paymentTxDescription(p),
+        type: paymentTxType(p),
+        createdAt: (p.paidAt ?? p.createdAt).toISOString(),
+        refundAmount: undefined,
+        refundReason: undefined,
+        refundedAt: undefined,
+    };
+}
+function mapPaymentTxToInvoice(p) {
+    const u = p.user;
+    const invStatus = mapPaymentTxInvoiceStatus(p);
+    const amount = p.amountInr;
+    const invoiceDate = p.createdAt;
+    const dueDate = new Date(p.createdAt.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const description = paymentTxDescription(p);
+    return {
+        id: p.id,
+        invoiceNumber: `INV-${p.id.slice(0, 8).toUpperCase()}`,
+        userId: p.userId,
+        userName: userDisplayName(u),
+        userEmail: u.email ?? "",
+        amount,
+        currency: p.currency ?? "INR",
+        status: invStatus,
+        invoiceDate: invoiceDate.toISOString(),
+        dueDate: dueDate.toISOString(),
+        paidDate: invStatus === "paid" && p.paidAt ? p.paidAt.toISOString() : undefined,
+        paymentMethod: "razorpay",
+        description,
+        items: [
+            {
+                description,
+                quantity: 1,
+                unitPrice: amount,
+                total: amount,
+            },
+        ],
+        subtotal: amount,
+        tax: 0,
+        total: amount,
+    };
+}
+function mapPaymentTxToPayment(p) {
+    const u = p.user;
+    const st = mapPaymentTxStatus(p.status);
+    return {
+        id: p.id,
+        userId: p.userId,
+        userName: userDisplayName(u),
+        userEmail: u.email ?? "",
+        amount: p.amountInr,
+        currency: p.currency ?? "INR",
+        status: st,
+        gateway: (p.provider ?? "RAZORPAY").toUpperCase(),
+        gatewayTransactionId: p.razorpayPaymentId ?? p.razorpayOrderId,
+        description: paymentTxDescription(p),
+        refundAmount: null,
+        refundReason: null,
+        refundedAt: null,
+        createdAt: p.createdAt.toISOString(),
+        updatedAt: p.updatedAt.toISOString(),
+        type: paymentTxType(p),
+        eventRegistrationsCount: 0,
+        venueBookingsCount: 0,
+    };
+}
+function buildRegistrationSearchWhere(search) {
+    if (!search.length)
+        return {};
+    return {
+        OR: [
+            { user: { email: { contains: search, mode: "insensitive" } } },
+            { user: { firstName: { contains: search, mode: "insensitive" } } },
+            { user: { lastName: { contains: search, mode: "insensitive" } } },
+            { event: { title: { contains: search, mode: "insensitive" } } },
+        ],
+    };
+}
+function sortByDateDesc(rows) {
+    return [...rows].sort((a, b) => {
+        const da = new Date(a.createdAt ?? a.invoiceDate ?? 0).getTime();
+        const db = new Date(b.createdAt ?? b.invoiceDate ?? 0).getTime();
+        return db - da;
+    });
+}
 async function listTransactions(query) {
     const { page, limit, skip, search, status } = parseFinancialListQuery(query);
-    const searchFilter = search.length > 0
-        ? {
-            OR: [
-                { user: { email: { contains: search, mode: "insensitive" } } },
-                { user: { firstName: { contains: search, mode: "insensitive" } } },
-                { user: { lastName: { contains: search, mode: "insensitive" } } },
-                { event: { title: { contains: search, mode: "insensitive" } } },
-            ],
-        }
-        : {};
-    const where = { ...searchFilter };
-    const [total, registrations] = await Promise.all([
-        prisma_1.default.eventRegistration.count({ where }),
+    const [paymentRows, registrations] = await Promise.all([
+        prisma_1.default.paymentTransaction.findMany({
+            where: buildPaymentTxSearchWhere(search),
+            orderBy: { createdAt: "desc" },
+            include: { user: true },
+        }),
         prisma_1.default.eventRegistration.findMany({
-            where,
-            skip,
-            take: limit,
+            where: buildRegistrationSearchWhere(search),
             orderBy: { registeredAt: "desc" },
             include: { user: true, event: { select: { title: true } } },
         }),
     ]);
-    let rows = registrations.map((r) => {
-        const st = mapRegPaymentStatus(r.status);
-        const u = r.user;
-        return {
-            id: r.id,
-            transactionId: `TXN-REG-${r.id.slice(0, 8)}`,
-            userId: r.userId,
-            userName: userDisplayName(u),
-            userEmail: u.email ?? "",
-            amount: r.totalAmount ?? 0,
-            currency: r.currency ?? "USD",
-            status: st,
-            gateway: "STRIPE",
-            gatewayTransactionId: `ch_reg_${r.id.replace(/-/g, "").slice(0, 24)}`,
-            description: r.event?.title ? `Event registration: ${r.event.title}` : "Event registration",
-            type: "REGISTRATION",
-            createdAt: r.registeredAt.toISOString(),
-            refundAmount: undefined,
-            refundReason: undefined,
-            refundedAt: undefined,
-        };
-    });
+    let rows = [
+        ...paymentRows.map(mapPaymentTxToTransaction),
+        ...registrations.map((r) => {
+            const st = mapRegPaymentStatus(r.status);
+            const u = r.user;
+            return {
+                id: r.id,
+                transactionId: `TXN-REG-${r.id.slice(0, 8)}`,
+                userId: r.userId,
+                userName: userDisplayName(u),
+                userEmail: u.email ?? "",
+                amount: r.totalAmount ?? 0,
+                currency: r.currency ?? "USD",
+                status: st,
+                gateway: "STRIPE",
+                gatewayTransactionId: `ch_reg_${r.id.replace(/-/g, "").slice(0, 24)}`,
+                description: r.event?.title ? `Event registration: ${r.event.title}` : "Event registration",
+                type: "REGISTRATION",
+                createdAt: r.registeredAt.toISOString(),
+                refundAmount: undefined,
+                refundReason: undefined,
+                refundedAt: undefined,
+            };
+        }),
+    ];
     if (status && status !== "all") {
         const su = status.toUpperCase();
         rows = rows.filter((t) => t.status === su || t.status === status);
     }
+    rows = sortByDateDesc(rows);
+    const total = rows.length;
+    const data = rows.slice(skip, skip + limit);
     return {
-        data: rows,
+        data,
         pagination: {
             page,
             limit,
@@ -107,49 +264,52 @@ async function listTransactions(query) {
 }
 async function listPayments(query) {
     const { page, limit, skip, search, status } = parseFinancialListQuery(query);
-    const searchFilter = search.length > 0
-        ? {
-            OR: [
-                { user: { email: { contains: search, mode: "insensitive" } } },
-                { user: { firstName: { contains: search, mode: "insensitive" } } },
-                { user: { lastName: { contains: search, mode: "insensitive" } } },
-            ],
-        }
-        : {};
-    const where = { ...searchFilter };
-    const [total, rows] = await Promise.all([
-        prisma_1.default.eventRegistration.count({ where }),
+    const [paymentRows, registrations] = await Promise.all([
+        prisma_1.default.paymentTransaction.findMany({
+            where: buildPaymentTxSearchWhere(search),
+            orderBy: { createdAt: "desc" },
+            include: { user: true },
+        }),
         prisma_1.default.eventRegistration.findMany({
-            where,
-            skip,
-            take: limit,
+            where: buildRegistrationSearchWhere(search),
             orderBy: { registeredAt: "desc" },
             include: { user: true, event: { select: { title: true } } },
         }),
     ]);
-    const data = rows.map((r) => {
-        const st = mapRegPaymentStatus(r.status);
-        const u = r.user;
-        return {
-            id: r.id,
-            userId: r.userId,
-            userName: userDisplayName(u),
-            userEmail: u.email ?? "",
-            amount: r.totalAmount ?? 0,
-            currency: r.currency ?? "USD",
-            status: st,
-            gateway: "STRIPE",
-            gatewayTransactionId: `ch_reg_${r.id.replace(/-/g, "").slice(0, 24)}`,
-            description: r.event?.title ? `Registration — ${r.event.title}` : "Event registration",
-            refundAmount: st === "REFUNDED" || st === "PARTIALLY_REFUNDED" ? r.totalAmount ?? 0 : null,
-            refundReason: null,
-            refundedAt: null,
-            createdAt: r.registeredAt.toISOString(),
-            updatedAt: r.updatedAt.toISOString(),
-            eventRegistrationsCount: 1,
-            venueBookingsCount: 0,
-        };
-    });
+    let rows = [
+        ...paymentRows.map(mapPaymentTxToPayment),
+        ...registrations.map((r) => {
+            const st = mapRegPaymentStatus(r.status);
+            const u = r.user;
+            return {
+                id: r.id,
+                userId: r.userId,
+                userName: userDisplayName(u),
+                userEmail: u.email ?? "",
+                amount: r.totalAmount ?? 0,
+                currency: r.currency ?? "USD",
+                status: st,
+                gateway: "STRIPE",
+                gatewayTransactionId: `ch_reg_${r.id.replace(/-/g, "").slice(0, 24)}`,
+                description: r.event?.title ? `Registration — ${r.event.title}` : "Event registration",
+                refundAmount: st === "REFUNDED" || st === "PARTIALLY_REFUNDED" ? r.totalAmount ?? 0 : null,
+                refundReason: null,
+                refundedAt: null,
+                createdAt: r.registeredAt.toISOString(),
+                updatedAt: r.updatedAt.toISOString(),
+                type: "REGISTRATION",
+                eventRegistrationsCount: 1,
+                venueBookingsCount: 0,
+            };
+        }),
+    ];
+    if (status && status !== "all") {
+        const su = status.toUpperCase();
+        rows = rows.filter((p) => p.status === su || p.status === status);
+    }
+    rows = sortByDateDesc(rows);
+    const total = rows.length;
+    const data = rows.slice(skip, skip + limit);
     return {
         data,
         pagination: {
@@ -197,6 +357,9 @@ async function ensureSubscriptionPlans() {
     });
 }
 async function seedDemoSubscriptionsIfEmpty() {
+    const realCount = await prisma_1.default.userPlanSubscription.count();
+    if (realCount > 0)
+        return;
     const c = await prisma_1.default.adminUserSubscription.count();
     if (c > 0)
         return;
@@ -226,6 +389,77 @@ async function listSubscriptions(query) {
     await ensureSubscriptionPlans();
     await seedDemoSubscriptionsIfEmpty();
     const { page, limit, skip, search, status } = parseFinancialListQuery(query);
+    const dashboardCount = await prisma_1.default.userPlanSubscription.count();
+    if (dashboardCount > 0) {
+        const whereDash = {};
+        if (search.length > 0) {
+            whereDash.OR = [
+                { user: { email: { contains: search, mode: "insensitive" } } },
+                { user: { firstName: { contains: search, mode: "insensitive" } } },
+                { user: { lastName: { contains: search, mode: "insensitive" } } },
+                { planName: { contains: search, mode: "insensitive" } },
+                { planSlug: { contains: search, mode: "insensitive" } },
+            ];
+        }
+        if (status && status !== "all") {
+            whereDash.status = status.toUpperCase();
+        }
+        const [total, subs] = await Promise.all([
+            prisma_1.default.userPlanSubscription.count({ where: whereDash }),
+            prisma_1.default.userPlanSubscription.findMany({
+                where: whereDash,
+                skip,
+                take: limit,
+                orderBy: { createdAt: "desc" },
+                include: { user: true, paymentTransaction: true },
+            }),
+        ]);
+        const data = subs.map((s) => {
+            const u = s.user;
+            const catalog = (0, plan_catalog_1.getCatalogPlan)(s.role, s.planSlug);
+            const billingKind = catalog?.billingKind ?? "ONE_TIME";
+            const planType = (0, plan_catalog_1.billingKindToPlanType)(billingKind);
+            const end = s.expiresAt ??
+                (billingKind === "YEARLY"
+                    ? new Date(s.startedAt.getTime() + 365 * 24 * 60 * 60 * 1000)
+                    : null);
+            return {
+                id: s.id,
+                userId: s.userId,
+                userName: userDisplayName(u),
+                userEmail: u.email ?? "",
+                userRole: s.role,
+                planName: s.planName,
+                planSlug: s.planSlug,
+                planType,
+                amount: s.amountInr,
+                currency: "INR",
+                status: s.status,
+                startDate: s.startedAt.toISOString(),
+                endDate: end?.toISOString() ?? null,
+                nextBillingDate: billingKind === "YEARLY" ? end?.toISOString() ?? null : null,
+                autoRenew: false,
+                paymentMethod: s.paymentTransactionId ? "RAZORPAY" : "FREE",
+                transactionId: s.paymentTransaction?.razorpayPaymentId ??
+                    s.paymentTransaction?.razorpayOrderId ??
+                    (s.paymentTransactionId ? `pay_${s.paymentTransactionId.slice(0, 8)}` : `free_${s.id.slice(0, 8)}`),
+                features: catalog ? [catalog.billingNote, `${s.role} dashboard plan`] : ["Dashboard plan"],
+                cancelledAt: s.status === "SUPERSEDED" ? s.updatedAt.toISOString() : null,
+                cancellationReason: s.status === "SUPERSEDED" ? "Upgraded or changed plan" : null,
+                createdAt: s.createdAt.toISOString(),
+                source: "DASHBOARD_PLAN",
+            };
+        });
+        return {
+            data,
+            pagination: {
+                page,
+                limit,
+                total,
+                totalPages: Math.ceil(total / limit) || 1,
+            },
+        };
+    }
     const whereSubs = {};
     if (search.length > 0) {
         whereSubs.OR = [
@@ -294,59 +528,63 @@ async function listSubscriptions(query) {
 }
 async function listInvoices(query) {
     const { page, limit, skip, search, status } = parseFinancialListQuery(query);
-    const searchFilter = search.length > 0
-        ? {
-            OR: [
-                { user: { email: { contains: search, mode: "insensitive" } } },
-                { user: { firstName: { contains: search, mode: "insensitive" } } },
-                { user: { lastName: { contains: search, mode: "insensitive" } } },
-            ],
-        }
-        : {};
-    const where = { ...searchFilter };
-    const [total, rows] = await Promise.all([
-        prisma_1.default.eventRegistration.count({ where }),
+    const [paymentRows, registrations] = await Promise.all([
+        prisma_1.default.paymentTransaction.findMany({
+            where: {
+                ...buildPaymentTxSearchWhere(search),
+                amountInr: { gt: 0 },
+            },
+            orderBy: { createdAt: "desc" },
+            include: { user: true },
+        }),
         prisma_1.default.eventRegistration.findMany({
-            where,
-            skip,
-            take: limit,
+            where: buildRegistrationSearchWhere(search),
             orderBy: { registeredAt: "desc" },
             include: { user: true, event: { select: { title: true } } },
         }),
     ]);
-    const data = rows.map((r) => {
-        const u = r.user;
-        const invStatus = mapInvoiceStatus(r.status);
-        const amount = r.totalAmount ?? 0;
-        const qty = r.quantity ?? 1;
-        const unit = qty > 0 ? amount / qty : amount;
-        return {
-            id: r.id,
-            invoiceNumber: `INV-${r.id.slice(0, 8).toUpperCase()}`,
-            userId: r.userId,
-            userName: userDisplayName(u),
-            userEmail: u.email ?? "",
-            amount,
-            currency: r.currency ?? "USD",
-            status: invStatus,
-            invoiceDate: r.registeredAt.toISOString(),
-            dueDate: r.registeredAt.toISOString(),
-            paidDate: invStatus === "paid" ? r.updatedAt.toISOString() : undefined,
-            paymentMethod: "card",
-            description: r.event?.title ? `Ticket — ${r.event.title}` : "Event ticket",
-            items: [
-                {
-                    description: r.event?.title ?? "Event registration",
-                    quantity: qty,
-                    unitPrice: unit,
-                    total: amount,
-                },
-            ],
-            subtotal: amount,
-            tax: 0,
-            total: amount,
-        };
-    });
+    let rows = [
+        ...paymentRows.map(mapPaymentTxToInvoice),
+        ...registrations.map((r) => {
+            const u = r.user;
+            const invStatus = mapInvoiceStatus(r.status);
+            const amount = r.totalAmount ?? 0;
+            const qty = r.quantity ?? 1;
+            const unit = qty > 0 ? amount / qty : amount;
+            return {
+                id: r.id,
+                invoiceNumber: `INV-REG-${r.id.slice(0, 8).toUpperCase()}`,
+                userId: r.userId,
+                userName: userDisplayName(u),
+                userEmail: u.email ?? "",
+                amount,
+                currency: r.currency ?? "USD",
+                status: invStatus,
+                invoiceDate: r.registeredAt.toISOString(),
+                dueDate: r.registeredAt.toISOString(),
+                paidDate: invStatus === "paid" ? r.updatedAt.toISOString() : undefined,
+                paymentMethod: "card",
+                description: r.event?.title ? `Ticket — ${r.event.title}` : "Event ticket",
+                items: [
+                    {
+                        description: r.event?.title ?? "Event registration",
+                        quantity: qty,
+                        unitPrice: unit,
+                        total: amount,
+                    },
+                ],
+                subtotal: amount,
+                tax: 0,
+                total: amount,
+            };
+        }),
+    ];
+    if (status && status !== "all") {
+        rows = rows.filter((inv) => inv.status === status);
+    }
+    rows = sortByDateDesc(rows);
+    const total = rows.length;
+    const data = rows.slice(skip, skip + limit);
     return {
         data,
         pagination: {

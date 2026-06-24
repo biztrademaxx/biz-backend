@@ -31,6 +31,7 @@ import supportUserRouter from "./support-user";
 import contactRouter from "./contact";
 import newsletterPublicRouter from "./newsletter";
 import paymentsRouter from "../modules/payments/payments.routes";
+import subscriptionsRouter from "../modules/subscriptions/subscriptions.routes";
 
 const router = Router();
 
@@ -138,6 +139,9 @@ router.use("/messages", messagesRouter);
 
 // Razorpay payment (create order + verify signature)
 router.use("/", paymentsRouter);
+
+// Dashboard plan subscriptions (Upgrade to Pro)
+router.use("/", subscriptionsRouter);
 
 export default router;
 

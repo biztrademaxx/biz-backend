@@ -43,6 +43,7 @@ export async function createPromotionPaymentOrder(input: CreatePromotionPaymentO
   const record = await prisma.paymentTransaction.create({
     data: {
       userId: input.userId,
+      purpose: "PROMOTION",
       razorpayOrderId: razorpay.orderId,
       amountPaise: razorpay.amount,
       currency: razorpay.currency,
@@ -135,11 +136,17 @@ export type PromotionPaymentExpectation = {
   exhibitorId?: string | null;
 };
 
+export type PaidPromotionPayment = PaymentTransaction & {
+  promotionChannel: string;
+  packageType: string;
+  durationDays: number;
+};
+
 export async function loadPaidPromotionPayment(
   paymentTransactionId: string,
   userId: string,
   expected: PromotionPaymentExpectation,
-): Promise<PaymentTransaction | { error: string; status: number }> {
+): Promise<PaidPromotionPayment | { error: string; status: number }> {
   const payment = await prisma.paymentTransaction.findUnique({
     where: { id: paymentTransactionId },
   });
@@ -185,7 +192,11 @@ export async function loadPaidPromotionPayment(
     return { error: "Payment exhibitor mismatch", status: 400 };
   }
 
-  return payment;
+  if (!payment.promotionChannel || !payment.packageType || payment.durationDays == null) {
+    return { error: "Invalid promotion payment metadata", status: 400 };
+  }
+
+  return payment as PaidPromotionPayment;
 }
 
 export async function linkPaymentToPromotion(paymentTransactionId: string, promotionId: string) {
