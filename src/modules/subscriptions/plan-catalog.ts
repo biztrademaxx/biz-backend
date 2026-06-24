@@ -53,7 +53,7 @@ const EXHIBITOR_PLANS: CatalogPlan[] = [
     slug: "exhibitor-standard",
     role: "EXHIBITOR",
     name: "Standard Plan",
-    amountInr: 10000,
+    amountInr: 1,
     billingNote: "per year",
     billingKind: "YEARLY",
   },
