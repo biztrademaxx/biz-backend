@@ -107,7 +107,7 @@ async function getEventCategoriesBrowseHandler(_req, res) {
 }
 async function getEventsHandler(req, res) {
     try {
-        const { page, limit, category, search, location, startDate, endDate, featured, sort, verified, vip, stats, } = req.query;
+        const { page, limit, category, search, location, startDate, endDate, featured, sort, verified, vip, stats, excludePast, } = req.query;
         // If stats=true, return category stats (backward-compatible behavior)
         if (stats === "true") {
             const data = await (0, events_service_1.getCategoryStats)();
@@ -130,6 +130,7 @@ async function getEventsHandler(req, res) {
             sort: sort ?? "newest",
             verified: verified === "true",
             vip: vip === "true",
+            excludePast: excludePast === "true",
         });
         return res.json({
             success: true,
@@ -797,20 +798,23 @@ async function trackEventMetricsHandler(req, res) {
 }
 async function createPromotionHandler(req, res) {
     try {
+        const userId = req.auth?.sub;
+        if (!userId) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
         const eventId = req.params.id;
         const body = req.body;
-        const packageType = body.packageType ?? "";
-        const targetCategories = Array.isArray(body.targetCategories) ? body.targetCategories : [];
-        const amount = Number(body.amount) || 0;
-        const duration = Number(body.duration) || 0;
-        const result = await (0, events_service_1.createPromotion)(eventId, {
-            packageType,
-            targetCategories,
-            amount,
-            duration,
+        const result = await (0, events_service_1.createPromotion)(eventId, userId, {
+            paymentTransactionId: body.paymentTransactionId ?? "",
         });
         if ("error" in result && result.error === "NOT_FOUND") {
             return res.status(404).json({ error: "Event not found" });
+        }
+        if ("error" in result && result.error === "PAYMENT_REQUIRED") {
+            return res.status(402).json({ error: "Verified payment is required" });
+        }
+        if ("error" in result && result.error === "PAYMENT_INVALID") {
+            return res.status(result.status ?? 402).json({ error: result.message });
         }
         return res.status(201).json(result.promotion);
     }

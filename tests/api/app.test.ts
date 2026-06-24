@@ -18,7 +18,7 @@ describe("Express API", () => {
   describe("GET /api/ (example route)", () => {
     it("returns the public API root message", async () => {
       const res = await request(app).get("/api/").expect(200);
-      expect(res.body).toEqual({ message: "Biz backend API root" });
+      expect(res.body).toEqual({ message: "ok" });
     });
   });
 });

@@ -171,15 +171,17 @@ async function createExhibitorPromotionHandler(req, res) {
         const raw = req.body ?? {};
         const result = await (0, exhibitors_service_1.createExhibitorPromotionForSelf)(viewerUserId, {
             exhibitorId: typeof raw.exhibitorId === "string" ? raw.exhibitorId : "",
-            eventId: typeof raw.eventId === "string" ? raw.eventId : "",
-            packageType: typeof raw.packageType === "string" ? raw.packageType : "",
-            targetCategories: Array.isArray(raw.targetCategories) ? raw.targetCategories : [],
-            amount: Number(raw.amount),
-            duration: Number(raw.duration),
+            paymentTransactionId: typeof raw.paymentTransactionId === "string" ? raw.paymentTransactionId : "",
         });
         if ("error" in result) {
             if (result.error === "FORBIDDEN") {
                 return res.status(403).json({ error: "Forbidden" });
+            }
+            if (result.error === "PAYMENT_REQUIRED") {
+                return res.status(402).json({ error: "Verified payment is required" });
+            }
+            if (result.error === "PAYMENT_INVALID") {
+                return res.status(result.status ?? 402).json({ error: result.message });
             }
             if (result.error === "NOT_FOUND") {
                 return res.status(404).json({ error: "Event not found" });

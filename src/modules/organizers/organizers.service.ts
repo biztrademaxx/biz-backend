@@ -1680,16 +1680,30 @@ export async function getOrganizerPromotionsMarketing(organizerId: string) {
 
 export async function createOrganizerPromotion(
   organizerId: string,
+  userId: string,
   body: {
-    eventId?: string | null;
-    packageType?: string;
-    targetCategories?: string[];
-    amount?: number;
-    duration?: number;
-  }
+    paymentTransactionId?: string;
+  },
 ) {
-  const eventId = body.eventId ?? null;
+  const paymentTransactionId = body.paymentTransactionId?.trim();
+  if (!paymentTransactionId) {
+    return { error: "PAYMENT_REQUIRED" as const };
+  }
 
+  const { loadPaidPromotionPayment, linkPaymentToPromotion } = await import(
+    "../payments/payments.service"
+  );
+
+  const payment = await loadPaidPromotionPayment(paymentTransactionId, userId, {
+    channel: "ORGANIZER",
+    organizerId,
+  });
+
+  if ("error" in payment) {
+    return { error: "PAYMENT_INVALID" as const, message: payment.error, status: payment.status };
+  }
+
+  const eventId = payment.eventId;
   if (!eventId) {
     return { error: "EVENT_REQUIRED" as const };
   }
@@ -1705,17 +1719,16 @@ export async function createOrganizerPromotion(
 
   const startDate = new Date();
   const endDate = new Date();
-  const durationDays = Number(body.duration) || 7;
-  endDate.setDate(endDate.getDate() + durationDays);
+  endDate.setDate(endDate.getDate() + payment.durationDays);
 
   const promotion = await prisma.promotion.create({
     data: {
       organizerId,
       eventId,
-      packageType: body.packageType ?? "CUSTOM",
-      targetCategories: body.targetCategories ?? [],
-      amount: Number(body.amount) || 0,
-      duration: durationDays,
+      packageType: payment.packageType,
+      targetCategories: payment.targetCategories,
+      amount: payment.amountInr,
+      duration: payment.durationDays,
       startDate,
       endDate,
       status: "PENDING",
@@ -1734,6 +1747,8 @@ export async function createOrganizerPromotion(
       },
     },
   });
+
+  await linkPaymentToPromotion(payment.id, promotion.id);
 
   return { promotion };
 }

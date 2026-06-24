@@ -46,6 +46,7 @@ export interface ListEventsParams {
   sort?: string;
   verified?: boolean;
   vip?: boolean;
+  excludePast?: boolean;
 }
 
 export async function listEvents(params: ListEventsParams) {
@@ -109,6 +110,12 @@ async function listEventsFromDb(params: ListEventsParams) {
 
   if (params.vip) {
     andParts.push({ isVIP: true });
+  }
+
+  if (params.excludePast) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    andParts.push({ endDate: { gte: today } });
   }
 
   const where: Prisma.EventWhereInput = { AND: andParts };
@@ -1154,6 +1161,7 @@ export async function listEventExhibitors(eventId: string) {
           phone: true,
           avatar: true,
           company: true,
+          organizationName: true,
           jobTitle: true,
           role: true,
           profileCity: true,
@@ -1242,6 +1250,16 @@ export async function listEventExhibitors(eventId: string) {
     const exhibitor = booth.exhibitor
       ? {
           ...booth.exhibitor,
+          publicSlug: getPublicProfileSlug(
+            {
+              role: "EXHIBITOR",
+              firstName: booth.exhibitor.firstName,
+              lastName: booth.exhibitor.lastName,
+              organizationName: booth.exhibitor.organizationName,
+              company: booth.exhibitor.company,
+            },
+            "EXHIBITOR",
+          ),
           city: loc.city || undefined,
           country: loc.country || undefined,
           locationDisplay: loc.display || undefined,
@@ -1766,26 +1784,45 @@ export async function getEventPromotions(
 
 export async function createPromotion(
   eventId: string,
-  body: { packageType: string; targetCategories: string[]; amount: number; duration: number }
+  userId: string,
+  body: { paymentTransactionId: string },
 ) {
+  const paymentTransactionId = body.paymentTransactionId?.trim();
+  if (!paymentTransactionId) {
+    return { error: "PAYMENT_REQUIRED" as const };
+  }
+
   const event = await prisma.event.findUnique({
     where: { id: eventId },
     select: { id: true, organizerId: true },
   });
   if (!event) return { error: "NOT_FOUND" as const };
 
+  const { loadPaidPromotionPayment, linkPaymentToPromotion } = await import(
+    "../payments/payments.service"
+  );
+
+  const payment = await loadPaidPromotionPayment(paymentTransactionId, userId, {
+    channel: "EVENT",
+    eventId,
+  });
+
+  if ("error" in payment) {
+    return { error: "PAYMENT_INVALID" as const, message: payment.error, status: payment.status };
+  }
+
   const startDate = new Date();
   const endDate = new Date();
-  endDate.setDate(endDate.getDate() + body.duration);
+  endDate.setDate(endDate.getDate() + payment.durationDays);
 
   const promotion = await prisma.promotion.create({
     data: {
       eventId,
       organizerId: event.organizerId,
-      packageType: body.packageType,
-      targetCategories: body.targetCategories ?? [],
-      amount: body.amount,
-      duration: body.duration,
+      packageType: payment.packageType,
+      targetCategories: payment.targetCategories,
+      amount: payment.amountInr,
+      duration: payment.durationDays,
       startDate,
       endDate,
       status: "ACTIVE",
@@ -1796,6 +1833,9 @@ export async function createPromotion(
       },
     },
   });
+
+  await linkPaymentToPromotion(payment.id, promotion.id);
+
   return { promotion };
 }
 

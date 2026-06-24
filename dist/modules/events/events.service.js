@@ -140,6 +140,11 @@ async function listEventsFromDb(params) {
     if (params.vip) {
         andParts.push({ isVIP: true });
     }
+    if (params.excludePast) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        andParts.push({ endDate: { gte: today } });
+    }
     const where = { AND: andParts };
     let orderBy = {};
     switch (params.sort) {
@@ -1066,6 +1071,7 @@ async function listEventExhibitors(eventId) {
                     phone: true,
                     avatar: true,
                     company: true,
+                    organizationName: true,
                     jobTitle: true,
                     role: true,
                     profileCity: true,
@@ -1143,6 +1149,13 @@ async function listEventExhibitors(eventId) {
         const exhibitor = booth.exhibitor
             ? {
                 ...booth.exhibitor,
+                publicSlug: (0, profile_slug_1.getPublicProfileSlug)({
+                    role: "EXHIBITOR",
+                    firstName: booth.exhibitor.firstName,
+                    lastName: booth.exhibitor.lastName,
+                    organizationName: booth.exhibitor.organizationName,
+                    company: booth.exhibitor.company,
+                }, "EXHIBITOR"),
                 city: loc.city || undefined,
                 country: loc.country || undefined,
                 locationDisplay: loc.display || undefined,
@@ -1562,24 +1575,36 @@ async function getEventPromotions(eventId, viewerUserId, viewerRole, viewerDomai
         promotions: promotions.map((p) => sanitizePromotionForViewer(p, canViewMetrics, isAdmin, event.listingClicks)),
     };
 }
-async function createPromotion(eventId, body) {
+async function createPromotion(eventId, userId, body) {
+    const paymentTransactionId = body.paymentTransactionId?.trim();
+    if (!paymentTransactionId) {
+        return { error: "PAYMENT_REQUIRED" };
+    }
     const event = await prisma_1.default.event.findUnique({
         where: { id: eventId },
         select: { id: true, organizerId: true },
     });
     if (!event)
         return { error: "NOT_FOUND" };
+    const { loadPaidPromotionPayment, linkPaymentToPromotion } = await Promise.resolve().then(() => __importStar(require("../payments/payments.service")));
+    const payment = await loadPaidPromotionPayment(paymentTransactionId, userId, {
+        channel: "EVENT",
+        eventId,
+    });
+    if ("error" in payment) {
+        return { error: "PAYMENT_INVALID", message: payment.error, status: payment.status };
+    }
     const startDate = new Date();
     const endDate = new Date();
-    endDate.setDate(endDate.getDate() + body.duration);
+    endDate.setDate(endDate.getDate() + payment.durationDays);
     const promotion = await prisma_1.default.promotion.create({
         data: {
             eventId,
             organizerId: event.organizerId,
-            packageType: body.packageType,
-            targetCategories: body.targetCategories ?? [],
-            amount: body.amount,
-            duration: body.duration,
+            packageType: payment.packageType,
+            targetCategories: payment.targetCategories,
+            amount: payment.amountInr,
+            duration: payment.durationDays,
             startDate,
             endDate,
             status: "ACTIVE",
@@ -1590,6 +1615,7 @@ async function createPromotion(eventId, body) {
             },
         },
     });
+    await linkPaymentToPromotion(payment.id, promotion.id);
     return { promotion };
 }
 // ----- Organizer event update / delete -----

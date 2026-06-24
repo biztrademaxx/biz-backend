@@ -30,12 +30,16 @@ import settingsRouter from "../modules/settings/settings.routes";
 import supportUserRouter from "./support-user";
 import contactRouter from "./contact";
 import newsletterPublicRouter from "./newsletter";
+import paymentsRouter from "../modules/payments/payments.routes";
 
 const router = Router();
 
 // Placeholder root route for the backend API
 router.get("/", (_req, res) => {
-  res.json({ message: "Biz backend API root" });
+  res.json({
+    service: "BizTradeFairs API",
+    status: "healthy",
+  });
 });
 
 // Example API health endpoint
@@ -131,6 +135,9 @@ router.use("/follow", followRouter);
 // Messaging: conversations and messages
 router.use("/conversations", conversationsRouter);
 router.use("/messages", messagesRouter);
+
+// Razorpay payment (create order + verify signature)
+router.use("/", paymentsRouter);
 
 export default router;
 

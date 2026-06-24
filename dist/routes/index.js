@@ -35,10 +35,14 @@ const settings_routes_1 = __importDefault(require("../modules/settings/settings.
 const support_user_1 = __importDefault(require("./support-user"));
 const contact_1 = __importDefault(require("./contact"));
 const newsletter_1 = __importDefault(require("./newsletter"));
+const payments_routes_1 = __importDefault(require("../modules/payments/payments.routes"));
 const router = (0, express_1.Router)();
 // Placeholder root route for the backend API
 router.get("/", (_req, res) => {
-    res.json({ message: "Biz backend API root" });
+    res.json({
+        service: "BizTradeFairs API",
+        status: "healthy",
+    });
 });
 // Example API health endpoint
 router.get("/health", (_req, res) => {
@@ -104,4 +108,6 @@ router.use("/follow", follow_routes_1.default);
 // Messaging: conversations and messages
 router.use("/conversations", conversations_routes_1.default);
 router.use("/messages", messages_routes_1.default);
+// Razorpay payment (create order + verify signature)
+router.use("/", payments_routes_1.default);
 exports.default = router;

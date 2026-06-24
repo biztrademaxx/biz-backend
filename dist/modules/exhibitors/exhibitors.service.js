@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -185,6 +218,24 @@ async function updateExhibitorProfile(id, body, viewerUserId, viewerRole) {
         data.businessPhone = body.businessPhone === "" ? null : body.businessPhone;
     if (body.businessAddress !== undefined)
         data.businessAddress = body.businessAddress === "" ? null : body.businessAddress;
+    const foundedRaw = body.founded ?? body.foundedYear;
+    if (foundedRaw !== undefined) {
+        data.founded = foundedRaw === "" ? null : String(foundedRaw).trim();
+    }
+    const teamSizeRaw = body.teamSize ?? body.companySize;
+    if (teamSizeRaw !== undefined) {
+        data.teamSize = teamSizeRaw === "" ? null : String(teamSizeRaw).trim();
+    }
+    const industryRaw = body.companyIndustry ?? body.industry;
+    if (industryRaw !== undefined) {
+        data.companyIndustry = industryRaw === "" ? null : String(industryRaw).trim();
+    }
+    if (body.headquarters !== undefined) {
+        data.headquarters = body.headquarters === "" ? null : String(body.headquarters).trim();
+    }
+    if (body.specialties !== undefined && Array.isArray(body.specialties)) {
+        data.specialties = body.specialties.map((s) => String(s).trim()).filter(Boolean);
+    }
     const locObj = body.location && typeof body.location === "object" && !Array.isArray(body.location)
         ? body.location
         : null;
@@ -250,6 +301,61 @@ async function updateExhibitorProfile(id, body, viewerUserId, viewerRole) {
     await (0, redis_1.invalidateExhibitorCaches)({ id: resolvedId, slug: publicSlug });
     return getExhibitorByIdFromDb(resolvedId, resolvedId);
 }
+function scoreExhibitorProfileCompleteness(user) {
+    let score = 0;
+    if (user.isVerified)
+        score += 1000;
+    if (String(user.website ?? "").trim())
+        score += 50;
+    if (String(user.founded ?? "").trim())
+        score += 20;
+    if (String(user.teamSize ?? "").trim())
+        score += 20;
+    if (String(user.companyIndustry ?? "").trim())
+        score += 20;
+    if (String(user.headquarters ?? "").trim())
+        score += 15;
+    if (String(user.bio ?? "").trim())
+        score += 10;
+    return score;
+}
+/** When multiple exhibitors share the same public slug, pick the best match for display. */
+async function pickExhibitorFromSlugHits(hits, viewerUserId) {
+    if (hits.length === 0)
+        return null;
+    if (hits.length === 1)
+        return hits[0].u.id;
+    const viewerRaw = String(viewerUserId ?? "").trim().toLowerCase();
+    if (viewerRaw) {
+        const selfHit = hits.find((h) => h.u.id.toLowerCase() === viewerRaw);
+        if (selfHit)
+            return selfHit.u.id;
+    }
+    const ids = hits.map((h) => h.u.id);
+    const profiles = await prisma_1.default.user.findMany({
+        where: { id: { in: ids }, role: "EXHIBITOR" },
+        select: {
+            id: true,
+            isVerified: true,
+            website: true,
+            founded: true,
+            teamSize: true,
+            companyIndustry: true,
+            headquarters: true,
+            bio: true,
+            updatedAt: true,
+        },
+    });
+    if (profiles.length === 0)
+        return hits[0].u.id;
+    profiles.sort((a, b) => {
+        const scoreDiff = scoreExhibitorProfileCompleteness(b) - scoreExhibitorProfileCompleteness(a);
+        if (scoreDiff !== 0)
+            return scoreDiff;
+        return b.updatedAt.getTime() - a.updatedAt.getTime();
+    });
+    return profiles[0]?.id ?? hits[0].u.id;
+}
 // Single exhibitor (read-only) – shape for public exhibitor page
 async function resolveExhibitorId(identifier, viewerUserId, viewerRole) {
     const raw = String(identifier || "").trim();
@@ -283,18 +389,14 @@ async function resolveExhibitorId(identifier, viewerUserId, viewerRole) {
         return exactHits[0].u.id;
     if (exactHits.length > 1) {
         const narrowed = exactHits.filter((x) => x.candidates[0] === targetSlug);
-        if (narrowed.length === 1)
-            return narrowed[0].u.id;
-        return null;
+        return pickExhibitorFromSlugHits(narrowed.length > 0 ? narrowed : exactHits, viewerUserId);
     }
     const looseHits = withCandidates.filter((x) => x.candidates.some((c) => (0, profile_slug_1.publicSlugRequestMatches)(c, targetSlug)));
     if (looseHits.length === 1)
         return looseHits[0].u.id;
     if (looseHits.length > 1) {
         const narrowed = looseHits.filter((x) => x.candidates.some((c) => c === targetSlug));
-        if (narrowed.length === 1)
-            return narrowed[0].u.id;
-        return null;
+        return pickExhibitorFromSlugHits(narrowed.length > 0 ? narrowed : looseHits, viewerUserId);
     }
     const viewerRaw = String(viewerUserId ?? "").trim();
     if (viewerRaw && ((0, profile_slug_1.isMongoObjectId)(viewerRaw) || (0, profile_slug_1.isUuidLike)(viewerRaw) || (0, profile_slug_1.isUuidSegment)(viewerRaw))) {
@@ -726,21 +828,26 @@ async function getExhibitorPromotionsMarketingForSelf(exhibitorId, viewerUserId)
         events: Array.from(eventsMap.values()),
     };
 }
-/** Logged-in exhibitor only: create promotion if they have a booth for the event. */
+/** Logged-in exhibitor only: create promotion after verified Razorpay payment. */
 async function createExhibitorPromotionForSelf(viewerUserId, body) {
     const resolved = (await resolveExhibitorId(body.exhibitorId)) ?? body.exhibitorId;
     if (!resolved || viewerUserId !== resolved) {
         return { error: "FORBIDDEN" };
     }
-    const eventId = body.eventId?.trim();
-    const packageType = body.packageType?.trim();
-    const targetCategories = Array.isArray(body.targetCategories) ? body.targetCategories : [];
-    if (!eventId || !packageType || targetCategories.length === 0) {
-        return { error: "INVALID" };
+    const paymentTransactionId = body.paymentTransactionId?.trim();
+    if (!paymentTransactionId) {
+        return { error: "PAYMENT_REQUIRED" };
     }
-    const amount = Number(body.amount);
-    const duration = Number(body.duration);
-    if (!Number.isFinite(amount) || amount <= 0 || !Number.isFinite(duration) || duration <= 0) {
+    const { loadPaidPromotionPayment, linkPaymentToPromotion } = await Promise.resolve().then(() => __importStar(require("../payments/payments.service")));
+    const payment = await loadPaidPromotionPayment(paymentTransactionId, viewerUserId, {
+        channel: "EXHIBITOR",
+        exhibitorId: resolved,
+    });
+    if ("error" in payment) {
+        return { error: "PAYMENT_INVALID", message: payment.error, status: payment.status };
+    }
+    const eventId = payment.eventId?.trim();
+    if (!eventId || payment.targetCategories.length === 0) {
         return { error: "INVALID" };
     }
     const booth = await prisma_1.default.exhibitorBooth.findFirst({
@@ -759,16 +866,16 @@ async function createExhibitorPromotionForSelf(viewerUserId, body) {
     }
     const startDate = new Date();
     const endDate = new Date();
-    endDate.setDate(endDate.getDate() + Math.floor(duration));
+    endDate.setDate(endDate.getDate() + payment.durationDays);
     const promotion = await prisma_1.default.promotion.create({
         data: {
             exhibitorId: resolved,
             eventId,
             organizerId: null,
-            packageType,
-            targetCategories,
-            amount,
-            duration: Math.floor(duration),
+            packageType: payment.packageType,
+            targetCategories: payment.targetCategories,
+            amount: payment.amountInr,
+            duration: payment.durationDays,
             startDate,
             endDate,
             status: "PENDING",
@@ -777,6 +884,7 @@ async function createExhibitorPromotionForSelf(viewerUserId, body) {
             conversions: 0,
         },
     });
+    await linkPaymentToPromotion(payment.id, promotion.id);
     return { promotion };
 }
 // --- Exhibitor reviews ---

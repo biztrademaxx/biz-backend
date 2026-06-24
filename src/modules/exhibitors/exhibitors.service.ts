@@ -189,6 +189,14 @@ export async function updateExhibitorProfile(
     businessEmail?: string;
     businessPhone?: string;
     businessAddress?: string;
+    founded?: string;
+    foundedYear?: string;
+    teamSize?: string;
+    companySize?: string;
+    companyIndustry?: string;
+    industry?: string;
+    headquarters?: string;
+    specialties?: string[];
   },
   viewerUserId?: string | null,
   viewerRole?: string | null,
@@ -226,6 +234,25 @@ export async function updateExhibitorProfile(
   if (body.businessEmail !== undefined) data.businessEmail = body.businessEmail === "" ? null : (body.businessEmail as string);
   if (body.businessPhone !== undefined) data.businessPhone = body.businessPhone === "" ? null : (body.businessPhone as string);
   if (body.businessAddress !== undefined) data.businessAddress = body.businessAddress === "" ? null : (body.businessAddress as string);
+
+  const foundedRaw = body.founded ?? body.foundedYear;
+  if (foundedRaw !== undefined) {
+    data.founded = foundedRaw === "" ? null : String(foundedRaw).trim();
+  }
+  const teamSizeRaw = body.teamSize ?? body.companySize;
+  if (teamSizeRaw !== undefined) {
+    data.teamSize = teamSizeRaw === "" ? null : String(teamSizeRaw).trim();
+  }
+  const industryRaw = body.companyIndustry ?? body.industry;
+  if (industryRaw !== undefined) {
+    data.companyIndustry = industryRaw === "" ? null : String(industryRaw).trim();
+  }
+  if (body.headquarters !== undefined) {
+    data.headquarters = body.headquarters === "" ? null : String(body.headquarters).trim();
+  }
+  if (body.specialties !== undefined && Array.isArray(body.specialties)) {
+    data.specialties = body.specialties.map((s) => String(s).trim()).filter(Boolean);
+  }
 
   const locObj =
     body.location && typeof body.location === "object" && !Array.isArray(body.location)
@@ -310,6 +337,78 @@ export async function updateExhibitorProfile(
   return getExhibitorByIdFromDb(resolvedId, resolvedId);
 }
 
+type ExhibitorSlugHit = {
+  u: {
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+    organizationName: string | null;
+    company: string | null;
+  };
+};
+
+function scoreExhibitorProfileCompleteness(user: {
+  isVerified?: boolean;
+  website?: string | null;
+  founded?: string | null;
+  teamSize?: string | null;
+  companyIndustry?: string | null;
+  headquarters?: string | null;
+  bio?: string | null;
+  updatedAt?: Date;
+}): number {
+  let score = 0;
+  if (user.isVerified) score += 1000;
+  if (String(user.website ?? "").trim()) score += 50;
+  if (String(user.founded ?? "").trim()) score += 20;
+  if (String(user.teamSize ?? "").trim()) score += 20;
+  if (String(user.companyIndustry ?? "").trim()) score += 20;
+  if (String(user.headquarters ?? "").trim()) score += 15;
+  if (String(user.bio ?? "").trim()) score += 10;
+  return score;
+}
+
+/** When multiple exhibitors share the same public slug, pick the best match for display. */
+async function pickExhibitorFromSlugHits(
+  hits: ExhibitorSlugHit[],
+  viewerUserId?: string | null,
+): Promise<string | null> {
+  if (hits.length === 0) return null;
+  if (hits.length === 1) return hits[0].u.id;
+
+  const viewerRaw = String(viewerUserId ?? "").trim().toLowerCase();
+  if (viewerRaw) {
+    const selfHit = hits.find((h) => h.u.id.toLowerCase() === viewerRaw);
+    if (selfHit) return selfHit.u.id;
+  }
+
+  const ids = hits.map((h) => h.u.id);
+  const profiles = await prisma.user.findMany({
+    where: { id: { in: ids }, role: "EXHIBITOR" },
+    select: {
+      id: true,
+      isVerified: true,
+      website: true,
+      founded: true,
+      teamSize: true,
+      companyIndustry: true,
+      headquarters: true,
+      bio: true,
+      updatedAt: true,
+    },
+  });
+
+  if (profiles.length === 0) return hits[0].u.id;
+
+  profiles.sort((a, b) => {
+    const scoreDiff = scoreExhibitorProfileCompleteness(b) - scoreExhibitorProfileCompleteness(a);
+    if (scoreDiff !== 0) return scoreDiff;
+    return b.updatedAt.getTime() - a.updatedAt.getTime();
+  });
+
+  return profiles[0]?.id ?? hits[0].u.id;
+}
+
 // Single exhibitor (read-only) – shape for public exhibitor page
 async function resolveExhibitorId(
   identifier: string,
@@ -345,8 +444,7 @@ async function resolveExhibitorId(
   if (exactHits.length === 1) return exactHits[0].u.id;
   if (exactHits.length > 1) {
     const narrowed = exactHits.filter((x) => x.candidates[0] === targetSlug);
-    if (narrowed.length === 1) return narrowed[0].u.id;
-    return null;
+    return pickExhibitorFromSlugHits(narrowed.length > 0 ? narrowed : exactHits, viewerUserId);
   }
 
   const looseHits = withCandidates.filter((x) =>
@@ -355,8 +453,7 @@ async function resolveExhibitorId(
   if (looseHits.length === 1) return looseHits[0].u.id;
   if (looseHits.length > 1) {
     const narrowed = looseHits.filter((x) => x.candidates.some((c) => c === targetSlug));
-    if (narrowed.length === 1) return narrowed[0].u.id;
-    return null;
+    return pickExhibitorFromSlugHits(narrowed.length > 0 ? narrowed : looseHits, viewerUserId);
   }
 
   const viewerRaw = String(viewerUserId ?? "").trim();
@@ -866,36 +963,42 @@ export async function getExhibitorPromotionsMarketingForSelf(
 
 export type CreateExhibitorPromotionBody = {
   exhibitorId: string;
-  eventId: string;
-  packageType: string;
-  targetCategories: string[];
-  amount: number;
-  duration: number;
+  paymentTransactionId: string;
 };
 
-/** Logged-in exhibitor only: create promotion if they have a booth for the event. */
+/** Logged-in exhibitor only: create promotion after verified Razorpay payment. */
 export async function createExhibitorPromotionForSelf(
   viewerUserId: string,
   body: CreateExhibitorPromotionBody,
 ): Promise<
   | { promotion: Awaited<ReturnType<typeof prisma.promotion.create>> }
-  | { error: "FORBIDDEN" | "NOT_FOUND" | "NOT_BOOTH" | "INVALID" }
+  | { error: "FORBIDDEN" | "NOT_FOUND" | "NOT_BOOTH" | "INVALID" | "PAYMENT_REQUIRED" | "PAYMENT_INVALID"; message?: string; status?: number }
 > {
   const resolved = (await resolveExhibitorId(body.exhibitorId)) ?? body.exhibitorId;
   if (!resolved || viewerUserId !== resolved) {
     return { error: "FORBIDDEN" };
   }
 
-  const eventId = body.eventId?.trim();
-  const packageType = body.packageType?.trim();
-  const targetCategories = Array.isArray(body.targetCategories) ? body.targetCategories : [];
-  if (!eventId || !packageType || targetCategories.length === 0) {
-    return { error: "INVALID" };
+  const paymentTransactionId = body.paymentTransactionId?.trim();
+  if (!paymentTransactionId) {
+    return { error: "PAYMENT_REQUIRED" };
   }
 
-  const amount = Number(body.amount);
-  const duration = Number(body.duration);
-  if (!Number.isFinite(amount) || amount <= 0 || !Number.isFinite(duration) || duration <= 0) {
+  const { loadPaidPromotionPayment, linkPaymentToPromotion } = await import(
+    "../payments/payments.service"
+  );
+
+  const payment = await loadPaidPromotionPayment(paymentTransactionId, viewerUserId, {
+    channel: "EXHIBITOR",
+    exhibitorId: resolved,
+  });
+
+  if ("error" in payment) {
+    return { error: "PAYMENT_INVALID", message: payment.error, status: payment.status };
+  }
+
+  const eventId = payment.eventId?.trim();
+  if (!eventId || payment.targetCategories.length === 0) {
     return { error: "INVALID" };
   }
 
@@ -917,17 +1020,17 @@ export async function createExhibitorPromotionForSelf(
 
   const startDate = new Date();
   const endDate = new Date();
-  endDate.setDate(endDate.getDate() + Math.floor(duration));
+  endDate.setDate(endDate.getDate() + payment.durationDays);
 
   const promotion = await prisma.promotion.create({
     data: {
       exhibitorId: resolved,
       eventId,
       organizerId: null,
-      packageType,
-      targetCategories,
-      amount,
-      duration: Math.floor(duration),
+      packageType: payment.packageType,
+      targetCategories: payment.targetCategories,
+      amount: payment.amountInr,
+      duration: payment.durationDays,
       startDate,
       endDate,
       status: "PENDING",
@@ -936,6 +1039,8 @@ export async function createExhibitorPromotionForSelf(
       conversions: 0,
     },
   });
+
+  await linkPaymentToPromotion(payment.id, promotion.id);
 
   return { promotion };
 }

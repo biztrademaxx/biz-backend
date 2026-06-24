@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -1431,8 +1464,20 @@ async function getOrganizerPromotionsMarketing(organizerId) {
     }));
     return { promotions: transformedPromotions, events: transformedEvents };
 }
-async function createOrganizerPromotion(organizerId, body) {
-    const eventId = body.eventId ?? null;
+async function createOrganizerPromotion(organizerId, userId, body) {
+    const paymentTransactionId = body.paymentTransactionId?.trim();
+    if (!paymentTransactionId) {
+        return { error: "PAYMENT_REQUIRED" };
+    }
+    const { loadPaidPromotionPayment, linkPaymentToPromotion } = await Promise.resolve().then(() => __importStar(require("../payments/payments.service")));
+    const payment = await loadPaidPromotionPayment(paymentTransactionId, userId, {
+        channel: "ORGANIZER",
+        organizerId,
+    });
+    if ("error" in payment) {
+        return { error: "PAYMENT_INVALID", message: payment.error, status: payment.status };
+    }
+    const eventId = payment.eventId;
     if (!eventId) {
         return { error: "EVENT_REQUIRED" };
     }
@@ -1445,16 +1490,15 @@ async function createOrganizerPromotion(organizerId, body) {
     }
     const startDate = new Date();
     const endDate = new Date();
-    const durationDays = Number(body.duration) || 7;
-    endDate.setDate(endDate.getDate() + durationDays);
+    endDate.setDate(endDate.getDate() + payment.durationDays);
     const promotion = await prisma_1.default.promotion.create({
         data: {
             organizerId,
             eventId,
-            packageType: body.packageType ?? "CUSTOM",
-            targetCategories: body.targetCategories ?? [],
-            amount: Number(body.amount) || 0,
-            duration: durationDays,
+            packageType: payment.packageType,
+            targetCategories: payment.targetCategories,
+            amount: payment.amountInr,
+            duration: payment.durationDays,
             startDate,
             endDate,
             status: "PENDING",
@@ -1473,6 +1517,7 @@ async function createOrganizerPromotion(organizerId, body) {
             },
         },
     });
+    await linkPaymentToPromotion(payment.id, promotion.id);
     return { promotion };
 }
 // ---------- Organizer subscription (summary only) ----------
