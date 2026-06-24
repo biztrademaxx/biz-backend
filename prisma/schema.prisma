@@ -419,6 +419,7 @@ model User {
   accountDeactivationRequests AccountDeactivationRequest[]
 
   adminUserSubscriptions AdminUserSubscription[]
+  userPlanSubscriptions UserPlanSubscription[]
 
   supportTickets       SupportTicket[]
   supportTicketReplies SupportTicketReply[]
@@ -919,18 +920,26 @@ model PaymentTransaction {
 
   receipt String
 
-  /// EVENT | ORGANIZER | EXHIBITOR
-  promotionChannel String
+  /// EVENT | ORGANIZER | EXHIBITOR (promotion checkout only)
+  promotionChannel String?
   eventId          String?  @db.Uuid
   organizerId      String?  @db.Uuid
   exhibitorId      String?  @db.Uuid
-  packageType      String
+  packageType      String?
   targetCategories String[] @default([])
-  durationDays     Int
+  durationDays     Int?
   amountInr        Float
+
+  /// VISITOR | EXHIBITOR | ORGANIZER (dashboard plan checkout only)
+  subscriptionRole String?
+  planSlug         String?
+  planName         String?
+  billingNote      String?
 
   promotionId String?    @unique @db.Uuid
   promotion   Promotion? @relation(fields: [promotionId], references: [id], onDelete: SetNull)
+
+  userPlanSubscription UserPlanSubscription?
 
   paidAt    DateTime?
   createdAt DateTime @default(now())
@@ -938,7 +947,37 @@ model PaymentTransaction {
 
   @@index([userId, status])
   @@index([promotionChannel, eventId])
+  @@index([purpose, subscriptionRole])
   @@map("payment_transactions")
+}
+
+/// Paid (or free) dashboard pricing plan per user role — source of truth for Upgrade to Pro.
+model UserPlanSubscription {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// VISITOR | EXHIBITOR | ORGANIZER
+  role       String
+  planSlug   String
+  planName   String
+  billingNote String?
+
+  status    String @default("ACTIVE")
+  amountInr Float  @default(0)
+
+  startedAt DateTime  @default(now())
+  expiresAt DateTime?
+
+  paymentTransactionId String?             @unique @db.Uuid
+  paymentTransaction   PaymentTransaction? @relation(fields: [paymentTransactionId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, role, status])
+  @@index([planSlug])
+  @@map("user_plan_subscriptions")
 }
 
 /// Daily social / offline marketing lead reports uploaded by admin for a promotion.
