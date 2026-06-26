@@ -14,6 +14,7 @@ import {
   trafficSummaryHandler,
   listSeoKeywordsHandler,
   createSeoKeywordHandler,
+  updateEmailTemplateHandler,
   deleteSeoKeywordHandler,
 } from "./marketing.controller";
 
@@ -23,6 +24,7 @@ router.get("/email-campaigns", requireAdmin, listEmailCampaignsHandler);
 router.post("/email-campaigns", requireAdmin, createEmailCampaignHandler);
 router.get("/email-templates", requireAdmin, listEmailTemplatesHandler);
 router.post("/email-templates", requireAdmin, createEmailTemplateHandler);
+router.put("/email-templates/:id", requireAdmin, updateEmailTemplateHandler);
 router.delete("/email-templates/:id", requireAdmin, deleteEmailTemplateHandler);
 router.get("/push-notifications", requireAdmin, listPushNotificationsHandler);
 router.post("/push-notifications", requireAdmin, createPushNotificationHandler);

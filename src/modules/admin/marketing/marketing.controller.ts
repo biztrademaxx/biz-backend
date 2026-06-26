@@ -47,6 +47,33 @@ export async function createEmailTemplateHandler(req: Request, res: Response) {
   }
 }
 
+export async function updateEmailTemplateHandler(req: Request, res: Response) {
+  try {
+    const id = req.params.id;
+    const { name, subject, content } = req.body;
+    if (!name || !subject || !content) {
+      return res.status(400).json({
+        success: false,
+        error: "name, subject and content are required",
+      })
+    }
+    const update = service.updateEmailTemplate(id, req.body);
+
+    if (!update) {
+      return res.status(404).json({
+        success: false,
+        error: "Email template not found",
+      });
+    }
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: "Failed to update template",
+      details: err.message,
+    })
+  }
+}
+
 export async function deleteEmailTemplateHandler(req: Request, res: Response) {
   try {
     const id = req.params.id;

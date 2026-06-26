@@ -269,6 +269,25 @@ export function createEmailTemplate(input: {
   templatesStore.unshift(template);
   return template;
 }
+export function updateEmailTemplate(id: string, input: {
+  name: string;
+  subject: string;
+  content: string;
+  htmlContent?: string;
+  category?: string;
+}) {
+  const template = templatesStore.find((t) => t.id === id);
+  if (!template) {
+    return null;
+  }
+  template.name = input.name;
+  template.subject = input.subject;
+  template.content = input.content;
+  template.category = input.category || template.category;
+  (template as any).htmlContent = input.htmlContent || "";
+  (template as any).updateAt = new Date().toISOString();
+  return template;
+}
 
 export function deleteEmailTemplate(id: string): boolean {
   const idx = templatesStore.findIndex((t) => t.id === id);
