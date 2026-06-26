@@ -201,21 +201,44 @@ function parseBoolQuery(value: unknown): boolean | undefined {
   return undefined;
 }
 
-async function listOrganizersFromDb(query: Record<string, unknown>) {
-  const { page, search, sort, order } = parseListQuery(query);
-  const limit = Math.min(1000, Math.max(1, Number(query.limit) || 20));
-  const skip = (page - 1) * limit;
+const ORGANIZER_TEMP_PASSWORD = "TEMP_PASSWORD";
+
+/** Self-service signups awaiting admin approval — excludes bulk-imported directory rows. */
+function organizerSignupPendingWhere(): Prisma.UserWhereInput {
+  return {
+    isVerified: false,
+    isActive: true,
+    password: { not: ORGANIZER_TEMP_PASSWORD },
+    NOT: {
+      email: { endsWith: "@import.local", mode: "insensitive" },
+    },
+  };
+}
+
+function buildOrganizerListWhere(
+  query: Record<string, unknown>,
+  options: { includeStatusFilters?: boolean } = {},
+): Prisma.UserWhereInput {
+  const { search } = parseListQuery(query);
   const country = String(query.country ?? "").trim();
-  const where: any = { role: ROLE };
-  const filters: Record<string, unknown>[] = [];
+  const includeStatusFilters = options.includeStatusFilters !== false;
+  const where: Prisma.UserWhereInput = { role: ROLE };
+  const filters: Prisma.UserWhereInput[] = [];
 
-  const verified = parseBoolQuery(query.verified);
-  if (verified === true) filters.push({ isVerified: true });
-  else if (verified === false) filters.push({ isVerified: false });
+  if (includeStatusFilters) {
+    const approvalPending = parseBoolQuery(query.approvalPending);
+    if (approvalPending === true) {
+      filters.push(organizerSignupPendingWhere());
+    } else {
+      const verified = parseBoolQuery(query.verified);
+      if (verified === true) filters.push({ isVerified: true });
+      else if (verified === false) filters.push({ isVerified: false });
+    }
 
-  const isActive = parseBoolQuery(query.isActive);
-  if (isActive === true) filters.push({ isActive: true });
-  else if (isActive === false) filters.push({ isActive: false });
+    const isActive = parseBoolQuery(query.isActive);
+    if (isActive === true) filters.push({ isActive: true });
+    else if (isActive === false) filters.push({ isActive: false });
+  }
 
   if (search) {
     filters.push({
@@ -243,7 +266,33 @@ async function listOrganizersFromDb(query: Record<string, unknown>) {
   if (filters.length > 0) {
     where.AND = filters;
   }
-  const [items, total] = await Promise.all([
+  return where;
+}
+
+export type OrganizerListStats = {
+  total: number;
+  verified: number;
+  premium: number;
+  pending: number;
+};
+
+async function getOrganizerListStats(baseWhere: Prisma.UserWhereInput): Promise<OrganizerListStats> {
+  const [total, verified, premium, pending] = await Promise.all([
+    prisma.user.count({ where: baseWhere }),
+    prisma.user.count({ where: { AND: [baseWhere, { isVerified: true }] } }),
+    prisma.user.count({ where: { AND: [baseWhere, { isVerified: true, isActive: true }] } }),
+    prisma.user.count({ where: { AND: [baseWhere, { isVerified: false }] } }),
+  ]);
+  return { total, verified, premium, pending };
+}
+
+async function listOrganizersFromDb(query: Record<string, unknown>) {
+  const { page, sort, order } = parseListQuery(query);
+  const limit = Math.min(1000, Math.max(1, Number(query.limit) || 20));
+  const skip = (page - 1) * limit;
+  const where = buildOrganizerListWhere(query);
+  const statsWhere = buildOrganizerListWhere(query, { includeStatusFilters: false });
+  const [items, total, stats] = await Promise.all([
     prisma.user.findMany({
       where,
       skip,
@@ -252,9 +301,14 @@ async function listOrganizersFromDb(query: Record<string, unknown>) {
       select: ORGANIZER_LIST_SELECT,
     }),
     prisma.user.count({ where }),
+    getOrganizerListStats(statsWhere),
   ]);
   const data = items.map((u) => mapOrganizerForAdmin(u as OrganizerAdminRow));
-  return { data, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+  return {
+    data,
+    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    stats,
+  };
 }
 
 export async function getOrganizerById(id: string) {

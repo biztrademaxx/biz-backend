@@ -61,7 +61,12 @@ const admin_activity_log_service_1 = require("../../../services/admin-activity-l
 async function list(req, res) {
     try {
         const result = await service.listOrganizers(req.query);
-        return (0, admin_response_1.sendList)(res, result.data, result.pagination);
+        return res.json({
+            success: true,
+            data: result.data,
+            pagination: result.pagination,
+            stats: result.stats,
+        });
     }
     catch (e) {
         return (0, admin_response_1.sendError)(res, 500, "Failed to list organizers", e?.message);

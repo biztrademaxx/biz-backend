@@ -9,7 +9,12 @@ import { recordAdminActivity } from "../../../services/admin-activity-log.servic
 export async function list(req: Request, res: Response) {
   try {
     const result = await service.listOrganizers(req.query as Record<string, unknown>);
-    return sendList(res, result.data, result.pagination);
+    return res.json({
+      success: true,
+      data: result.data,
+      pagination: result.pagination,
+      stats: result.stats,
+    });
   } catch (e: any) {
     return sendError(res, 500, "Failed to list organizers", e?.message);
   }

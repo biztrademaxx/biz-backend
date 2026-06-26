@@ -8,11 +8,13 @@ router.get("/email-campaigns", auth_middleware_1.requireAdmin, marketing_control
 router.post("/email-campaigns", auth_middleware_1.requireAdmin, marketing_controller_1.createEmailCampaignHandler);
 router.get("/email-templates", auth_middleware_1.requireAdmin, marketing_controller_1.listEmailTemplatesHandler);
 router.post("/email-templates", auth_middleware_1.requireAdmin, marketing_controller_1.createEmailTemplateHandler);
+router.put("/email-templates/:id", auth_middleware_1.requireAdmin, marketing_controller_1.updateEmailTemplateHandler);
 router.delete("/email-templates/:id", auth_middleware_1.requireAdmin, marketing_controller_1.deleteEmailTemplateHandler);
 router.get("/push-notifications", auth_middleware_1.requireAdmin, marketing_controller_1.listPushNotificationsHandler);
 router.post("/push-notifications", auth_middleware_1.requireAdmin, marketing_controller_1.createPushNotificationHandler);
 router.get("/push-templates", auth_middleware_1.requireAdmin, marketing_controller_1.listPushTemplatesHandler);
 router.post("/push-templates", auth_middleware_1.requireAdmin, marketing_controller_1.createPushTemplateHandler);
+router.put("/push-templates/:id", auth_middleware_1.requireAdmin, marketing_controller_1.updatePushTemplateHandler);
 router.delete("/push-templates/:id", auth_middleware_1.requireAdmin, marketing_controller_1.deletePushTemplateHandler);
 router.get("/traffic-summary", auth_middleware_1.requireAdmin, marketing_controller_1.trafficSummaryHandler);
 router.get("/seo-keywords", auth_middleware_1.requireAdmin, marketing_controller_1.listSeoKeywordsHandler);

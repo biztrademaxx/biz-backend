@@ -161,23 +161,42 @@ function parseBoolQuery(value) {
         return false;
     return undefined;
 }
-async function listOrganizersFromDb(query) {
-    const { page, search, sort, order } = (0, admin_response_1.parseListQuery)(query);
-    const limit = Math.min(1000, Math.max(1, Number(query.limit) || 20));
-    const skip = (page - 1) * limit;
+const ORGANIZER_TEMP_PASSWORD = "TEMP_PASSWORD";
+/** Self-service signups awaiting admin approval — excludes bulk-imported directory rows. */
+function organizerSignupPendingWhere() {
+    return {
+        isVerified: false,
+        isActive: true,
+        password: { not: ORGANIZER_TEMP_PASSWORD },
+        NOT: {
+            email: { endsWith: "@import.local", mode: "insensitive" },
+        },
+    };
+}
+function buildOrganizerListWhere(query, options = {}) {
+    const { search } = (0, admin_response_1.parseListQuery)(query);
     const country = String(query.country ?? "").trim();
+    const includeStatusFilters = options.includeStatusFilters !== false;
     const where = { role: ROLE };
     const filters = [];
-    const verified = parseBoolQuery(query.verified);
-    if (verified === true)
-        filters.push({ isVerified: true });
-    else if (verified === false)
-        filters.push({ isVerified: false });
-    const isActive = parseBoolQuery(query.isActive);
-    if (isActive === true)
-        filters.push({ isActive: true });
-    else if (isActive === false)
-        filters.push({ isActive: false });
+    if (includeStatusFilters) {
+        const approvalPending = parseBoolQuery(query.approvalPending);
+        if (approvalPending === true) {
+            filters.push(organizerSignupPendingWhere());
+        }
+        else {
+            const verified = parseBoolQuery(query.verified);
+            if (verified === true)
+                filters.push({ isVerified: true });
+            else if (verified === false)
+                filters.push({ isVerified: false });
+        }
+        const isActive = parseBoolQuery(query.isActive);
+        if (isActive === true)
+            filters.push({ isActive: true });
+        else if (isActive === false)
+            filters.push({ isActive: false });
+    }
     if (search) {
         filters.push({
             OR: [
@@ -202,7 +221,24 @@ async function listOrganizersFromDb(query) {
     if (filters.length > 0) {
         where.AND = filters;
     }
-    const [items, total] = await Promise.all([
+    return where;
+}
+async function getOrganizerListStats(baseWhere) {
+    const [total, verified, premium, pending] = await Promise.all([
+        prisma_1.default.user.count({ where: baseWhere }),
+        prisma_1.default.user.count({ where: { AND: [baseWhere, { isVerified: true }] } }),
+        prisma_1.default.user.count({ where: { AND: [baseWhere, { isVerified: true, isActive: true }] } }),
+        prisma_1.default.user.count({ where: { AND: [baseWhere, { isVerified: false }] } }),
+    ]);
+    return { total, verified, premium, pending };
+}
+async function listOrganizersFromDb(query) {
+    const { page, sort, order } = (0, admin_response_1.parseListQuery)(query);
+    const limit = Math.min(1000, Math.max(1, Number(query.limit) || 20));
+    const skip = (page - 1) * limit;
+    const where = buildOrganizerListWhere(query);
+    const statsWhere = buildOrganizerListWhere(query, { includeStatusFilters: false });
+    const [items, total, stats] = await Promise.all([
         prisma_1.default.user.findMany({
             where,
             skip,
@@ -211,9 +247,14 @@ async function listOrganizersFromDb(query) {
             select: ORGANIZER_LIST_SELECT,
         }),
         prisma_1.default.user.count({ where }),
+        getOrganizerListStats(statsWhere),
     ]);
     const data = items.map((u) => mapOrganizerForAdmin(u));
-    return { data, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+    return {
+        data,
+        pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+        stats,
+    };
 }
 async function getOrganizerById(id) {
     const user = await prisma_1.default.user.findFirst({

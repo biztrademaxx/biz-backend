@@ -37,11 +37,13 @@ exports.listEmailCampaignsHandler = listEmailCampaignsHandler;
 exports.createEmailCampaignHandler = createEmailCampaignHandler;
 exports.listEmailTemplatesHandler = listEmailTemplatesHandler;
 exports.createEmailTemplateHandler = createEmailTemplateHandler;
+exports.updateEmailTemplateHandler = updateEmailTemplateHandler;
 exports.deleteEmailTemplateHandler = deleteEmailTemplateHandler;
 exports.listPushNotificationsHandler = listPushNotificationsHandler;
 exports.createPushNotificationHandler = createPushNotificationHandler;
 exports.listPushTemplatesHandler = listPushTemplatesHandler;
 exports.createPushTemplateHandler = createPushTemplateHandler;
+exports.updatePushTemplateHandler = updatePushTemplateHandler;
 exports.deletePushTemplateHandler = deletePushTemplateHandler;
 exports.trafficSummaryHandler = trafficSummaryHandler;
 exports.listSeoKeywordsHandler = listSeoKeywordsHandler;
@@ -92,6 +94,36 @@ async function createEmailTemplateHandler(req, res) {
     }
     catch (error) {
         return res.status(500).json({ success: false, error: "Failed to create email template", details: error?.message });
+    }
+}
+async function updateEmailTemplateHandler(req, res) {
+    try {
+        const id = req.params.id;
+        const { name, subject, content } = req.body;
+        if (!name || !subject || !content) {
+            return res.status(400).json({
+                success: false,
+                error: "name, subject and content are required",
+            });
+        }
+        const update = service.updateEmailTemplate(id, req.body);
+        if (!update) {
+            return res.status(404).json({
+                success: false,
+                error: "Email template not found",
+            });
+        }
+        return res.status(200).json({
+            success: true,
+            data: update,
+        });
+    }
+    catch (err) {
+        return res.status(500).json({
+            success: false,
+            error: "Failed to update template",
+            details: err.message,
+        });
     }
 }
 async function deleteEmailTemplateHandler(req, res) {
@@ -151,6 +183,36 @@ async function createPushTemplateHandler(req, res) {
     }
     catch (error) {
         return res.status(500).json({ success: false, error: "Failed to create push template", details: error?.message });
+    }
+}
+async function updatePushTemplateHandler(req, res) {
+    try {
+        const id = req.params.id;
+        const { name, title, message } = req.body;
+        if (!name || !title || !message) {
+            return res.status(400).json({
+                success: false,
+                error: "name, title and message are required"
+            });
+        }
+        const update = service.updatePushTemplate(id, req.body);
+        if (!update) {
+            return res.status(404).json({
+                success: false,
+                error: "Push template not found"
+            });
+        }
+        return res.json({
+            success: true,
+            data: update,
+        });
+    }
+    catch (err) {
+        return res.status(500).json({
+            success: false,
+            error: "Failed to update push template",
+            details: err.message,
+        });
     }
 }
 async function deletePushTemplateHandler(req, res) {

@@ -8,12 +8,14 @@ exports.createEmailCampaign = createEmailCampaign;
 exports.listEmailTemplates = listEmailTemplates;
 exports.listEmailTemplatesByCategory = listEmailTemplatesByCategory;
 exports.createEmailTemplate = createEmailTemplate;
+exports.updateEmailTemplate = updateEmailTemplate;
 exports.deleteEmailTemplate = deleteEmailTemplate;
 exports.listPushNotifications = listPushNotifications;
 exports.createPushNotification = createPushNotification;
 exports.listPushTemplates = listPushTemplates;
 exports.listPushTemplatesByCategory = listPushTemplatesByCategory;
 exports.createPushTemplate = createPushTemplate;
+exports.updatePushTemplate = updatePushTemplate;
 exports.deletePushTemplate = deletePushTemplate;
 exports.getMarketingTrafficSummaryAsync = getMarketingTrafficSummaryAsync;
 exports.listSeoKeywords = listSeoKeywords;
@@ -187,6 +189,19 @@ function createEmailTemplate(input) {
     templatesStore.unshift(template);
     return template;
 }
+function updateEmailTemplate(id, input) {
+    const template = templatesStore.find((t) => t.id === id);
+    if (!template) {
+        return null;
+    }
+    template.name = input.name;
+    template.subject = input.subject;
+    template.content = input.content;
+    template.category = input.category || template.category;
+    template.htmlContent = input.htmlContent || "";
+    template.updateAt = new Date().toISOString();
+    return template;
+}
 function deleteEmailTemplate(id) {
     const idx = templatesStore.findIndex((t) => t.id === id);
     if (idx === -1)
@@ -290,6 +305,19 @@ function createPushTemplate(input) {
     };
     pushTemplatesStore.unshift(item);
     return item;
+}
+function updatePushTemplate(id, input) {
+    const template = pushTemplatesStore.find((t) => t.id === id);
+    if (!template) {
+        return null;
+    }
+    template.name = input.name;
+    template.title = input.title;
+    template.message = input.message;
+    template.imageUrl = input.imageUrl || template.imageUrl;
+    template.category = input.category || template.category;
+    template.updatedAt = new Date().toISOString();
+    return template;
 }
 function deletePushTemplate(id) {
     const idx = pushTemplatesStore.findIndex((t) => t.id === id);
