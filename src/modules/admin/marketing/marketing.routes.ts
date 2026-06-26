@@ -10,6 +10,7 @@ import {
   createPushNotificationHandler,
   listPushTemplatesHandler,
   createPushTemplateHandler,
+  updatePushTemplateHandler,
   deletePushTemplateHandler,
   trafficSummaryHandler,
   listSeoKeywordsHandler,
@@ -30,6 +31,7 @@ router.get("/push-notifications", requireAdmin, listPushNotificationsHandler);
 router.post("/push-notifications", requireAdmin, createPushNotificationHandler);
 router.get("/push-templates", requireAdmin, listPushTemplatesHandler);
 router.post("/push-templates", requireAdmin, createPushTemplateHandler);
+router.put( "/push-templates/:id", requireAdmin, updatePushTemplateHandler);
 router.delete("/push-templates/:id", requireAdmin, deletePushTemplateHandler);
 router.get("/traffic-summary", requireAdmin, trafficSummaryHandler);
 router.get("/seo-keywords", requireAdmin, listSeoKeywordsHandler);

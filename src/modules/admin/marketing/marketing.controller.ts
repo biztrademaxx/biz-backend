@@ -51,12 +51,14 @@ export async function updateEmailTemplateHandler(req: Request, res: Response) {
   try {
     const id = req.params.id;
     const { name, subject, content } = req.body;
+
     if (!name || !subject || !content) {
       return res.status(400).json({
         success: false,
         error: "name, subject and content are required",
-      })
+      });
     }
+
     const update = service.updateEmailTemplate(id, req.body);
 
     if (!update) {
@@ -65,12 +67,17 @@ export async function updateEmailTemplateHandler(req: Request, res: Response) {
         error: "Email template not found",
       });
     }
+
+    return res.status(200).json({
+      success: true,
+      data: update,
+    });
   } catch (err: any) {
     return res.status(500).json({
       success: false,
       error: "Failed to update template",
       details: err.message,
-    })
+    });
   }
 }
 
@@ -130,6 +137,38 @@ export async function createPushTemplateHandler(req: Request, res: Response) {
     return res.status(201).json({ success: true, data });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: "Failed to create push template", details: error?.message });
+  }
+}
+
+export async function updatePushTemplateHandler(req: Request, res: Response){
+  try{
+    const id = req.params.id;
+    const {name, title, message} = req.body;
+
+    if(!name || !title || !message){
+      return res.status(400).json({
+        success:false,
+        error:"name, title and message are required"
+      });
+    }
+    const update = service.updatePushTemplate(id, req.body);
+
+    if(!update){
+      return res.status(404).json({
+        success:false,
+        error:"Push template not found"
+      })
+    }
+    return res.json({
+      success:true,
+      data:update,
+    });
+  }catch(err:any){
+    return res.status(500).json({
+      success: false,
+      error: "Failed to update push template",
+      details: err.message,
+    })
   }
 }
 

@@ -410,6 +410,31 @@ export function createPushTemplate(input: {
   pushTemplatesStore.unshift(item);
   return item;
 }
+export function updatePushTemplate(
+  id: string,
+  input: {
+    name: string;
+    title: string;
+    message: string;
+    imageUrl?: string;
+    category?: string;
+  }
+): PushTemplateItem | null {
+  const template = pushTemplatesStore.find((t) => t.id === id);
+
+  if (!template) {
+    return null;
+  }
+
+  template.name = input.name;
+  template.title = input.title;
+  template.message = input.message;
+  template.imageUrl = input.imageUrl || template.imageUrl;
+  template.category = input.category || template.category;
+  template.updatedAt = new Date().toISOString();
+
+  return template;
+}
 
 export function deletePushTemplate(id: string): boolean {
   const idx = pushTemplatesStore.findIndex((t) => t.id === id);
