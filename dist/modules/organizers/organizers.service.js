@@ -455,7 +455,8 @@ async function listOrganizersFromDb(options = {}) {
     };
 }
 async function listOrganizerFilterFacets() {
-    return (0, redis_1.cached)(redis_1.CACHE_KEYS.organizersFacets(), redis_1.CACHE_TTL.ORGANIZERS_FACETS, listOrganizerFilterFacetsFromDb);
+    const key = await (0, redis_1.organizersFacetsCacheKey)();
+    return (0, redis_1.cached)(key, redis_1.CACHE_TTL.ORGANIZERS_FACETS, listOrganizerFilterFacetsFromDb);
 }
 async function listOrganizerFilterFacetsFromDb() {
     const rows = await prisma_1.default.user.findMany({

@@ -5,6 +5,7 @@ import {
   CACHE_TTL,
   invalidateOrganizerCaches,
   organizerEventsCacheKey,
+  organizersFacetsCacheKey,
   organizersListCacheKey,
 } from "../../config/redis";
 import { Prisma } from "@prisma/client";
@@ -501,7 +502,8 @@ async function listOrganizersFromDb(options: ListOrganizersOptions = {}): Promis
 }
 
 export async function listOrganizerFilterFacets() {
-  return cached(CACHE_KEYS.organizersFacets(), CACHE_TTL.ORGANIZERS_FACETS, listOrganizerFilterFacetsFromDb);
+  const key = await organizersFacetsCacheKey();
+  return cached(key, CACHE_TTL.ORGANIZERS_FACETS, listOrganizerFilterFacetsFromDb);
 }
 
 async function listOrganizerFilterFacetsFromDb() {

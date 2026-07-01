@@ -24,6 +24,7 @@ const CACHE_VERSION_KEYS = {
   eventsList: "cache:ver:events:list",
   eventsStats: "cache:ver:events:stats",
   organizersList: "cache:ver:organizers:list",
+  organizersFacets: "cache:ver:organizers:facets",
   organizerEvents: "cache:ver:organizer:events",
   adminEventsList: "cache:ver:admin:events",
   adminOrganizersList: "cache:ver:admin:organizers",
@@ -113,6 +114,11 @@ export async function organizersListCacheKey(params: Record<string, unknown>): P
   return `organizers:list:v${version}:${hashCacheParams(params)}`;
 }
 
+export async function organizersFacetsCacheKey(): Promise<string> {
+  const version = await getCacheVersion(CACHE_VERSION_KEYS.organizersFacets);
+  return `organizers:facets:v${version}`;
+}
+
 export async function organizerEventsCacheKey(
   organizerKey: string,
   page: number,
@@ -188,9 +194,10 @@ export async function invalidateOrganizerCaches(opts?: { id?: string; slug?: str
 
   await Promise.all([
     bumpCacheVersion(CACHE_VERSION_KEYS.organizersList),
+    bumpCacheVersion(CACHE_VERSION_KEYS.organizersFacets),
     bumpCacheVersion(CACHE_VERSION_KEYS.organizerEvents),
     bumpCacheVersion(CACHE_VERSION_KEYS.adminOrganizersList),
-    cacheDel(CACHE_KEYS.organizersFacets(), ...profileKeys),
+    ...(profileKeys.length > 0 ? [cacheDel(...profileKeys)] : []),
   ]);
 }
 
@@ -233,7 +240,6 @@ export async function invalidateEventCaches(opts?: { slug?: string; id?: string 
   ];
 
   const keysToDelete = [
-    CACHE_KEYS.organizersFacets(),
     CACHE_KEYS.adminEventsStats(),
     CACHE_KEYS.eventsCategoriesBrowse(),
     CACHE_KEYS.eventsVip(),
@@ -245,6 +251,8 @@ export async function invalidateEventCaches(opts?: { slug?: string; id?: string 
   await Promise.all([
     bumpCacheVersion(CACHE_VERSION_KEYS.eventsList),
     bumpCacheVersion(CACHE_VERSION_KEYS.eventsStats),
+    bumpCacheVersion(CACHE_VERSION_KEYS.organizersList),
+    bumpCacheVersion(CACHE_VERSION_KEYS.organizersFacets),
     bumpCacheVersion(CACHE_VERSION_KEYS.organizerEvents),
     bumpCacheVersion(CACHE_VERSION_KEYS.adminEventsList),
     cacheDel(...keysToDelete),
@@ -278,7 +286,6 @@ export const CACHE_TTL = {
 } as const;
 
 export const CACHE_KEYS = {
-  organizersFacets: () => "organizers:facets",
   adminEventsStats: () => "admin:events:stats",
   eventsCategoriesBrowse: () => "events:categories:browse",
   eventsVip: () => "events:vip",
