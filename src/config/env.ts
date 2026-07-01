@@ -11,7 +11,7 @@ export function validateEnv(): void {
   const missing = REQUIRED_ENV_VARS.filter((key) => !process.env[key]);
 
   if (missing.length > 0) {
-    // eslint-disable-next-line no-console
+    // eslint-disable-next-line no-consolee 
     console.error(
       `[env] Missing required environment variables: ${missing.join(", ")}`
     );

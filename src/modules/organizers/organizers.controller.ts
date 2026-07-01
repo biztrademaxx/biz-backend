@@ -24,6 +24,7 @@ import {
 import prisma from "../../config/prisma";
 import { updateEventByOrganizer, deleteEventByOrganizer } from "../events/events.service";
 import { createEventAdmin } from "../events/events-writes.service";
+import { organizersListOptionsFromRequest } from "../../middleware/organizers-list-query";
 
 export async function getOrganizerFacetsHandler(_req: Request, res: Response) {
   try {
@@ -41,43 +42,7 @@ export async function getOrganizerFacetsHandler(_req: Request, res: Response) {
 
 export async function getOrganizersHandler(req: Request, res: Response) {
   try {
-    const requireProfileImage =
-      req.query.requireProfileImage === "1" || req.query.requireProfileImage === "true";
-    const paginate = req.query.page != null || req.query.limit != null;
-    const page = req.query.page ? parseInt(req.query.page as string, 10) : undefined;
-    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
-    const search = typeof req.query.search === "string" ? req.query.search : undefined;
-    const country = typeof req.query.country === "string" ? req.query.country : undefined;
-    const city = typeof req.query.city === "string" ? req.query.city : undefined;
-    const category = typeof req.query.category === "string" ? req.query.category : undefined;
-    const eventsBucket =
-      typeof req.query.eventsBucket === "string" ? req.query.eventsBucket : undefined;
-    const followersBucket =
-      typeof req.query.followersBucket === "string" ? req.query.followersBucket : undefined;
-    const prioritizeCountry =
-      typeof req.query.prioritizeCountry === "string" ? req.query.prioritizeCountry : undefined;
-    const prioritizeCountryCode =
-      typeof req.query.prioritizeCountryCode === "string"
-        ? req.query.prioritizeCountryCode
-        : undefined;
-    const prioritizeCity =
-      typeof req.query.prioritizeCity === "string" ? req.query.prioritizeCity : undefined;
-
-    const result = await listOrganizers({
-      requireProfileImage,
-      paginate,
-      page,
-      limit,
-      search,
-      country,
-      city,
-      category,
-      eventsBucket,
-      followersBucket,
-      prioritizeCountry,
-      prioritizeCountryCode,
-      prioritizeCity,
-    });
+    const result = await listOrganizers(organizersListOptionsFromRequest(req));
     return res.json({
       organizers: result.organizers,
       total: result.total,

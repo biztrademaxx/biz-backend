@@ -19,7 +19,7 @@
     "test": "tests"
   },
   "scripts": {
-    "postinstall": "prisma generate",
+    "postinstall": "prisma generate && node scripts/prune-dep-tsconfigs.cjs",
     "dev": "nodemon --watch src --ext ts,js --exec ts-node src/server.ts",
     "build": "prisma generate && node --max-old-space-size=2048 ./node_modules/typescript/lib/tsc.js -p tsconfig.json",
     "start": "node dist/server.js",
