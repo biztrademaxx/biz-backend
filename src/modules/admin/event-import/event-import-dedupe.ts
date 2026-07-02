@@ -52,7 +52,7 @@ export function formatDuplicateKeyForMessage(fp: ImportDuplicateFingerprint): st
 }
 
 /**
- * True if an event already exists with same title (case-insensitive), same UTC start day, same venue name.
+ * True if an event already exists with same title (case-insensitive), same UTC start day, same venue name..
  */
 export async function findExistingEventDuplicate(
   fp: ImportDuplicateFingerprint,

@@ -76,6 +76,9 @@ async function listExhibitors() {
             organizationName: true,
             jobTitle: true,
             location: true,
+            profileCity: true,
+            profileState: true,
+            profileCountry: true,
             website: true,
             linkedin: true,
             twitter: true,
@@ -87,6 +90,10 @@ async function listExhibitors() {
     });
     return exhibitors.map((e) => ({
         ...e,
+        profileCity: e.profileCity ?? undefined,
+        profileState: e.profileState ?? undefined,
+        profileCountry: e.profileCountry ?? undefined,
+        location: formatExhibitorProfileLocation(e),
         publicSlug: (0, profile_slug_1.getPublicProfileSlug)({
             role: "EXHIBITOR",
             firstName: e.firstName,
