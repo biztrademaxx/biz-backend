@@ -1397,6 +1397,8 @@ async function listExhibitionSpaces(eventId) {
         basePrice: s.basePrice,
         pricePerSqm: s.pricePerSqm,
         minArea: s.minArea,
+        additionalPowerRate: s.additionalPowerRate,
+        compressedAirRate: s.compressedAirRate,
         unit: s.unit,
         pricePerUnit: s.pricePerUnit,
         currency: s.currency,

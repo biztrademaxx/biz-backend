@@ -1,7 +1,7 @@
 /**
  * Duplicate detection for bulk event import.
  * Match when eventTitle + startDate (calendar day) + venueName all match.
- * Same title on different dates or venues is allowed.
+ * Same title on different dates or venues is allowed..
  */
 import prisma from "../../../config/prisma";
 import { parseImportTimezone, parseImportedDateTime } from "./event-import-parse";
