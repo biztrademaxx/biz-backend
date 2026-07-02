@@ -50,6 +50,7 @@ exports.isAttendeeLeadType = isAttendeeLeadType;
 exports.listInterestedEventsForUser = listInterestedEventsForUser;
 exports.createEventLead = createEventLead;
 exports.listEventExhibitors = listEventExhibitors;
+exports.listEventStallBookRequests = listEventStallBookRequests;
 exports.listEventSpeakers = listEventSpeakers;
 exports.listSpeakerSessions = listSpeakerSessions;
 exports.getEventBrochureAndDocuments = getEventBrochureAndDocuments;
@@ -1167,6 +1168,58 @@ async function listEventExhibitors(eventId) {
             followersCount: f.count,
             followerPreview: f.preview,
         };
+    });
+}
+const STALL_REQUEST_TYPES = [
+    "exhibitor",
+    "stall_book_request",
+    "stall-book-request",
+    "stallbookrequest",
+    "STALL_BOOK_REQUEST",
+    "STALL-BOOK-REQUEST",
+    "STALLBOOKREQUEST",
+];
+/**
+ * Leads originating from "Exhibit" / "Send Stall Book Request" actions.
+ * Kept separate from confirmed event exhibitors (ExhibitorBooth rows).
+ */
+async function listEventStallBookRequests(eventId) {
+    return prisma_1.default.eventLead.findMany({
+        where: {
+            eventId,
+            type: { in: [...STALL_REQUEST_TYPES] },
+        },
+        include: {
+            user: {
+                select: {
+                    id: true,
+                    firstName: true,
+                    lastName: true,
+                    email: true,
+                    phone: true,
+                    company: true,
+                    jobTitle: true,
+                    avatar: true,
+                    role: true,
+                    profileCity: true,
+                    profileState: true,
+                    profileCountry: true,
+                    organizerCity: true,
+                    organizerState: true,
+                    organizerCountry: true,
+                    location: true,
+                    headquarters: true,
+                },
+            },
+            event: {
+                select: {
+                    id: true,
+                    title: true,
+                    startDate: true,
+                },
+            },
+        },
+        orderBy: { createdAt: "desc" },
     });
 }
 async function listEventSpeakers(eventId) {

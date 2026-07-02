@@ -16,6 +16,7 @@ import {
   listEventLeads,
   listEventAttendees,
   listEventExhibitors,
+  listEventStallBookRequests,
   listEventSpeakers,
   getEventBrochureAndDocuments,
   updateEventLayoutPlan,
@@ -338,11 +339,20 @@ export async function createEventLeadHandler(req: Request, res: Response) {
 export async function getEventExhibitorsHandler(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    const exhibitors = await listEventExhibitors(id);
+    const [exhibitors, stallBookRequests] = await Promise.all([
+      listEventExhibitors(id),
+      listEventStallBookRequests(id),
+    ]);
     return res.json({
       success: true,
       data: {
         exhibitors,
+        stallBookRequests,
+        stats: {
+          totalExhibitors: exhibitors.length,
+          confirmedExhibitors: exhibitors.filter((x: any) => x.status === "CONFIRMED").length,
+          newLeads: stallBookRequests.filter((x: any) => (x.status ?? "NEW") === "NEW").length,
+        },
       },
     });
   } catch (error: any) {

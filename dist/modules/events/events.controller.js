@@ -338,11 +338,20 @@ async function createEventLeadHandler(req, res) {
 async function getEventExhibitorsHandler(req, res) {
     try {
         const { id } = req.params;
-        const exhibitors = await (0, events_service_1.listEventExhibitors)(id);
+        const [exhibitors, stallBookRequests] = await Promise.all([
+            (0, events_service_1.listEventExhibitors)(id),
+            (0, events_service_1.listEventStallBookRequests)(id),
+        ]);
         return res.json({
             success: true,
             data: {
                 exhibitors,
+                stallBookRequests,
+                stats: {
+                    totalExhibitors: exhibitors.length,
+                    confirmedExhibitors: exhibitors.filter((x) => x.status === "CONFIRMED").length,
+                    newLeads: stallBookRequests.filter((x) => (x.status ?? "NEW") === "NEW").length,
+                },
             },
         });
     }

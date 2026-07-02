@@ -1274,6 +1274,60 @@ export async function listEventExhibitors(eventId: string) {
   });
 }
 
+const STALL_REQUEST_TYPES = [
+  "exhibitor",
+  "stall_book_request",
+  "stall-book-request",
+  "stallbookrequest",
+  "STALL_BOOK_REQUEST",
+  "STALL-BOOK-REQUEST",
+  "STALLBOOKREQUEST",
+] as const;
+
+/**
+ * Leads originating from "Exhibit" / "Send Stall Book Request" actions.
+ * Kept separate from confirmed event exhibitors (ExhibitorBooth rows).
+ */
+export async function listEventStallBookRequests(eventId: string) {
+  return prisma.eventLead.findMany({
+    where: {
+      eventId,
+      type: { in: [...STALL_REQUEST_TYPES] },
+    },
+    include: {
+      user: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+          phone: true,
+          company: true,
+          jobTitle: true,
+          avatar: true,
+          role: true,
+          profileCity: true,
+          profileState: true,
+          profileCountry: true,
+          organizerCity: true,
+          organizerState: true,
+          organizerCountry: true,
+          location: true,
+          headquarters: true,
+        },
+      },
+      event: {
+        select: {
+          id: true,
+          title: true,
+          startDate: true,
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
 export async function listEventSpeakers(eventId: string) {
   const sessions = await prisma.speakerSession.findMany({
     where: { eventId },
