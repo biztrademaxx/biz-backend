@@ -48,7 +48,7 @@ router.get("/event-categories", getPublicEventCategoriesHandler);
 router.get("/events/categories/browse", getEventCategoriesBrowseHandler);
 
 // List events, with filters & pagination
-router.get("/events", getEventsHandler);
+router.get("/events", optionalUser, getEventsHandler);
 
 // Recent events
 router.get("/events/recent", getRecentEventsHandler);

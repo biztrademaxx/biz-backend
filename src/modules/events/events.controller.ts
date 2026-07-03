@@ -109,6 +109,7 @@ export async function getEventsHandler(req: Request, res: Response) {
       verified: verified === "true",
       vip: vip === "true",
       excludePast: excludePast === "true",
+      userId: req.auth?.sub,
     });
 
     return res.json({

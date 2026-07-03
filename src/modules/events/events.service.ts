@@ -47,6 +47,7 @@ export interface ListEventsParams {
   verified?: boolean;
   vip?: boolean;
   excludePast?: boolean;
+  userId?: string;
 }
 
 export async function listEvents(params: ListEventsParams) {
@@ -202,6 +203,16 @@ async function listEventsFromDb(params: ListEventsParams) {
             },
           },
         },
+        leads: params.userId
+          ? {
+            where: {
+              userId: params.userId,
+            },
+            select: {
+              type: true,
+            },
+          }
+          : false,
       },
       orderBy,
       skip,
@@ -212,11 +223,23 @@ async function listEventsFromDb(params: ListEventsParams) {
 
   const transformedEvents = events.map((event: any) => {
     const cheapestTicket = event.ticketTypes[0]?.price || 0;
+    const leadType = event.leads?.[0]?.type ?? null;
+
+    const isVisited =
+      leadType === "attendee";
+
+    const isExhibiting =
+      leadType === "exhibitor";
 
     return {
       id: event.id,
       title: event.title,
-      /** Full body omitted at DB layer for listing — cards use short text only.. */
+
+      leadType,
+      isVisited,
+      isExhibiting,
+      /** Full body omitted at DB layer for listing — cards use short text only. */
+
       description: event.shortDescription ?? "",
       shortDescription: event.shortDescription,
       subTitle: event.subTitle ?? null,
