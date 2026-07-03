@@ -11,6 +11,10 @@ import { recordAdminActivity } from "../../services/admin-activity-log.service";
 import { normalizeYoutubeVideoUrlForStorage } from "../../utils/youtube-url";
 import type { EventStatus, SessionType, SessionStatus, User } from "@prisma/client";
 import type { UserRole } from "@prisma/client";
+import {
+  parseWallClockDateTime,
+  resolveStoredEventTimezone,
+} from "../admin/event-import/event-import-parse";
 
 function trimTextField(v: unknown): string | null {
   if (v == null) return null;
@@ -790,8 +794,14 @@ export async function createSpeakerSession(body: {
   const durationMinutes =
     typeof duration === "string" ? parseInt(duration, 10) || 0 : duration ?? 0;
 
-  const start = new Date(startTime);
-  const end = new Date(endTime);
+  const event = await prisma.event.findUnique({
+    where: { id: eventId },
+    select: { timezone: true, country: true },
+  });
+  const eventTimezone = resolveStoredEventTimezone(event?.timezone, event?.country);
+
+  const start = parseWallClockDateTime(startTime, eventTimezone);
+  const end = parseWallClockDateTime(endTime, eventTimezone);
 
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
     throw new Error("Invalid startTime or endTime");

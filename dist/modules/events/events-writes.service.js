@@ -18,6 +18,7 @@ const prisma_1 = __importDefault(require("../../config/prisma"));
 const redis_1 = require("../../config/redis");
 const admin_activity_log_service_1 = require("../../services/admin-activity-log.service");
 const youtube_url_1 = require("../../utils/youtube-url");
+const event_import_parse_1 = require("../admin/event-import/event-import-parse");
 function trimTextField(v) {
     if (v == null)
         return null;
@@ -708,8 +709,13 @@ async function createEventAdmin(params) {
 async function createSpeakerSession(body) {
     const { eventId, speakerId, title, description, sessionType, duration, startTime, endTime, room, abstract, learningObjectives, targetAudience, } = body;
     const durationMinutes = typeof duration === "string" ? parseInt(duration, 10) || 0 : duration ?? 0;
-    const start = new Date(startTime);
-    const end = new Date(endTime);
+    const event = await prisma_1.default.event.findUnique({
+        where: { id: eventId },
+        select: { timezone: true, country: true },
+    });
+    const eventTimezone = (0, event_import_parse_1.resolveStoredEventTimezone)(event?.timezone, event?.country);
+    const start = (0, event_import_parse_1.parseWallClockDateTime)(startTime, eventTimezone);
+    const end = (0, event_import_parse_1.parseWallClockDateTime)(endTime, eventTimezone);
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
         throw new Error("Invalid startTime or endTime");
     }

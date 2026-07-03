@@ -284,6 +284,8 @@ export async function getSpeakerSessions(speakerId: string) {
           slug: true,
           startDate: true,
           endDate: true,
+          timezone: true,
+          country: true,
         },
       },
       materials: {
@@ -312,6 +314,8 @@ export async function getSpeakerSessions(speakerId: string) {
           slug: s.event.slug,
           startDate: s.event.startDate.toISOString(),
           endDate: s.event.endDate.toISOString(),
+          timezone: s.event.timezone,
+          country: s.event.country,
         }
       : null,
     materials: (s.materials ?? []).map((m) => ({

@@ -271,6 +271,58 @@ export function parseImportedDateTime(
   return combineDateAndTimeInTimeZone(date, time, timeZone);
 }
 
+/** Parse ISO or naive YYYY-MM-DDTHH:mm as wall-clock time in the event timezone. */
+export function parseWallClockDateTime(raw: string, timeZone: string): Date {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    throw new Error("Empty datetime");
+  }
+
+  if (/Z$|[+-]\d{2}:\d{2}$/.test(trimmed)) {
+    const parsed = new Date(trimmed);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new Error("Invalid datetime");
+    }
+    return parsed;
+  }
+
+  const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+  if (match) {
+    return combineDateAndTimeInTimeZone(
+      {
+        year: parseInt(match[1], 10),
+        month: parseInt(match[2], 10),
+        day: parseInt(match[3], 10),
+      },
+      {
+        hours: parseInt(match[4], 10),
+        minutes: parseInt(match[5], 10),
+      },
+      timeZone,
+    );
+  }
+
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error("Invalid datetime");
+  }
+  return parsed;
+}
+
+export function resolveStoredEventTimezone(
+  timezone?: string | null,
+  country?: string | null,
+): string {
+  const manual = timezone?.trim();
+  if (manual && manual.toUpperCase() !== "UTC") return manual;
+  const countryName = country?.trim();
+  if (countryName) {
+    const lower = countryName.toLowerCase();
+    if (lower.includes("india")) return DEFAULT_IMPORT_TIMEZONE;
+  }
+  return DEFAULT_IMPORT_TIMEZONE;
+}
+
 export function formatCalendarParts(parts: CalendarParts): string {
   return `${pad2(parts.day)}-${pad2(parts.month)}-${parts.year}`;
 }

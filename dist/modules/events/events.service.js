@@ -240,7 +240,7 @@ async function listEventsFromDb(params) {
         return {
             id: event.id,
             title: event.title,
-            /** Full body omitted at DB layer for listing — cards use short text only. */
+            /** Full body omitted at DB layer for listing — cards use short text only.. */
             description: event.shortDescription ?? "",
             shortDescription: event.shortDescription,
             subTitle: event.subTitle ?? null,
@@ -1260,6 +1260,8 @@ async function listSpeakerSessions(params) {
                     title: true,
                     startDate: true,
                     endDate: true,
+                    timezone: true,
+                    country: true,
                 },
             },
             speaker: {
