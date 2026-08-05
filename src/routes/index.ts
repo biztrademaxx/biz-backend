@@ -31,6 +31,7 @@ import supportUserRouter from "./support-user";
 import contactRouter from "./contact";
 import newsletterPublicRouter from "./newsletter";
 import paymentsRouter from "../modules/payments/payments.routes";
+// import subscriptionsRouter from "../modules/subscriptions/subscriptions.routes";
 import subscriptionsRouter from "../modules/subscriptions/subscriptions.routes";
 
 const router = Router();

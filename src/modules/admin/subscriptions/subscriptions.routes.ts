@@ -1,7 +1,7 @@
 // C:\bizz\biz-backend\src\modules\subscriptions\subscriptions.routes.ts
 
 import { Router } from "express";
-import { requireUser } from "../../middleware/auth.middleware";
+import { requireUser } from "../../../middleware/auth.middleware";
 import {
   activateFreePlanHandler,
   activateSubscriptionHandler,

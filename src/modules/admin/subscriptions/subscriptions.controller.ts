@@ -137,8 +137,6 @@ export async function getOrganizerPlansBatchHandler(req: Request, res: Response)
       return res.status(400).json({ message: "organizerIds array is required" });
     }
 
-    console.log('📡 getOrganizerPlansBatchHandler called with:', organizerIds);
-
     // Check if user is admin
     const isAdmin = req.auth?.role === "SUPER_ADMIN" || req.auth?.role === "SUB_ADMIN";
     

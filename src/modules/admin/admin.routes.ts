@@ -49,6 +49,7 @@ import contentAdminRoutes from "./content/content.routes";
 import roleDefinitionsRoutes from "./role-definitions/role-definitions.routes";
 import newsletterAdminRoutes from "./newsletter/newsletter.routes";
 import { promotionMarketingReportsAdminRouter } from "../promotions/promotion-marketing-reports.routes";
+import subscriptionsRoutes from "../subscriptions/subscriptions.routes"; // Import subscriptions routes
 
 const router = Router();
 
@@ -126,5 +127,7 @@ router.use("/content", contentAdminRoutes);
 router.use("/role-definitions", roleDefinitionsRoutes);
 router.use("/newsletter", newsletterAdminRoutes);
 router.use("/promotions", promotionMarketingReportsAdminRouter);
+
+router.use("/subscriptions", subscriptionsRoutes); // Mount subscriptions routes
 
 export default router;

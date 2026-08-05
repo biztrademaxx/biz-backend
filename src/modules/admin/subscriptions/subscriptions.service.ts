@@ -1,23 +1,16 @@
 // C:\bizz\biz-backend\src\modules\subscriptions\subscriptions.service.ts
 
-import prisma from "../../config/prisma";
+import prisma from "../../../config/prisma";
 import type { PaymentTransaction, UserPlanSubscription } from "@prisma/client";
-import { createRazorpayOrder } from "../payments/razorpay.service";
+import { createRazorpayOrder } from "../../payments/razorpay.service";
 import {
   computeExpiresAt,
   defaultFreePlanSlug,
   getCatalogPlan,
   type DashboardPlanRole,
-} from "./plan-catalog";
+} from "../../../modules/subscriptions/plan-catalog";
 
 const MIN_AMOUNT_PAISE = 100;
-
-// Helper function to validate UUID
-function isValidUUID(id: string): boolean {
-  // UUID v4 pattern: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  return uuidRegex.test(id);
-}
 
 export async function createSubscriptionPaymentOrder(input: {
   userId: string;
@@ -309,7 +302,7 @@ export async function getCurrentPlanForRole(userId: string, role: string) {
   };
 }
 
-// ============ Batch fetch organizer plans ============
+// ============ NEW: Batch fetch organizer plans ============
 
 export async function getOrganizerPlansBatch(input: {
   userId: string;
@@ -319,12 +312,13 @@ export async function getOrganizerPlansBatch(input: {
   try {
     console.log('📡 getOrganizerPlansBatch called with:', input.organizerIds);
 
-    // Separate UUIDs from names/emails using proper UUID validation
+    // Separate UUIDs from names/emails
     const uuidIds: string[] = []
     const nameOrEmailIds: string[] = []
     
     for (const id of input.organizerIds) {
-      if (isValidUUID(id)) {
+      // Check if it's a valid UUID (contains hyphens and is long enough)
+      if (id.includes('-') && id.length > 30) {
         uuidIds.push(id)
       } else {
         nameOrEmailIds.push(id)
@@ -432,11 +426,14 @@ export async function getOrganizerPlansBatch(input: {
 
     // For each organizer identifier, get their subscription or free plan
     for (const identifier of input.organizerIds) {
+      // Try to find the user ID for this identifier
       let userId: string | null = null
       
-      if (isValidUUID(identifier)) {
+      // Check if it's a UUID
+      if (identifier.includes('-') && identifier.length > 30) {
         userId = identifier
       } else {
+        // Find user by email, organization name, or company
         const user = await prisma.user.findFirst({
           where: {
             role: "ORGANIZER",
@@ -470,6 +467,7 @@ export async function getOrganizerPlansBatch(input: {
             razorpayPaymentId: activeSub.paymentTransaction?.razorpayPaymentId || null,
           })
         } else {
+          // No active subscription, return free plan
           subscriptionMap.set(identifier, {
             planSlug: 'organizer-free',
             planName: 'Free',
@@ -483,6 +481,7 @@ export async function getOrganizerPlansBatch(input: {
           })
         }
       } else {
+        // No user found, return free plan
         subscriptionMap.set(identifier, {
           planSlug: 'organizer-free',
           planName: 'Free',
@@ -497,6 +496,7 @@ export async function getOrganizerPlansBatch(input: {
       }
     }
 
+    // Convert map to object for JSON response
     const result: Record<string, any> = {}
     for (const [id, plan] of subscriptionMap) {
       result[id] = plan
@@ -513,6 +513,7 @@ export async function getOrganizerPlansBatch(input: {
   }
 }
 
+// SINGLE function - remove duplicate
 function getTierFromPlanSlug(planSlug: string): 'free' | 'silver' | 'gold' | 'platinum' {
   if (!planSlug) return 'free';
   const slug = planSlug.toLowerCase();
