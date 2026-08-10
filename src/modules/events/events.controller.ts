@@ -108,6 +108,7 @@ export async function getEventsHandler(req: Request, res: Response) {
       excludePast,
       minRating,
       price,
+      planTier,
     } = req.query;
 
     // If stats=true, return category stats (backward-compatible behavior)
@@ -151,6 +152,7 @@ export async function getEventsHandler(req: Request, res: Response) {
       excludePast: excludePast === "true",
       minRating: minRatingNum != null && Number.isFinite(minRatingNum) ? minRatingNum : null,
       price: (price as string | undefined) ?? null,
+      planTier: (planTier as string | undefined) ?? null,
       userId: req.auth?.sub,
     });
 

@@ -112,16 +112,39 @@ export function finalScoreWithRelevance(baseRankScore: number, relevanceScore: n
 export type RankedCandidate = {
   id: string;
   startDate: Date;
+  /** platinum=3, gold=2, silver=1, free/other=0 — hard preference over score. */
+  planTierRank: number;
   baseRankScore: number;
   relevanceScore: number;
   finalScore: number;
 };
 
+/** Hard listing preference: platinum → gold → silver → free. */
+export function planTierSortRank(tier: string | null | undefined): number {
+  switch ((tier || "").toLowerCase()) {
+    case "platinum":
+      return 3;
+    case "gold":
+      return 2;
+    case "silver":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+/**
+ * Ranked listing order:
+ * 1) organizer plan tier (platinum → gold → silver → free)
+ * 2) nearest start date
+ * 3) finalScore / rankScore
+ */
 export function sortRankedCandidates(rows: RankedCandidate[]): RankedCandidate[] {
   return [...rows].sort((a, b) => {
-    if (b.finalScore !== a.finalScore) return b.finalScore - a.finalScore;
+    if (b.planTierRank !== a.planTierRank) return b.planTierRank - a.planTierRank;
     const t = a.startDate.getTime() - b.startDate.getTime();
     if (t !== 0) return t;
+    if (b.finalScore !== a.finalScore) return b.finalScore - a.finalScore;
     return a.id.localeCompare(b.id);
   });
 }

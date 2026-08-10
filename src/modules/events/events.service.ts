@@ -21,6 +21,7 @@ import { resolveUserCityCountry } from "../../utils/profile-location";
 import {
   fetchEventFtsRelevanceMap,
   finalScoreWithRelevance,
+  planTierSortRank,
   searchPublishedEventsByFts,
   sortRankedCandidates,
 } from "./event-fts";
@@ -68,6 +69,8 @@ export interface ListEventsParams {
   minRating?: number | null;
   /** free | under-1000 | 1000-5000 | above-5000 — based on cheapest active ticket. */
   price?: string | null;
+  /** Comma-separated organizer plan tiers: free|silver|gold|platinum */
+  planTier?: string | null;
   userId?: string;
 }
 
@@ -237,6 +240,18 @@ async function listEventsFromDb(params: ListEventsParams) {
     andParts.push({ isVIP: true });
   }
 
+  if (params.planTier) {
+    const tiers = params.planTier
+      .split(",")
+      .map((t) => t.trim().toLowerCase())
+      .filter((t) => t === "free" || t === "silver" || t === "gold" || t === "platinum");
+    if (tiers.length === 1) {
+      andParts.push({ organizerPlanTier: tiers[0] });
+    } else if (tiers.length > 1) {
+      andParts.push({ organizerPlanTier: { in: tiers } });
+    }
+  }
+
   if (params.excludePast) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -343,24 +358,28 @@ async function listEventsFromDb(params: ListEventsParams) {
       : false,
   } as const;
 
-  // Phase 3: ranked + search → live FinalScore = baseRankScore + 0.25·S_rel
-  if (params.sort === "ranked" && ftsRelevance && ftsRelevance.size > 0) {
+  // Ranked listing: hard tier order (platinum → gold → silver → free), then nearest start, then score.
+  // Search path adds live FTS relevance into finalScore; browse uses precomputed rankScore only.
+  if (params.sort === "ranked") {
     const slimRows = await prisma.event.findMany({
       where,
       select: {
         id: true,
         startDate: true,
+        organizerPlanTier: true,
         searchStats: true,
       },
     });
     const ranked = sortRankedCandidates(
       slimRows.map((row) => {
-        const relevanceScore = ftsRelevance!.get(row.id) ?? 0;
+        const relevanceScore =
+          ftsRelevance && ftsRelevance.size > 0 ? ftsRelevance.get(row.id) ?? 0 : 0;
         const stats = row.searchStats as { rankScore?: number } | null;
         const baseRankScore = typeof stats?.rankScore === "number" ? stats.rankScore : 0;
         return {
           id: row.id,
           startDate: row.startDate,
+          planTierRank: planTierSortRank(row.organizerPlanTier),
           baseRankScore,
           relevanceScore,
           finalScore: finalScoreWithRelevance(baseRankScore, relevanceScore),
@@ -393,6 +412,7 @@ async function listEventsFromDb(params: ListEventsParams) {
               score: scored.finalScore,
               relevance: scored.relevanceScore,
               base: scored.baseRankScore,
+              planTierRank: scored.planTierRank,
             }
           : undefined,
       };
@@ -427,14 +447,6 @@ async function listEventsFromDb(params: ListEventsParams) {
       break;
     case "verified":
       orderBy = [{ isVerified: "desc" }, { createdAt: "desc" }];
-      break;
-    case "ranked":
-      // Phase 3 browse: precomputed rankScore (sub + pop + trend + fresh)
-      orderBy = [
-        { searchStats: { rankScore: "desc" } },
-        { startDate: "asc" },
-        { id: "asc" },
-      ];
       break;
     case "newest":
     default:
