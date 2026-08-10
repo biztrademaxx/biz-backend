@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.adminGetEventsHandler = adminGetEventsHandler;
 exports.adminGetEventStatsHandler = adminGetEventStatsHandler;
@@ -17,6 +50,9 @@ exports.adminGetEventOverviewHandler = adminGetEventOverviewHandler;
 exports.adminGetEventCategoriesHandler = adminGetEventCategoriesHandler;
 exports.adminGetEventMailCandidatesHandler = adminGetEventMailCandidatesHandler;
 exports.adminSendEventListingEmailHandler = adminSendEventListingEmailHandler;
+exports.adminBackfillEventRankingHandler = adminBackfillEventRankingHandler;
+exports.adminRefreshEventTrendingHandler = adminRefreshEventTrendingHandler;
+exports.adminSearchAnalyticsHandler = adminSearchAnalyticsHandler;
 const admin_activity_log_service_1 = require("../../services/admin-activity-log.service");
 const admin_service_1 = require("./admin.service");
 async function adminGetEventsHandler(req, res) {
@@ -467,6 +503,56 @@ async function adminSendEventListingEmailHandler(req, res) {
             success: false,
             error: "Failed to send email",
             details: error.message,
+        });
+    }
+}
+/** Phase 2/3: backfill organizerPlanTier + EventSearchStats.rankScore (+ trending windows). */
+async function adminBackfillEventRankingHandler(_req, res) {
+    try {
+        const { backfillEventRankingFeatures } = await Promise.resolve().then(() => __importStar(require("../events/event-ranking.service")));
+        const result = await backfillEventRankingFeatures();
+        return res.json({ success: true, ...result });
+    }
+    catch (error) {
+        console.error("Admin backfill event ranking error:", error);
+        return res.status(500).json({
+            success: false,
+            error: "Failed to backfill event ranking",
+            details: error?.message,
+        });
+    }
+}
+/** Phase 3: refresh 7-day trending windows only. */
+async function adminRefreshEventTrendingHandler(_req, res) {
+    try {
+        const { refreshTrendingWindows7d } = await Promise.resolve().then(() => __importStar(require("../events/event-ranking.service")));
+        const result = await refreshTrendingWindows7d();
+        return res.json({ success: true, ...result });
+    }
+    catch (error) {
+        console.error("Admin refresh event trending error:", error);
+        return res.status(500).json({
+            success: false,
+            error: "Failed to refresh trending windows",
+            details: error?.message,
+        });
+    }
+}
+/** Phase 4: search demand + CTR summary. */
+async function adminSearchAnalyticsHandler(req, res) {
+    try {
+        const { getSearchAnalyticsSummary } = await Promise.resolve().then(() => __importStar(require("../events/search-analytics.service")));
+        const limit = req.query.limit ? Number(req.query.limit) : 25;
+        const days = req.query.days ? Number(req.query.days) : 14;
+        const result = await getSearchAnalyticsSummary({ limit, days });
+        return res.json({ success: true, ...result });
+    }
+    catch (error) {
+        console.error("Admin search analytics error:", error);
+        return res.status(500).json({
+            success: false,
+            error: "Failed to load search analytics",
+            details: error?.message,
         });
     }
 }

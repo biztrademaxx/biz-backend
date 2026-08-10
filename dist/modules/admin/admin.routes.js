@@ -38,6 +38,7 @@ const content_routes_1 = __importDefault(require("./content/content.routes"));
 const role_definitions_routes_1 = __importDefault(require("./role-definitions/role-definitions.routes"));
 const newsletter_routes_1 = __importDefault(require("./newsletter/newsletter.routes"));
 const promotion_marketing_reports_routes_1 = require("../promotions/promotion-marketing-reports.routes");
+const subscriptions_routes_1 = __importDefault(require("../subscriptions/subscriptions.routes")); // Import subscriptions routes
 const router = (0, express_1.Router)();
 const verifyBadgeUpload = (0, multer_1.default)({
     storage: multer_1.default.memoryStorage(),
@@ -60,6 +61,9 @@ router.get("/events/:id", auth_middleware_1.requireAdmin, admin_controller_1.adm
 router.patch("/events/:id", auth_middleware_1.requireAdmin, admin_controller_1.adminUpdateEventHandler);
 router.delete("/events/:id", auth_middleware_1.requireAdmin, admin_controller_1.adminDeleteEventHandler);
 router.post("/events", auth_middleware_1.requireAdmin, events_controller_1.createEventAdminHandler);
+router.post("/events/ranking/backfill", auth_middleware_1.requireAdmin, admin_controller_1.adminBackfillEventRankingHandler);
+router.post("/events/ranking/refresh-trending", auth_middleware_1.requireAdmin, admin_controller_1.adminRefreshEventTrendingHandler);
+router.get("/search/analytics", auth_middleware_1.requireAdmin, admin_controller_1.adminSearchAnalyticsHandler);
 router.post("/events/approve", auth_middleware_1.requireAdmin, (0, auth_middleware_1.requirePermission)("approve_events"), admin_controller_1.adminApproveEventHandler);
 router.post("/events/reject", auth_middleware_1.requireAdmin, (0, auth_middleware_1.requirePermission)("approve_events"), admin_controller_1.adminRejectEventHandler);
 router.post("/events/bulk-approve", auth_middleware_1.requireAdmin, (0, auth_middleware_1.requirePermission)("approve_events"), admin_controller_1.adminBulkApproveEventsHandler);
@@ -98,4 +102,5 @@ router.use("/content", content_routes_1.default);
 router.use("/role-definitions", role_definitions_routes_1.default);
 router.use("/newsletter", newsletter_routes_1.default);
 router.use("/promotions", promotion_marketing_reports_routes_1.promotionMarketingReportsAdminRouter);
+router.use("/subscriptions", subscriptions_routes_1.default); // Mount subscriptions routes
 exports.default = router;

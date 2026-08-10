@@ -38,6 +38,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getPublicEventCategoriesHandler = getPublicEventCategoriesHandler;
 exports.getEventCategoriesBrowseHandler = getEventCategoriesBrowseHandler;
+exports.getEventFacetsHandler = getEventFacetsHandler;
 exports.getEventsHandler = getEventsHandler;
 exports.getEventByIdHandler = getEventByIdHandler;
 exports.patchEventByIdHandler = patchEventByIdHandler;
@@ -62,6 +63,7 @@ exports.removeExhibitorFromEventHandler = removeExhibitorFromEventHandler;
 exports.deleteSpeakerSessionHandler = deleteSpeakerSessionHandler;
 exports.getEventsStatsHandler = getEventsStatsHandler;
 exports.searchHandler = searchHandler;
+exports.searchClickHandler = searchClickHandler;
 exports.saveEventHandler = saveEventHandler;
 exports.unsaveEventHandler = unsaveEventHandler;
 exports.isEventSavedHandler = isEventSavedHandler;
@@ -74,6 +76,7 @@ exports.getEventFollowersHandler = getEventFollowersHandler;
 exports.getEventReviewsHandler = getEventReviewsHandler;
 exports.createEventReviewHandler = createEventReviewHandler;
 const events_service_1 = require("./events.service");
+const event_ranking_1 = require("./event-ranking");
 const event_schedule_1 = require("./event-schedule");
 const events_service_2 = require("./events.service");
 const events_writes_service_1 = require("./events-writes.service");
@@ -105,9 +108,25 @@ async function getEventCategoriesBrowseHandler(_req, res) {
         });
     }
 }
+/** /event sidebar facet counts (categories, locations, formats). */
+async function getEventFacetsHandler(req, res) {
+    try {
+        const { getEventListingFacets } = await Promise.resolve().then(() => __importStar(require("./event-facets.service")));
+        const excludePast = req.query.excludePast !== "false";
+        const facets = await getEventListingFacets({ excludePast });
+        return res.json({ success: true, ...facets });
+    }
+    catch (e) {
+        console.error("getEventFacetsHandler:", e);
+        return res.status(500).json({
+            success: false,
+            error: e?.message || "Failed to load event facets",
+        });
+    }
+}
 async function getEventsHandler(req, res) {
     try {
-        const { page, limit, category, search, location, startDate, endDate, featured, sort, verified, vip, stats, excludePast, } = req.query;
+        const { page, limit, category, search, q, location, country, type, format, startDate, endDate, from, to, startDateTo, featured, sort, verified, vip, stats, excludePast, minRating, price, planTier, } = req.query;
         // If stats=true, return category stats (backward-compatible behavior)
         if (stats === "true") {
             const data = await (0, events_service_1.getCategoryStats)();
@@ -118,24 +137,43 @@ async function getEventsHandler(req, res) {
         }
         const pageNum = page ? parseInt(page, 10) : undefined;
         const limitNum = limit ? parseInt(limit, 10) : undefined;
+        const minRatingNum = minRating != null && String(minRating).trim() !== ""
+            ? Number.parseFloat(minRating)
+            : null;
+        const searchText = search?.trim() ||
+            q?.trim() ||
+            "";
         const result = await (0, events_service_1.listEvents)({
             page: pageNum,
             limit: limitNum,
             category: category ?? null,
-            search: search ?? "",
+            search: searchText,
             location: location ?? null,
+            country: country ?? null,
+            type: (type || format) ?? null,
             startDate: startDate ?? null,
             endDate: endDate ?? null,
+            from: from ?? null,
+            to: to ?? null,
+            startDateTo: startDateTo ?? null,
             featured: featured === "true",
             sort: sort ?? "newest",
             verified: verified === "true",
             vip: vip === "true",
             excludePast: excludePast === "true",
+            minRating: minRatingNum != null && Number.isFinite(minRatingNum) ? minRatingNum : null,
+            price: price ?? null,
+            planTier: planTier ?? null,
+            userId: req.auth?.sub,
         });
         return res.json({
             success: true,
             events: result.events,
             pagination: result.pagination,
+            meta: {
+                rankingVersion: event_ranking_1.RANKING_VERSION,
+                sort: sort ?? "newest",
+            },
         });
     }
     catch (error) {
@@ -703,8 +741,32 @@ async function searchHandler(req, res) {
     }
     catch (error) {
         // eslint-disable-next-line no-console
-        console.error("Search API error (backend):", error);
-        return res.status(500).json({ error: "Internal server error" });
+        console.error("Error in search (backend):", error);
+        return res.status(500).json({ error: "Search failed" });
+    }
+}
+/** Phase 4: record listing / navbar result click for ranking CTR. */
+async function searchClickHandler(req, res) {
+    try {
+        const { recordSearchClick } = await Promise.resolve().then(() => __importStar(require("./search-analytics.service")));
+        const body = req.body ?? {};
+        const result = await recordSearchClick({
+            query: typeof body.query === "string" ? body.query : null,
+            eventId: String(body.eventId ?? ""),
+            position: body.position != null ? Number(body.position) : null,
+            page: body.page != null ? Number(body.page) : null,
+            userId: req.auth?.domain === "USER" ? req.auth.sub : null,
+            sessionId: typeof body.sessionId === "string" ? body.sessionId : null,
+            listingSource: body.listingSource === "navbar" ? "navbar" : "events_list",
+        });
+        if ("error" in result) {
+            return res.status(400).json({ success: false, error: result.error });
+        }
+        return res.json({ success: true });
+    }
+    catch (error) {
+        console.error("searchClickHandler:", error);
+        return res.status(500).json({ success: false, error: "Failed to record click" });
     }
 }
 // ----- Write handlers (requireUser for save/promotions) -----

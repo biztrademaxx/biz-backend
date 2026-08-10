@@ -75,6 +75,9 @@ const event_schedule_1 = require("./event-schedule");
 const public_profile_1 = require("../../utils/public-profile");
 const profile_slug_1 = require("../../utils/profile-slug");
 const profile_location_1 = require("../../utils/profile-location");
+const event_fts_1 = require("./event-fts");
+const event_ranking_1 = require("./event-ranking");
+const search_analytics_service_1 = require("./search-analytics.service");
 const statusMap = {
     PUBLISHED: "Approved",
     PENDING_APPROVAL: "Pending Review",
@@ -89,48 +92,149 @@ function trimOrganizerEventText(v) {
     const s = String(v).trim();
     return s.length > 0 ? s : null;
 }
+const LIST_EVENTS_MAX_LIMIT = 500;
+function parseCategoryFilter(category) {
+    if (!category?.trim())
+        return [];
+    return category
+        .split(",")
+        .map((c) => c.trim())
+        .filter(Boolean);
+}
+function exploreTypeVariants(typeRaw) {
+    const t = typeRaw.trim();
+    if (!t)
+        return [];
+    const upper = t.toUpperCase();
+    const variants = new Set([t, upper, t.toLowerCase()]);
+    if (upper === "CONFERENCE" || t.toLowerCase() === "conference") {
+        variants.add("Conference");
+        variants.add("CONFERENCE");
+    }
+    else if (upper === "EXHIBITION" || t.toLowerCase() === "exhibition") {
+        variants.add("Exhibition");
+        variants.add("EXHIBITION");
+    }
+    else if (upper === "SEMINAR" || t.toLowerCase() === "seminar") {
+        variants.add("Seminar");
+        variants.add("SEMINAR");
+    }
+    else if (upper === "WORKSHOP" ||
+        t.toLowerCase() === "workshop" ||
+        t.toLowerCase() === "workshops") {
+        variants.add("Workshop");
+        variants.add("Workshops");
+        variants.add("WORKSHOP");
+    }
+    return Array.from(variants);
+}
+function endOfUtcDay(isoDate) {
+    const d = new Date(isoDate);
+    if (Number.isNaN(d.getTime()))
+        return d;
+    d.setUTCHours(23, 59, 59, 999);
+    return d;
+}
 async function listEvents(params) {
-    const key = await (0, redis_1.eventsListCacheKey)(params);
-    return (0, redis_1.cached)(key, redis_1.CACHE_TTL.EVENTS_LIST, () => listEventsFromDb(params));
+    const key = await (0, redis_1.eventsListCacheKey)({
+        ...params,
+        rankingVersion: event_ranking_1.RANKING_VERSION,
+    });
+    const result = await (0, redis_1.cached)(key, redis_1.CACHE_TTL.EVENTS_LIST, () => listEventsFromDb(params));
+    const q = params.search?.trim() ?? "";
+    if (q.length >= 2) {
+        (0, search_analytics_service_1.recordSearchQuerySafe)({
+            query: q,
+            resultCount: result.pagination?.total ?? result.events.length,
+            source: "events_list",
+        });
+    }
+    return result;
 }
 async function listEventsFromDb(params) {
     const page = params.page && params.page > 0 ? params.page : 1;
-    const limit = params.limit && params.limit > 0 ? params.limit : 12;
+    const rawLimit = params.limit && params.limit > 0 ? params.limit : 12;
+    const limit = Math.min(rawLimit, LIST_EVENTS_MAX_LIMIT);
     const skip = (page - 1) * limit;
     const andParts = [(0, public_profile_1.publicPublishedEventWhere)()];
-    if (params.category) {
-        andParts.push({ category: { has: params.category } });
+    const categories = parseCategoryFilter(params.category);
+    if (categories.length === 1) {
+        andParts.push({ category: { has: categories[0] } });
+    }
+    else if (categories.length > 1) {
+        andParts.push({ category: { hasSome: categories } });
     }
     const search = params.search?.trim() ?? "";
+    let ftsRelevance = null;
     if (search) {
-        andParts.push({
-            OR: [
-                { title: { contains: search, mode: "insensitive" } },
-                { description: { contains: search, mode: "insensitive" } },
-                { shortDescription: { contains: search, mode: "insensitive" } },
-                { tags: { has: search } },
-            ],
-        });
+        ftsRelevance = await (0, event_fts_1.fetchEventFtsRelevanceMap)(search, 2000);
+        if (ftsRelevance.size > 0) {
+            andParts.push({ id: { in: Array.from(ftsRelevance.keys()) } });
+        }
+        else {
+            // Fallback when FTS has no hits (or column not migrated yet)
+            andParts.push({
+                OR: [
+                    { title: { contains: search, mode: "insensitive" } },
+                    { description: { contains: search, mode: "insensitive" } },
+                    { shortDescription: { contains: search, mode: "insensitive" } },
+                    { tags: { has: search } },
+                ],
+            });
+            ftsRelevance = null;
+        }
     }
     if (params.location) {
         const location = params.location.trim();
         if (location) {
             andParts.push({
-                venue: {
-                    OR: [
-                        { venueCity: { contains: location, mode: "insensitive" } },
-                        { venueState: { contains: location, mode: "insensitive" } },
-                        { venueCountry: { contains: location, mode: "insensitive" } },
-                    ],
-                },
+                OR: [
+                    {
+                        venue: {
+                            OR: [
+                                { venueCity: { contains: location, mode: "insensitive" } },
+                                { venueState: { contains: location, mode: "insensitive" } },
+                                { venueCountry: { contains: location, mode: "insensitive" } },
+                            ],
+                        },
+                    },
+                    { city: { contains: location, mode: "insensitive" } },
+                ],
             });
+        }
+    }
+    if (params.country) {
+        const country = params.country.trim();
+        if (country) {
+            andParts.push({
+                OR: [
+                    { country: { contains: country, mode: "insensitive" } },
+                    { venue: { venueCountry: { contains: country, mode: "insensitive" } } },
+                ],
+            });
+        }
+    }
+    if (params.type) {
+        const variants = exploreTypeVariants(params.type);
+        if (variants.length > 0) {
+            andParts.push({ eventType: { hasSome: variants } });
         }
     }
     if (params.startDate) {
         andParts.push({ startDate: { gte: new Date(params.startDate) } });
     }
+    if (params.startDateTo) {
+        andParts.push({ startDate: { lte: endOfUtcDay(params.startDateTo) } });
+    }
     if (params.endDate) {
         andParts.push({ endDate: { lte: new Date(params.endDate) } });
+    }
+    // Calendar overlap window (preferred for /event from/to URL params)
+    if (params.from) {
+        andParts.push({ endDate: { gte: new Date(params.from) } });
+    }
+    if (params.to) {
+        andParts.push({ startDate: { lte: endOfUtcDay(params.to) } });
     }
     if (params.featured) {
         andParts.push({ isFeatured: true });
@@ -141,12 +245,186 @@ async function listEventsFromDb(params) {
     if (params.vip) {
         andParts.push({ isVIP: true });
     }
+    if (params.planTier) {
+        const tiers = params.planTier
+            .split(",")
+            .map((t) => t.trim().toLowerCase())
+            .filter((t) => t === "free" || t === "silver" || t === "gold" || t === "platinum");
+        if (tiers.length === 1) {
+            andParts.push({ organizerPlanTier: tiers[0] });
+        }
+        else if (tiers.length > 1) {
+            andParts.push({ organizerPlanTier: { in: tiers } });
+        }
+    }
     if (params.excludePast) {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         andParts.push({ endDate: { gte: today } });
     }
+    if (params.minRating != null && Number.isFinite(params.minRating) && params.minRating > 0) {
+        andParts.push({ averageRating: { gte: params.minRating } });
+    }
+    const price = params.price?.trim().toLowerCase() ?? "";
+    if (price === "free") {
+        andParts.push({
+            OR: [
+                { ticketTypes: { none: { isActive: true } } },
+                { ticketTypes: { some: { isActive: true, price: 0 } } },
+            ],
+        });
+    }
+    else if (price === "under-1000") {
+        andParts.push({
+            ticketTypes: { some: { isActive: true, price: { lt: 1000 } } },
+        });
+    }
+    else if (price === "1000-5000") {
+        andParts.push({
+            AND: [
+                { ticketTypes: { some: { isActive: true, price: { gte: 1000, lte: 5000 } } } },
+                { ticketTypes: { none: { isActive: true, price: { lt: 1000 } } } },
+            ],
+        });
+    }
+    else if (price === "above-5000") {
+        andParts.push({
+            AND: [
+                { ticketTypes: { some: { isActive: true, price: { gt: 5000 } } } },
+                { ticketTypes: { none: { isActive: true, price: { lte: 5000 } } } },
+            ],
+        });
+    }
     const where = { AND: andParts };
+    const listInclude = {
+        organizer: {
+            select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+                avatar: true,
+            },
+        },
+        venue: {
+            select: {
+                id: true,
+                venueName: true,
+                venueCity: true,
+                venueState: true,
+                venueCountry: true,
+                venueAddress: true,
+            },
+        },
+        ticketTypes: {
+            where: { isActive: true },
+            select: {
+                id: true,
+                name: true,
+                price: true,
+                quantity: true,
+            },
+            orderBy: { price: "asc" },
+            take: 1,
+        },
+        _count: {
+            select: {
+                registrations: {
+                    where: { status: "CONFIRMED" },
+                },
+                reviews: true,
+                savedEvents: true,
+            },
+        },
+        savedEvents: {
+            orderBy: { savedAt: "desc" },
+            take: 3,
+            select: {
+                user: {
+                    select: {
+                        id: true,
+                        firstName: true,
+                        lastName: true,
+                        avatar: true,
+                    },
+                },
+            },
+        },
+        leads: params.userId
+            ? {
+                where: {
+                    userId: params.userId,
+                },
+                select: {
+                    type: true,
+                },
+            }
+            : false,
+    };
+    // Ranked listing: hard tier order (platinum → gold → silver → free), then nearest start, then score.
+    // Search path adds live FTS relevance into finalScore; browse uses precomputed rankScore only.
+    if (params.sort === "ranked") {
+        const slimRows = await prisma_1.default.event.findMany({
+            where,
+            select: {
+                id: true,
+                startDate: true,
+                organizerPlanTier: true,
+                searchStats: true,
+            },
+        });
+        const ranked = (0, event_fts_1.sortRankedCandidates)(slimRows.map((row) => {
+            const relevanceScore = ftsRelevance && ftsRelevance.size > 0 ? ftsRelevance.get(row.id) ?? 0 : 0;
+            const stats = row.searchStats;
+            const baseRankScore = typeof stats?.rankScore === "number" ? stats.rankScore : 0;
+            return {
+                id: row.id,
+                startDate: row.startDate,
+                planTierRank: (0, event_fts_1.planTierSortRank)(row.organizerPlanTier),
+                baseRankScore,
+                relevanceScore,
+                finalScore: (0, event_fts_1.finalScoreWithRelevance)(baseRankScore, relevanceScore),
+            };
+        }));
+        const total = ranked.length;
+        const pageIds = ranked.slice(skip, skip + limit).map((r) => r.id);
+        const scoreById = new Map(ranked.map((r) => [r.id, r]));
+        const events = pageIds.length === 0
+            ? []
+            : await prisma_1.default.event.findMany({
+                where: { id: { in: pageIds } },
+                omit: { description: true },
+                include: listInclude,
+            });
+        const byId = new Map(events.map((e) => [e.id, e]));
+        const ordered = pageIds.map((id) => byId.get(id)).filter(Boolean);
+        const transformedEvents = ordered.map((event) => {
+            const scored = scoreById.get(event.id);
+            return {
+                ...transformListEvent(event),
+                ranking: scored
+                    ? {
+                        version: event_ranking_1.RANKING_VERSION,
+                        score: scored.finalScore,
+                        relevance: scored.relevanceScore,
+                        base: scored.baseRankScore,
+                        planTierRank: scored.planTierRank,
+                    }
+                    : undefined,
+            };
+        });
+        return {
+            events: transformedEvents,
+            pagination: {
+                page,
+                limit,
+                total,
+                totalPages: Math.ceil(total / limit) || 1,
+                hasNextPage: page * limit < total,
+                hasPreviousPage: page > 1,
+            },
+        };
+    }
     let orderBy = {};
     switch (params.sort) {
         case "oldest":
@@ -174,137 +452,14 @@ async function listEventsFromDb(params) {
             omit: {
                 description: true,
             },
-            include: {
-                organizer: {
-                    select: {
-                        id: true,
-                        firstName: true,
-                        lastName: true,
-                        email: true,
-                        avatar: true,
-                    },
-                },
-                venue: {
-                    select: {
-                        id: true,
-                        venueName: true,
-                        venueCity: true,
-                        venueState: true,
-                        venueCountry: true,
-                        venueAddress: true,
-                    },
-                },
-                ticketTypes: {
-                    where: { isActive: true },
-                    select: {
-                        id: true,
-                        name: true,
-                        price: true,
-                        quantity: true,
-                    },
-                    orderBy: { price: "asc" },
-                    take: 1,
-                },
-                _count: {
-                    select: {
-                        registrations: {
-                            where: { status: "CONFIRMED" },
-                        },
-                        reviews: true,
-                        savedEvents: true,
-                    },
-                },
-                savedEvents: {
-                    orderBy: { savedAt: "desc" },
-                    take: 3,
-                    select: {
-                        user: {
-                            select: {
-                                id: true,
-                                firstName: true,
-                                lastName: true,
-                                avatar: true,
-                            },
-                        },
-                    },
-                },
-            },
+            include: listInclude,
             orderBy,
             skip,
             take: limit,
         }),
         prisma_1.default.event.count({ where }),
     ]);
-    const transformedEvents = events.map((event) => {
-        const cheapestTicket = event.ticketTypes[0]?.price || 0;
-        return {
-            id: event.id,
-            title: event.title,
-            /** Full body omitted at DB layer for listing — cards use short text only.. */
-            description: event.shortDescription ?? "",
-            shortDescription: event.shortDescription,
-            subTitle: event.subTitle ?? null,
-            edition: event.edition,
-            slug: event.slug,
-            startDate: event.startDate.toISOString(),
-            endDate: event.endDate.toISOString(),
-            timezone: event.timezone,
-            location: event.venue?.venueName || "Virtual Event",
-            city: event.venue?.venueCity || "",
-            state: event.venue?.venueState || "",
-            country: event.venue?.venueCountry || "",
-            address: event.venue?.venueAddress || "",
-            venue: event.venue
-                ? {
-                    venueName: event.venue.venueName,
-                    venueCity: event.venue.venueCity,
-                    venueState: event.venue.venueState,
-                    venueCountry: event.venue.venueCountry,
-                    venueAddress: event.venue.venueAddress,
-                }
-                : null,
-            isVirtual: event.isVirtual,
-            virtualLink: event.virtualLink,
-            status: statusMap[event.status] || "Pending Review",
-            category: event.category || [],
-            tags: event.tags || [],
-            eventType: event.eventType || [],
-            isFeatured: event.isFeatured,
-            isVIP: event.isVIP,
-            isVerified: event.isVerified || false,
-            verifiedAt: event.verifiedAt?.toISOString() ?? null,
-            verifiedBy: event.verifiedBy || "",
-            verifiedBadgeImage: event.verifiedBadgeImage ?? null,
-            attendees: event._count.registrations,
-            totalReviews: event._count.reviews,
-            followersCount: event._count.savedEvents ?? 0,
-            followerPreview: Array.isArray(event.savedEvents)
-                ? event.savedEvents.map((se) => ({
-                    id: se.user.id,
-                    firstName: se.user.firstName,
-                    lastName: se.user.lastName,
-                    avatar: se.user.avatar ?? null,
-                }))
-                : [],
-            averageRating: Number(event.averageRating ?? 0),
-            cheapestTicket,
-            currency: event.currency,
-            images: event.images,
-            videos: event.videos ?? [],
-            bannerImage: event.bannerImage,
-            vipImage: event.vipImage ?? null,
-            thumbnailImage: event.thumbnailImage,
-            youtubeVideoUrl: event.youtubeVideoUrl ?? null,
-            organizer: {
-                id: event.organizer.id,
-                name: `${event.organizer.firstName} ${event.organizer.lastName}`.trim(),
-                email: event.organizer.email,
-                avatar: event.organizer.avatar,
-            },
-            createdAt: event.createdAt.toISOString(),
-            updatedAt: event.updatedAt.toISOString(),
-        };
-    });
+    const transformedEvents = events.map((event) => transformListEvent(event));
     return {
         events: transformedEvents,
         pagination: {
@@ -315,6 +470,83 @@ async function listEventsFromDb(params) {
             hasNextPage: page * limit < total,
             hasPreviousPage: page > 1,
         },
+    };
+}
+function transformListEvent(event) {
+    const cheapestTicket = event.ticketTypes[0]?.price || 0;
+    const leadType = event.leads?.[0]?.type ?? null;
+    const isVisited = leadType === "attendee";
+    const isExhibiting = leadType === "exhibitor";
+    return {
+        id: event.id,
+        title: event.title,
+        leadType,
+        isVisited,
+        isExhibiting,
+        /** Full body omitted at DB layer for listing — cards use short text only. */
+        description: event.shortDescription ?? "",
+        shortDescription: event.shortDescription,
+        subTitle: event.subTitle ?? null,
+        edition: event.edition,
+        slug: event.slug,
+        startDate: event.startDate.toISOString(),
+        endDate: event.endDate.toISOString(),
+        timezone: event.timezone,
+        location: event.venue?.venueName || "Virtual Event",
+        city: event.venue?.venueCity || "",
+        state: event.venue?.venueState || "",
+        country: event.venue?.venueCountry || "",
+        address: event.venue?.venueAddress || "",
+        venue: event.venue
+            ? {
+                venueName: event.venue.venueName,
+                venueCity: event.venue.venueCity,
+                venueState: event.venue.venueState,
+                venueCountry: event.venue.venueCountry,
+                venueAddress: event.venue.venueAddress,
+            }
+            : null,
+        isVirtual: event.isVirtual,
+        virtualLink: event.virtualLink,
+        status: statusMap[event.status] || "Pending Review",
+        category: event.category || [],
+        tags: event.tags || [],
+        eventType: event.eventType || [],
+        isFeatured: event.isFeatured,
+        isVIP: event.isVIP,
+        isVerified: event.isVerified || false,
+        verifiedAt: event.verifiedAt?.toISOString() ?? null,
+        verifiedBy: event.verifiedBy || "",
+        verifiedBadgeImage: event.verifiedBadgeImage ?? null,
+        attendees: event._count.registrations,
+        totalReviews: event._count.reviews,
+        followersCount: event._count.savedEvents ?? 0,
+        followerPreview: Array.isArray(event.savedEvents)
+            ? event.savedEvents.map((se) => ({
+                id: se.user.id,
+                firstName: se.user.firstName,
+                lastName: se.user.lastName,
+                avatar: se.user.avatar ?? null,
+            }))
+            : [],
+        averageRating: Number(event.averageRating ?? 0),
+        cheapestTicket,
+        currency: event.currency,
+        images: event.images,
+        videos: event.videos ?? [],
+        bannerImage: event.bannerImage,
+        vipImage: event.vipImage ?? null,
+        thumbnailImage: event.thumbnailImage,
+        youtubeVideoUrl: event.youtubeVideoUrl ?? null,
+        organizerPlanTier: event.organizerPlanTier ?? "free",
+        organizer: {
+            id: event.organizer.id,
+            name: `${event.organizer.firstName} ${event.organizer.lastName}`.trim(),
+            email: event.organizer.email,
+            avatar: event.organizer.avatar,
+        },
+        createdAt: event.createdAt.toISOString(),
+        updatedAt: event.updatedAt.toISOString(),
     };
 }
 // Featured events — same venue/location shape as listEvents so home cards get city/country.
@@ -736,34 +968,18 @@ async function searchEntities(query, limit = 5) {
         };
     }
     const key = await (0, redis_1.searchCacheKey)(trimmed, limit);
-    return (0, redis_1.cached)(key, redis_1.CACHE_TTL.SEARCH, () => searchEntitiesFromDb(trimmed, limit));
+    const result = await (0, redis_1.cached)(key, redis_1.CACHE_TTL.SEARCH, () => searchEntitiesFromDb(trimmed, limit));
+    (0, search_analytics_service_1.recordSearchQuerySafe)({
+        query: trimmed,
+        resultCount: result.events?.length ?? 0,
+        source: "navbar",
+    });
+    return result;
 }
 async function searchEntitiesFromDb(trimmed, limit) {
-    const [events, venues, speakers] = await Promise.all([
-        prisma_1.default.event.findMany({
-            where: {
-                AND: [
-                    (0, public_profile_1.publicPublishedEventWhere)(),
-                    { title: { contains: trimmed, mode: "insensitive" } },
-                ],
-            },
-            select: {
-                id: true,
-                title: true,
-                slug: true,
-                startDate: true,
-                isVIP: true,
-                isFeatured: true,
-                venue: {
-                    select: {
-                        venueCity: true,
-                        venueCountry: true,
-                    },
-                },
-            },
-            orderBy: { startDate: "asc" },
-            take: limit,
-        }),
+    const ftsEventsPromise = (0, event_fts_1.searchPublishedEventsByFts)(trimmed, limit);
+    const [ftsEvents, venues, speakers] = await Promise.all([
+        ftsEventsPromise,
         prisma_1.default.user.findMany({
             where: {
                 role: "VENUE_MANAGER",
@@ -796,16 +1012,61 @@ async function searchEntitiesFromDb(trimmed, limit) {
             take: limit,
         }),
     ]);
-    const eventResults = events.map((event) => ({
-        id: event.id,
-        title: event.title,
-        slug: event.slug,
-        startDate: event.startDate,
-        isVIP: event.isVIP,
-        isFeatured: event.isFeatured,
-        venue: event.venue,
-        type: "event",
-    }));
+    let eventResults;
+    if (ftsEvents && ftsEvents.length > 0) {
+        eventResults = ftsEvents.map((event) => ({
+            id: event.id,
+            title: event.title,
+            slug: event.slug,
+            startDate: event.startDate,
+            isVIP: event.isVIP,
+            isFeatured: event.isFeatured,
+            venue: event.venueCity || event.venueCountry
+                ? { venueCity: event.venueCity, venueCountry: event.venueCountry }
+                : null,
+            type: "event",
+        }));
+    }
+    else if (ftsEvents === null) {
+        // FTS unavailable — ILIKE title fallback
+        const events = await prisma_1.default.event.findMany({
+            where: {
+                AND: [
+                    (0, public_profile_1.publicPublishedEventWhere)(),
+                    { title: { contains: trimmed, mode: "insensitive" } },
+                ],
+            },
+            select: {
+                id: true,
+                title: true,
+                slug: true,
+                startDate: true,
+                isVIP: true,
+                isFeatured: true,
+                venue: {
+                    select: {
+                        venueCity: true,
+                        venueCountry: true,
+                    },
+                },
+            },
+            orderBy: { startDate: "asc" },
+            take: limit,
+        });
+        eventResults = events.map((event) => ({
+            id: event.id,
+            title: event.title,
+            slug: event.slug,
+            startDate: event.startDate,
+            isVIP: event.isVIP,
+            isFeatured: event.isFeatured,
+            venue: event.venue,
+            type: "event",
+        }));
+    }
+    else {
+        eventResults = [];
+    }
     const venueResults = venues.map((venue) => ({
         id: venue.id,
         venueName: venue.venueName,
@@ -1583,12 +1844,16 @@ async function saveEvent(userId, eventId) {
         data: { userId, eventId },
         include: { event: true },
     });
+    const { refreshEventSearchStats } = await Promise.resolve().then(() => __importStar(require("./event-ranking.service")));
+    await refreshEventSearchStats(eventId).catch(() => undefined);
     return { savedEvent };
 }
 async function unsaveEvent(userId, eventId) {
     await prisma_1.default.savedEvent.deleteMany({
         where: { userId, eventId },
     });
+    const { refreshEventSearchStats } = await Promise.resolve().then(() => __importStar(require("./event-ranking.service")));
+    await refreshEventSearchStats(eventId).catch(() => undefined);
     return { removed: true };
 }
 async function isEventSaved(userId, eventId) {

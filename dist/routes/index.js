@@ -36,6 +36,7 @@ const support_user_1 = __importDefault(require("./support-user"));
 const contact_1 = __importDefault(require("./contact"));
 const newsletter_1 = __importDefault(require("./newsletter"));
 const payments_routes_1 = __importDefault(require("../modules/payments/payments.routes"));
+// import subscriptionsRouter from "../modules/subscriptions/subscriptions.routes";
 const subscriptions_routes_1 = __importDefault(require("../modules/subscriptions/subscriptions.routes"));
 const router = (0, express_1.Router)();
 // Placeholder root route for the backend API

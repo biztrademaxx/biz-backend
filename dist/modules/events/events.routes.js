@@ -8,8 +8,10 @@ const router = (0, express_1.Router)();
 router.get("/event-categories", events_controller_1.getPublicEventCategoriesHandler);
 // DB-backed categories + event counts (homepage sidebars, no auth)
 router.get("/events/categories/browse", events_controller_1.getEventCategoriesBrowseHandler);
+// Listing sidebar facets (categories / locations / formats)
+router.get("/events/facets", events_controller_1.getEventFacetsHandler);
 // List events, with filters & pagination
-router.get("/events", events_controller_1.getEventsHandler);
+router.get("/events", auth_middleware_1.optionalUser, events_controller_1.getEventsHandler);
 // Recent events
 router.get("/events/recent", events_controller_1.getRecentEventsHandler);
 // VIP events
@@ -58,4 +60,5 @@ router.post("/events/:id/promotions", auth_middleware_1.requireUser, events_cont
 router.post("/events/:id/metrics", events_controller_1.trackEventMetricsHandler);
 // Global search (events, venues, speakers)
 router.get("/search", events_controller_1.searchHandler);
+router.post("/search/click", auth_middleware_1.optionalUser, events_controller_1.searchClickHandler);
 exports.default = router;
