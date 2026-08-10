@@ -754,6 +754,12 @@ export async function createEventAdmin(params: CreateEventAdminParams) {
     await invalidateSpeakerCaches();
   }
 
+  const { syncOrganizerPlanTierForUser, refreshEventSearchStats } = await import(
+    "./event-ranking.service"
+  );
+  await syncOrganizerPlanTierForUser(createdEvent.organizerId).catch(() => undefined);
+  await refreshEventSearchStats(createdEvent.id).catch(() => undefined);
+
   return {
     success: true,
     message: "Event created successfully with nested entities",

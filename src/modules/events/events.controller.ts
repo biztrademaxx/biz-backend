@@ -22,6 +22,7 @@ import {
   updateEventLayoutPlan,
   updateEventFields,
 } from "./events.service";
+import { RANKING_VERSION } from "./event-ranking";
 import { updateEventSchedule } from "./event-schedule";
 import {
   listEventSpaceCosts,
@@ -66,6 +67,22 @@ export async function getEventCategoriesBrowseHandler(_req: Request, res: Respon
   }
 }
 
+/** /event sidebar facet counts (categories, locations, formats). */
+export async function getEventFacetsHandler(req: Request, res: Response) {
+  try {
+    const { getEventListingFacets } = await import("./event-facets.service");
+    const excludePast = req.query.excludePast !== "false";
+    const facets = await getEventListingFacets({ excludePast });
+    return res.json({ success: true, ...facets });
+  } catch (e: any) {
+    console.error("getEventFacetsHandler:", e);
+    return res.status(500).json({
+      success: false,
+      error: e?.message || "Failed to load event facets",
+    });
+  }
+}
+
 export async function getEventsHandler(req: Request, res: Response) {
   try {
     const {
@@ -73,15 +90,24 @@ export async function getEventsHandler(req: Request, res: Response) {
       limit,
       category,
       search,
+      q,
       location,
+      country,
+      type,
+      format,
       startDate,
       endDate,
+      from,
+      to,
+      startDateTo,
       featured,
       sort,
       verified,
       vip,
       stats,
       excludePast,
+      minRating,
+      price,
     } = req.query;
 
     // If stats=true, return category stats (backward-compatible behavior)
@@ -95,20 +121,36 @@ export async function getEventsHandler(req: Request, res: Response) {
 
     const pageNum = page ? parseInt(page as string, 10) : undefined;
     const limitNum = limit ? parseInt(limit as string, 10) : undefined;
+    const minRatingNum =
+      minRating != null && String(minRating).trim() !== ""
+        ? Number.parseFloat(minRating as string)
+        : null;
+
+    const searchText =
+      (search as string | undefined)?.trim() ||
+      (q as string | undefined)?.trim() ||
+      "";
 
     const result = await listEvents({
       page: pageNum,
       limit: limitNum,
       category: (category as string | undefined) ?? null,
-      search: (search as string | undefined) ?? "",
+      search: searchText,
       location: (location as string | undefined) ?? null,
+      country: (country as string | undefined) ?? null,
+      type: ((type as string | undefined) || (format as string | undefined)) ?? null,
       startDate: (startDate as string | undefined) ?? null,
       endDate: (endDate as string | undefined) ?? null,
+      from: (from as string | undefined) ?? null,
+      to: (to as string | undefined) ?? null,
+      startDateTo: (startDateTo as string | undefined) ?? null,
       featured: featured === "true",
       sort: (sort as string | undefined) ?? "newest",
       verified: verified === "true",
       vip: vip === "true",
       excludePast: excludePast === "true",
+      minRating: minRatingNum != null && Number.isFinite(minRatingNum) ? minRatingNum : null,
+      price: (price as string | undefined) ?? null,
       userId: req.auth?.sub,
     });
 
@@ -116,6 +158,10 @@ export async function getEventsHandler(req: Request, res: Response) {
       success: true,
       events: result.events,
       pagination: result.pagination,
+      meta: {
+        rankingVersion: RANKING_VERSION,
+        sort: (sort as string | undefined) ?? "newest",
+      },
     });
   } catch (error: any) {
     // eslint-disable-next-line no-console
@@ -713,12 +759,35 @@ export async function searchHandler(req: Request, res: Response) {
     const limit = req.query.limit ? Number(req.query.limit) : 5;
 
     const result = await searchEntities(q, limit);
-
     return res.json(result);
   } catch (error: any) {
     // eslint-disable-next-line no-console
-    console.error("Search API error (backend):", error);
-    return res.status(500).json({ error: "Internal server error" });
+    console.error("Error in search (backend):", error);
+    return res.status(500).json({ error: "Search failed" });
+  }
+}
+
+/** Phase 4: record listing / navbar result click for ranking CTR. */
+export async function searchClickHandler(req: Request, res: Response) {
+  try {
+    const { recordSearchClick } = await import("./search-analytics.service");
+    const body = req.body ?? {};
+    const result = await recordSearchClick({
+      query: typeof body.query === "string" ? body.query : null,
+      eventId: String(body.eventId ?? ""),
+      position: body.position != null ? Number(body.position) : null,
+      page: body.page != null ? Number(body.page) : null,
+      userId: req.auth?.domain === "USER" ? req.auth.sub : null,
+      sessionId: typeof body.sessionId === "string" ? body.sessionId : null,
+      listingSource: body.listingSource === "navbar" ? "navbar" : "events_list",
+    });
+    if ("error" in result) {
+      return res.status(400).json({ success: false, error: result.error });
+    }
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error("searchClickHandler:", error);
+    return res.status(500).json({ success: false, error: "Failed to record click" });
   }
 }
 

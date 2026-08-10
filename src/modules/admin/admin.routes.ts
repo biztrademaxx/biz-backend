@@ -16,6 +16,9 @@ import {
   adminVerifyEventHandler,
   adminGetEventMailCandidatesHandler,
   adminSendEventListingEmailHandler,
+  adminBackfillEventRankingHandler,
+  adminRefreshEventTrendingHandler,
+  adminSearchAnalyticsHandler,
 } from "./admin.controller";
 import { createEventAdminHandler } from "../events/events.controller";
 import { getEventImportJobHandler, postEventImportHandler } from "./event-import/event-import.controller";
@@ -86,6 +89,9 @@ router.get("/events/:id", requireAdmin, adminGetEventByIdHandler);
 router.patch("/events/:id", requireAdmin, adminUpdateEventHandler);
 router.delete("/events/:id", requireAdmin, adminDeleteEventHandler);
 router.post("/events", requireAdmin, createEventAdminHandler);
+router.post("/events/ranking/backfill", requireAdmin, adminBackfillEventRankingHandler);
+router.post("/events/ranking/refresh-trending", requireAdmin, adminRefreshEventTrendingHandler);
+router.get("/search/analytics", requireAdmin, adminSearchAnalyticsHandler);
 router.post("/events/approve", requireAdmin, requirePermission("approve_events"), adminApproveEventHandler);
 router.post("/events/reject", requireAdmin, requirePermission("approve_events"), adminRejectEventHandler);
 router.post("/events/bulk-approve", requireAdmin, requirePermission("approve_events"), adminBulkApproveEventsHandler);

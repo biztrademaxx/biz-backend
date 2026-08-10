@@ -18,6 +18,14 @@ import {
 } from "../../utils/public-profile";
 import { getPublicProfileSlug } from "../../utils/profile-slug";
 import { resolveUserCityCountry } from "../../utils/profile-location";
+import {
+  fetchEventFtsRelevanceMap,
+  finalScoreWithRelevance,
+  searchPublishedEventsByFts,
+  sortRankedCandidates,
+} from "./event-fts";
+import { RANKING_VERSION } from "./event-ranking";
+import { recordSearchQuerySafe } from "./search-analytics.service";
 
 const statusMap: Record<string, string> = {
   PUBLISHED: "Approved",
@@ -37,59 +45,163 @@ function trimOrganizerEventText(v: unknown): string | null {
 export interface ListEventsParams {
   page?: number;
   limit?: number;
+  /** Single category, or comma-separated list (OR match via hasSome). */
   category?: string | null;
   search?: string;
   location?: string | null;
+  country?: string | null;
+  /** Explore type key or format label, e.g. CONFERENCE / Conference. */
+  type?: string | null;
   startDate?: string | null;
   endDate?: string | null;
+  /** Inclusive calendar overlap: event.endDate >= from */
+  from?: string | null;
+  /** Inclusive calendar overlap: event.startDate <= to */
+  to?: string | null;
+  /** Upper bound on event.startDate (e.g. tab "This Week"). */
+  startDateTo?: string | null;
   featured?: boolean;
   sort?: string;
   verified?: boolean;
   vip?: boolean;
   excludePast?: boolean;
+  minRating?: number | null;
+  /** free | under-1000 | 1000-5000 | above-5000 — based on cheapest active ticket. */
+  price?: string | null;
   userId?: string;
 }
 
+const LIST_EVENTS_MAX_LIMIT = 500;
+
+function parseCategoryFilter(category: string | null | undefined): string[] {
+  if (!category?.trim()) return [];
+  return category
+    .split(",")
+    .map((c) => c.trim())
+    .filter(Boolean);
+}
+
+function exploreTypeVariants(typeRaw: string): string[] {
+  const t = typeRaw.trim();
+  if (!t) return [];
+  const upper = t.toUpperCase();
+  const variants = new Set<string>([t, upper, t.toLowerCase()]);
+  if (upper === "CONFERENCE" || t.toLowerCase() === "conference") {
+    variants.add("Conference");
+    variants.add("CONFERENCE");
+  } else if (upper === "EXHIBITION" || t.toLowerCase() === "exhibition") {
+    variants.add("Exhibition");
+    variants.add("EXHIBITION");
+  } else if (upper === "SEMINAR" || t.toLowerCase() === "seminar") {
+    variants.add("Seminar");
+    variants.add("SEMINAR");
+  } else if (
+    upper === "WORKSHOP" ||
+    t.toLowerCase() === "workshop" ||
+    t.toLowerCase() === "workshops"
+  ) {
+    variants.add("Workshop");
+    variants.add("Workshops");
+    variants.add("WORKSHOP");
+  }
+  return Array.from(variants);
+}
+
+function endOfUtcDay(isoDate: string): Date {
+  const d = new Date(isoDate);
+  if (Number.isNaN(d.getTime())) return d;
+  d.setUTCHours(23, 59, 59, 999);
+  return d;
+}
+
 export async function listEvents(params: ListEventsParams) {
-  const key = await eventsListCacheKey(params as Record<string, unknown>);
-  return cached(key, CACHE_TTL.EVENTS_LIST, () => listEventsFromDb(params));
+  const key = await eventsListCacheKey({
+    ...(params as Record<string, unknown>),
+    rankingVersion: RANKING_VERSION,
+  });
+  const result = await cached(key, CACHE_TTL.EVENTS_LIST, () => listEventsFromDb(params));
+  const q = params.search?.trim() ?? "";
+  if (q.length >= 2) {
+    recordSearchQuerySafe({
+      query: q,
+      resultCount: result.pagination?.total ?? result.events.length,
+      source: "events_list",
+    });
+  }
+  return result;
 }
 
 async function listEventsFromDb(params: ListEventsParams) {
   const page = params.page && params.page > 0 ? params.page : 1;
-  const limit = params.limit && params.limit > 0 ? params.limit : 12;
+  const rawLimit = params.limit && params.limit > 0 ? params.limit : 12;
+  const limit = Math.min(rawLimit, LIST_EVENTS_MAX_LIMIT);
   const skip = (page - 1) * limit;
 
   const andParts: Prisma.EventWhereInput[] = [publicPublishedEventWhere()];
 
-  if (params.category) {
-    andParts.push({ category: { has: params.category } });
+  const categories = parseCategoryFilter(params.category);
+  if (categories.length === 1) {
+    andParts.push({ category: { has: categories[0] } });
+  } else if (categories.length > 1) {
+    andParts.push({ category: { hasSome: categories } });
   }
 
   const search = params.search?.trim() ?? "";
+  let ftsRelevance: Map<string, number> | null = null;
   if (search) {
-    andParts.push({
-      OR: [
-        { title: { contains: search, mode: "insensitive" } },
-        { description: { contains: search, mode: "insensitive" } },
-        { shortDescription: { contains: search, mode: "insensitive" } },
-        { tags: { has: search } },
-      ],
-    });
+    ftsRelevance = await fetchEventFtsRelevanceMap(search, 2000);
+    if (ftsRelevance.size > 0) {
+      andParts.push({ id: { in: Array.from(ftsRelevance.keys()) } });
+    } else {
+      // Fallback when FTS has no hits (or column not migrated yet)
+      andParts.push({
+        OR: [
+          { title: { contains: search, mode: "insensitive" } },
+          { description: { contains: search, mode: "insensitive" } },
+          { shortDescription: { contains: search, mode: "insensitive" } },
+          { tags: { has: search } },
+        ],
+      });
+      ftsRelevance = null;
+    }
   }
 
   if (params.location) {
     const location = params.location.trim();
     if (location) {
       andParts.push({
-        venue: {
-          OR: [
-            { venueCity: { contains: location, mode: "insensitive" } },
-            { venueState: { contains: location, mode: "insensitive" } },
-            { venueCountry: { contains: location, mode: "insensitive" } },
-          ],
-        },
+        OR: [
+          {
+            venue: {
+              OR: [
+                { venueCity: { contains: location, mode: "insensitive" } },
+                { venueState: { contains: location, mode: "insensitive" } },
+                { venueCountry: { contains: location, mode: "insensitive" } },
+              ],
+            },
+          },
+          { city: { contains: location, mode: "insensitive" } },
+        ],
       });
+    }
+  }
+
+  if (params.country) {
+    const country = params.country.trim();
+    if (country) {
+      andParts.push({
+        OR: [
+          { country: { contains: country, mode: "insensitive" } },
+          { venue: { venueCountry: { contains: country, mode: "insensitive" } } },
+        ],
+      });
+    }
+  }
+
+  if (params.type) {
+    const variants = exploreTypeVariants(params.type);
+    if (variants.length > 0) {
+      andParts.push({ eventType: { hasSome: variants } });
     }
   }
 
@@ -97,8 +209,20 @@ async function listEventsFromDb(params: ListEventsParams) {
     andParts.push({ startDate: { gte: new Date(params.startDate) } });
   }
 
+  if (params.startDateTo) {
+    andParts.push({ startDate: { lte: endOfUtcDay(params.startDateTo) } });
+  }
+
   if (params.endDate) {
     andParts.push({ endDate: { lte: new Date(params.endDate) } });
+  }
+
+  // Calendar overlap window (preferred for /event from/to URL params)
+  if (params.from) {
+    andParts.push({ endDate: { gte: new Date(params.from) } });
+  }
+  if (params.to) {
+    andParts.push({ startDate: { lte: endOfUtcDay(params.to) } });
   }
 
   if (params.featured) {
@@ -119,7 +243,173 @@ async function listEventsFromDb(params: ListEventsParams) {
     andParts.push({ endDate: { gte: today } });
   }
 
+  if (params.minRating != null && Number.isFinite(params.minRating) && params.minRating > 0) {
+    andParts.push({ averageRating: { gte: params.minRating } });
+  }
+
+  const price = params.price?.trim().toLowerCase() ?? "";
+  if (price === "free") {
+    andParts.push({
+      OR: [
+        { ticketTypes: { none: { isActive: true } } },
+        { ticketTypes: { some: { isActive: true, price: 0 } } },
+      ],
+    });
+  } else if (price === "under-1000") {
+    andParts.push({
+      ticketTypes: { some: { isActive: true, price: { lt: 1000 } } },
+    });
+  } else if (price === "1000-5000") {
+    andParts.push({
+      AND: [
+        { ticketTypes: { some: { isActive: true, price: { gte: 1000, lte: 5000 } } } },
+        { ticketTypes: { none: { isActive: true, price: { lt: 1000 } } } },
+      ],
+    });
+  } else if (price === "above-5000") {
+    andParts.push({
+      AND: [
+        { ticketTypes: { some: { isActive: true, price: { gt: 5000 } } } },
+        { ticketTypes: { none: { isActive: true, price: { lte: 5000 } } } },
+      ],
+    });
+  }
+
   const where: Prisma.EventWhereInput = { AND: andParts };
+
+  const listInclude = {
+    organizer: {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        avatar: true,
+      },
+    },
+    venue: {
+      select: {
+        id: true,
+        venueName: true,
+        venueCity: true,
+        venueState: true,
+        venueCountry: true,
+        venueAddress: true,
+      },
+    },
+    ticketTypes: {
+      where: { isActive: true },
+      select: {
+        id: true,
+        name: true,
+        price: true,
+        quantity: true,
+      },
+      orderBy: { price: "asc" as const },
+      take: 1,
+    },
+    _count: {
+      select: {
+        registrations: {
+          where: { status: "CONFIRMED" },
+        },
+        reviews: true,
+        savedEvents: true,
+      },
+    },
+    savedEvents: {
+      orderBy: { savedAt: "desc" as const },
+      take: 3,
+      select: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            avatar: true,
+          },
+        },
+      },
+    },
+    leads: params.userId
+      ? {
+          where: {
+            userId: params.userId,
+          },
+          select: {
+            type: true,
+          },
+        }
+      : false,
+  } as const;
+
+  // Phase 3: ranked + search → live FinalScore = baseRankScore + 0.25·S_rel
+  if (params.sort === "ranked" && ftsRelevance && ftsRelevance.size > 0) {
+    const slimRows = await prisma.event.findMany({
+      where,
+      select: {
+        id: true,
+        startDate: true,
+        searchStats: true,
+      },
+    });
+    const ranked = sortRankedCandidates(
+      slimRows.map((row) => {
+        const relevanceScore = ftsRelevance!.get(row.id) ?? 0;
+        const stats = row.searchStats as { rankScore?: number } | null;
+        const baseRankScore = typeof stats?.rankScore === "number" ? stats.rankScore : 0;
+        return {
+          id: row.id,
+          startDate: row.startDate,
+          baseRankScore,
+          relevanceScore,
+          finalScore: finalScoreWithRelevance(baseRankScore, relevanceScore),
+        };
+      }),
+    );
+    const total = ranked.length;
+    const pageIds = ranked.slice(skip, skip + limit).map((r) => r.id);
+    const scoreById = new Map(ranked.map((r) => [r.id, r]));
+
+    const events =
+      pageIds.length === 0
+        ? []
+        : await prisma.event.findMany({
+            where: { id: { in: pageIds } },
+            omit: { description: true },
+            include: listInclude,
+          });
+
+    const byId = new Map(events.map((e) => [e.id, e]));
+    const ordered = pageIds.map((id) => byId.get(id)).filter(Boolean) as typeof events;
+
+    const transformedEvents = ordered.map((event: any) => {
+      const scored = scoreById.get(event.id);
+      return {
+        ...transformListEvent(event),
+        ranking: scored
+          ? {
+              version: RANKING_VERSION,
+              score: scored.finalScore,
+              relevance: scored.relevanceScore,
+              base: scored.baseRankScore,
+            }
+          : undefined,
+      };
+    });
+
+    return {
+      events: transformedEvents,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit) || 1,
+        hasNextPage: page * limit < total,
+        hasPreviousPage: page > 1,
+      },
+    };
+  }
 
   let orderBy: any = {};
   switch (params.sort) {
@@ -138,6 +428,14 @@ async function listEventsFromDb(params: ListEventsParams) {
     case "verified":
       orderBy = [{ isVerified: "desc" }, { createdAt: "desc" }];
       break;
+    case "ranked":
+      // Phase 3 browse: precomputed rankScore (sub + pop + trend + fresh)
+      orderBy = [
+        { searchStats: { rankScore: "desc" } },
+        { startDate: "asc" },
+        { id: "asc" },
+      ];
+      break;
     case "newest":
     default:
       orderBy = { createdAt: "desc" };
@@ -149,71 +447,7 @@ async function listEventsFromDb(params: ListEventsParams) {
       omit: {
         description: true,
       },
-      include: {
-        organizer: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            avatar: true,
-          },
-        },
-        venue: {
-          select: {
-            id: true,
-            venueName: true,
-            venueCity: true,
-            venueState: true,
-            venueCountry: true,
-            venueAddress: true,
-          },
-        },
-        ticketTypes: {
-          where: { isActive: true },
-          select: {
-            id: true,
-            name: true,
-            price: true,
-            quantity: true,
-          },
-          orderBy: { price: "asc" as const },
-          take: 1,
-        },
-        _count: {
-          select: {
-            registrations: {
-              where: { status: "CONFIRMED" },
-            },
-            reviews: true,
-            savedEvents: true,
-          },
-        },
-        savedEvents: {
-          orderBy: { savedAt: "desc" },
-          take: 3,
-          select: {
-            user: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                avatar: true,
-              },
-            },
-          },
-        },
-        leads: params.userId
-          ? {
-            where: {
-              userId: params.userId,
-            },
-            select: {
-              type: true,
-            },
-          }
-          : false,
-      },
+      include: listInclude,
       orderBy,
       skip,
       take: limit,
@@ -221,89 +455,7 @@ async function listEventsFromDb(params: ListEventsParams) {
     prisma.event.count({ where }),
   ]);
 
-  const transformedEvents = events.map((event: any) => {
-    const cheapestTicket = event.ticketTypes[0]?.price || 0;
-    const leadType = event.leads?.[0]?.type ?? null;
-
-    const isVisited =
-      leadType === "attendee";
-
-    const isExhibiting =
-      leadType === "exhibitor";
-
-    return {
-      id: event.id,
-      title: event.title,
-
-      leadType,
-      isVisited,
-      isExhibiting,
-      /** Full body omitted at DB layer for listing — cards use short text only. */
-
-      description: event.shortDescription ?? "",
-      shortDescription: event.shortDescription,
-      subTitle: event.subTitle ?? null,
-      edition: event.edition,
-      slug: event.slug,
-      startDate: event.startDate.toISOString(),
-      endDate: event.endDate.toISOString(),
-      timezone: event.timezone,
-      location: event.venue?.venueName || "Virtual Event",
-      city: event.venue?.venueCity || "",
-      state: event.venue?.venueState || "",
-      country: event.venue?.venueCountry || "",
-      address: event.venue?.venueAddress || "",
-      venue: event.venue
-        ? {
-            venueName: event.venue.venueName,
-            venueCity: event.venue.venueCity,
-            venueState: event.venue.venueState,
-            venueCountry: event.venue.venueCountry,
-            venueAddress: event.venue.venueAddress,
-          }
-        : null,
-      isVirtual: event.isVirtual,
-      virtualLink: event.virtualLink,
-      status: statusMap[event.status] || "Pending Review",
-      category: event.category || [],
-      tags: event.tags || [],
-      eventType: event.eventType || [],
-      isFeatured: event.isFeatured,
-      isVIP: event.isVIP,
-      isVerified: event.isVerified || false,
-      verifiedAt: event.verifiedAt?.toISOString() ?? null,
-      verifiedBy: event.verifiedBy || "",
-      verifiedBadgeImage: event.verifiedBadgeImage ?? null,
-      attendees: event._count.registrations,
-      totalReviews: event._count.reviews,
-      followersCount: event._count.savedEvents ?? 0,
-      followerPreview: Array.isArray(event.savedEvents)
-        ? event.savedEvents.map((se: { user: { id: string; firstName: string; lastName: string; avatar: string | null } }) => ({
-            id: se.user.id,
-            firstName: se.user.firstName,
-            lastName: se.user.lastName,
-            avatar: se.user.avatar ?? null,
-          }))
-        : [],
-      averageRating: Number(event.averageRating ?? 0),
-      cheapestTicket,
-      currency: event.currency,
-      images: event.images,
-      videos: event.videos ?? [],
-      bannerImage: event.bannerImage,
-      vipImage: event.vipImage ?? null,
-      thumbnailImage: event.thumbnailImage,
-      youtubeVideoUrl: event.youtubeVideoUrl ?? null,
-      organizer: {
-        id: event.organizer.id,
-        name: `${event.organizer.firstName} ${event.organizer.lastName}`.trim(),
-        email: event.organizer.email,
-        avatar: event.organizer.avatar,
-      },
-      createdAt: event.createdAt.toISOString(),
-      updatedAt: event.updatedAt.toISOString(),
-    };
-  });
+  const transformedEvents = events.map((event: any) => transformListEvent(event));
 
   return {
     events: transformedEvents,
@@ -315,6 +467,92 @@ async function listEventsFromDb(params: ListEventsParams) {
       hasNextPage: page * limit < total,
       hasPreviousPage: page > 1,
     },
+  };
+}
+
+function transformListEvent(event: any) {
+  const cheapestTicket = event.ticketTypes[0]?.price || 0;
+  const leadType = event.leads?.[0]?.type ?? null;
+
+  const isVisited = leadType === "attendee";
+  const isExhibiting = leadType === "exhibitor";
+
+  return {
+    id: event.id,
+    title: event.title,
+
+    leadType,
+    isVisited,
+    isExhibiting,
+    /** Full body omitted at DB layer for listing — cards use short text only. */
+
+    description: event.shortDescription ?? "",
+    shortDescription: event.shortDescription,
+    subTitle: event.subTitle ?? null,
+    edition: event.edition,
+    slug: event.slug,
+    startDate: event.startDate.toISOString(),
+    endDate: event.endDate.toISOString(),
+    timezone: event.timezone,
+    location: event.venue?.venueName || "Virtual Event",
+    city: event.venue?.venueCity || "",
+    state: event.venue?.venueState || "",
+    country: event.venue?.venueCountry || "",
+    address: event.venue?.venueAddress || "",
+    venue: event.venue
+      ? {
+          venueName: event.venue.venueName,
+          venueCity: event.venue.venueCity,
+          venueState: event.venue.venueState,
+          venueCountry: event.venue.venueCountry,
+          venueAddress: event.venue.venueAddress,
+        }
+      : null,
+    isVirtual: event.isVirtual,
+    virtualLink: event.virtualLink,
+    status: statusMap[event.status] || "Pending Review",
+    category: event.category || [],
+    tags: event.tags || [],
+    eventType: event.eventType || [],
+    isFeatured: event.isFeatured,
+    isVIP: event.isVIP,
+    isVerified: event.isVerified || false,
+    verifiedAt: event.verifiedAt?.toISOString() ?? null,
+    verifiedBy: event.verifiedBy || "",
+    verifiedBadgeImage: event.verifiedBadgeImage ?? null,
+    attendees: event._count.registrations,
+    totalReviews: event._count.reviews,
+    followersCount: event._count.savedEvents ?? 0,
+    followerPreview: Array.isArray(event.savedEvents)
+      ? event.savedEvents.map(
+          (se: {
+            user: { id: string; firstName: string; lastName: string; avatar: string | null };
+          }) => ({
+            id: se.user.id,
+            firstName: se.user.firstName,
+            lastName: se.user.lastName,
+            avatar: se.user.avatar ?? null,
+          }),
+        )
+      : [],
+    averageRating: Number(event.averageRating ?? 0),
+    cheapestTicket,
+    currency: event.currency,
+    images: event.images,
+    videos: event.videos ?? [],
+    bannerImage: event.bannerImage,
+    vipImage: event.vipImage ?? null,
+    thumbnailImage: event.thumbnailImage,
+    youtubeVideoUrl: event.youtubeVideoUrl ?? null,
+    organizerPlanTier: event.organizerPlanTier ?? "free",
+    organizer: {
+      id: event.organizer.id,
+      name: `${event.organizer.firstName} ${event.organizer.lastName}`.trim(),
+      email: event.organizer.email,
+      avatar: event.organizer.avatar,
+    },
+    createdAt: event.createdAt.toISOString(),
+    updatedAt: event.updatedAt.toISOString(),
   };
 }
 
@@ -810,36 +1048,20 @@ export async function searchEntities(query: string, limit = 5) {
   }
 
   const key = await searchCacheKey(trimmed, limit);
-  return cached(key, CACHE_TTL.SEARCH, () => searchEntitiesFromDb(trimmed, limit));
+  const result = await cached(key, CACHE_TTL.SEARCH, () => searchEntitiesFromDb(trimmed, limit));
+  recordSearchQuerySafe({
+    query: trimmed,
+    resultCount: result.events?.length ?? 0,
+    source: "navbar",
+  });
+  return result;
 }
 
 async function searchEntitiesFromDb(trimmed: string, limit: number) {
-  const [events, venues, speakers] = await Promise.all([
-    prisma.event.findMany({
-      where: {
-        AND: [
-          publicPublishedEventWhere(),
-          { title: { contains: trimmed, mode: "insensitive" } },
-        ],
-      },
-      select: {
-        id: true,
-        title: true,
-        slug: true,
-        startDate: true,
-        isVIP: true,
-        isFeatured: true,
-        venue: {
-          select: {
-            venueCity: true,
-            venueCountry: true,
-          },
-        },
-      },
-      orderBy: { startDate: "asc" as const },
-      take: limit,
-    }),
+  const ftsEventsPromise = searchPublishedEventsByFts(trimmed, limit);
 
+  const [ftsEvents, venues, speakers] = await Promise.all([
+    ftsEventsPromise,
     prisma.user.findMany({
       where: {
         role: "VENUE_MANAGER",
@@ -874,16 +1096,70 @@ async function searchEntitiesFromDb(trimmed: string, limit: number) {
     }),
   ]);
 
-  const eventResults = events.map((event: any) => ({
-    id: event.id,
-    title: event.title,
-    slug: event.slug,
-    startDate: event.startDate,
-    isVIP: event.isVIP,
-    isFeatured: event.isFeatured,
-    venue: event.venue,
-    type: "event" as const,
-  }));
+  let eventResults: Array<{
+    id: string;
+    title: string;
+    slug: string;
+    startDate: Date;
+    isVIP: boolean | null;
+    isFeatured: boolean | null;
+    venue: { venueCity: string | null; venueCountry: string | null } | null;
+    type: "event";
+  }>;
+
+  if (ftsEvents && ftsEvents.length > 0) {
+    eventResults = ftsEvents.map((event) => ({
+      id: event.id,
+      title: event.title,
+      slug: event.slug,
+      startDate: event.startDate,
+      isVIP: event.isVIP,
+      isFeatured: event.isFeatured,
+      venue:
+        event.venueCity || event.venueCountry
+          ? { venueCity: event.venueCity, venueCountry: event.venueCountry }
+          : null,
+      type: "event" as const,
+    }));
+  } else if (ftsEvents === null) {
+    // FTS unavailable — ILIKE title fallback
+    const events = await prisma.event.findMany({
+      where: {
+        AND: [
+          publicPublishedEventWhere(),
+          { title: { contains: trimmed, mode: "insensitive" } },
+        ],
+      },
+      select: {
+        id: true,
+        title: true,
+        slug: true,
+        startDate: true,
+        isVIP: true,
+        isFeatured: true,
+        venue: {
+          select: {
+            venueCity: true,
+            venueCountry: true,
+          },
+        },
+      },
+      orderBy: { startDate: "asc" as const },
+      take: limit,
+    });
+    eventResults = events.map((event) => ({
+      id: event.id,
+      title: event.title,
+      slug: event.slug,
+      startDate: event.startDate,
+      isVIP: event.isVIP,
+      isFeatured: event.isFeatured,
+      venue: event.venue,
+      type: "event" as const,
+    }));
+  } else {
+    eventResults = [];
+  }
 
   const venueResults = venues.map((venue: any) => ({
     id: venue.id,
@@ -1792,6 +2068,8 @@ export async function saveEvent(userId: string, eventId: string) {
     data: { userId, eventId },
     include: { event: true },
   });
+  const { refreshEventSearchStats } = await import("./event-ranking.service");
+  await refreshEventSearchStats(eventId).catch(() => undefined);
   return { savedEvent };
 }
 
@@ -1799,6 +2077,8 @@ export async function unsaveEvent(userId: string, eventId: string) {
   await prisma.savedEvent.deleteMany({
     where: { userId, eventId },
   });
+  const { refreshEventSearchStats } = await import("./event-ranking.service");
+  await refreshEventSearchStats(eventId).catch(() => undefined);
   return { removed: true };
 }
 

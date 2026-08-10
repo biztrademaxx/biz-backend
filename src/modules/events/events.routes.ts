@@ -6,6 +6,7 @@ import {
   getFeaturedEventsHandler,
   getEventsStatsHandler,
   searchHandler,
+  searchClickHandler,
   saveEventHandler,
   unsaveEventHandler,
   isEventSavedHandler,
@@ -36,6 +37,7 @@ import {
   createEventReviewHandler,
   getPublicEventCategoriesHandler,
   getEventCategoriesBrowseHandler,
+  getEventFacetsHandler,
 } from "./events.controller";
 import { requireUser, optionalUser } from "../../middleware/auth.middleware";
 
@@ -46,6 +48,9 @@ router.get("/event-categories", getPublicEventCategoriesHandler);
 
 // DB-backed categories + event counts (homepage sidebars, no auth)
 router.get("/events/categories/browse", getEventCategoriesBrowseHandler);
+
+// Listing sidebar facets (categories / locations / formats)
+router.get("/events/facets", getEventFacetsHandler);
 
 // List events, with filters & pagination
 router.get("/events", optionalUser, getEventsHandler);
@@ -110,6 +115,7 @@ router.post("/events/:id/metrics", trackEventMetricsHandler);
 
 // Global search (events, venues, speakers)
 router.get("/search", searchHandler);
+router.post("/search/click", optionalUser, searchClickHandler);
 
 export default router;
 

@@ -88,6 +88,8 @@ export async function trackPromotionMetric(
       data: { listingClicks: { increment: 1 } },
     });
     await incrementPromotionCounters(promotionIds, { clicks: 1 });
+    const { refreshEventSearchStats } = await import("./event-ranking.service");
+    await refreshEventSearchStats(eventId).catch(() => undefined);
   } else {
     await incrementPromotionCounters(promotionIds, { impressions: 1 });
   }

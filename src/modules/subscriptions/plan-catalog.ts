@@ -90,7 +90,7 @@ const ORGANIZER_PLANS: CatalogPlan[] = [
     slug: "organizer-silver",
     role: "ORGANIZER",
     name: "Silver Plan",
-    amountInr: 1, // ✅ Fixed: ₹10,000/year (matches frontend)
+    amountInr: 10000,
     billingNote: "per year",
     billingKind: "YEARLY",
     displayOrder: 2,
@@ -108,7 +108,7 @@ const ORGANIZER_PLANS: CatalogPlan[] = [
     slug: "organizer-platinum",
     role: "ORGANIZER",
     name: "Platinum Plan",
-    amountInr: 1, // ✅ Fixed: ₹50,000/month (was 1)
+    amountInr: 50000,
     billingNote: "month",
     billingKind: "MONTHLY",
     displayOrder: 4,

@@ -505,3 +505,53 @@ export async function adminSendEventListingEmailHandler(req: Request, res: Respo
   }
 }
 
+/** Phase 2/3: backfill organizerPlanTier + EventSearchStats.rankScore (+ trending windows). */
+export async function adminBackfillEventRankingHandler(_req: Request, res: Response) {
+  try {
+    const { backfillEventRankingFeatures } = await import("../events/event-ranking.service");
+    const result = await backfillEventRankingFeatures();
+    return res.json({ success: true, ...result });
+  } catch (error: any) {
+    console.error("Admin backfill event ranking error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to backfill event ranking",
+      details: error?.message,
+    });
+  }
+}
+
+/** Phase 3: refresh 7-day trending windows only. */
+export async function adminRefreshEventTrendingHandler(_req: Request, res: Response) {
+  try {
+    const { refreshTrendingWindows7d } = await import("../events/event-ranking.service");
+    const result = await refreshTrendingWindows7d();
+    return res.json({ success: true, ...result });
+  } catch (error: any) {
+    console.error("Admin refresh event trending error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to refresh trending windows",
+      details: error?.message,
+    });
+  }
+}
+
+/** Phase 4: search demand + CTR summary. */
+export async function adminSearchAnalyticsHandler(req: Request, res: Response) {
+  try {
+    const { getSearchAnalyticsSummary } = await import("../events/search-analytics.service");
+    const limit = req.query.limit ? Number(req.query.limit) : 25;
+    const days = req.query.days ? Number(req.query.days) : 14;
+    const result = await getSearchAnalyticsSummary({ limit, days });
+    return res.json({ success: true, ...result });
+  } catch (error: any) {
+    console.error("Admin search analytics error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to load search analytics",
+      details: error?.message,
+    });
+  }
+}
+

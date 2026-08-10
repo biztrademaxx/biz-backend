@@ -142,6 +142,13 @@ export async function activateFreePlan(input: { userId: string; role: string; pl
     return { error: "FAILED" as const, message: subscription.error };
   }
 
+  if (plan.role === "ORGANIZER") {
+    const { syncOrganizerPlanTierForUser } = await import("../events/event-ranking.service");
+    await syncOrganizerPlanTierForUser(input.userId).catch((err) => {
+      console.error("syncOrganizerPlanTierForUser after free activate:", err);
+    });
+  }
+
   return { success: true, subscription: serializeSubscription(subscription) };
 }
 
@@ -223,6 +230,13 @@ export async function activateSubscriptionAfterPayment(input: {
     return sub;
   });
 
+  if (payment.subscriptionRole === "ORGANIZER") {
+    const { syncOrganizerPlanTierForUser } = await import("../events/event-ranking.service");
+    await syncOrganizerPlanTierForUser(input.userId).catch((err) => {
+      console.error("syncOrganizerPlanTierForUser after paid activate:", err);
+    });
+  }
+
   return { success: true, subscription: serializeSubscription(subscription) };
 }
 
@@ -278,6 +292,12 @@ export async function getCurrentPlanForRole(userId: string, role: string) {
       where: { id: subscription.id },
       data: { status: "EXPIRED" },
     });
+    if (normalizedRole === "ORGANIZER") {
+      const { syncOrganizerPlanTierForUser } = await import("../events/event-ranking.service");
+      await syncOrganizerPlanTierForUser(userId).catch((err) => {
+        console.error("syncOrganizerPlanTierForUser after expire:", err);
+      });
+    }
     const freeSlug = defaultFreePlanSlug(normalizedRole);
     const plan = getCatalogPlan(normalizedRole, freeSlug);
     return {

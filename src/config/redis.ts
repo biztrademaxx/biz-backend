@@ -101,7 +101,12 @@ export async function cacheDel(...keys: string[]): Promise<void> {
 
 export async function eventsListCacheKey(params: Record<string, unknown>): Promise<string> {
   const version = await getCacheVersion(CACHE_VERSION_KEYS.eventsList);
-  return `events:list:v${version}:${hashCacheParams(params)}`;
+  // rankingVersion keeps list pages coherent when scorer weights change
+  const rankingVersion =
+    typeof params.rankingVersion === "string" && params.rankingVersion
+      ? params.rankingVersion
+      : "v1";
+  return `events:list:v${version}:rv${rankingVersion}:${hashCacheParams(params)}`;
 }
 
 export async function eventsStatsCacheKey(include: string): Promise<string> {
@@ -244,6 +249,8 @@ export async function invalidateEventCaches(opts?: { slug?: string; id?: string 
     CACHE_KEYS.eventsCategoriesBrowse(),
     CACHE_KEYS.eventsVip(),
     CACHE_KEYS.eventsFeatured(),
+    CACHE_KEYS.eventsFacets("future"),
+    CACHE_KEYS.eventsFacets("all"),
     ...detailKeys,
     ...adminDashboardKeysToDelete(),
   ];
@@ -276,6 +283,7 @@ export const CACHE_TTL = {
   ADMIN_ORGANIZERS_LIST: 60,
   EVENTS_STATS: 300,
   EVENTS_CATEGORIES_BROWSE: 300,
+  EVENTS_FACETS: 120,
   VENUES_LIST: 120,
   SPEAKERS_LIST: 120,
   EXHIBITOR_PROFILE: 120,
@@ -288,6 +296,7 @@ export const CACHE_TTL = {
 export const CACHE_KEYS = {
   adminEventsStats: () => "admin:events:stats",
   eventsCategoriesBrowse: () => "events:categories:browse",
+  eventsFacets: (scope: string) => `events:facets:${scope}`,
   eventsVip: () => "events:vip",
   eventsFeatured: () => "events:featured",
   eventDetail: (identifier: string) => `event:detail:${normalizeDetailKey(identifier)}`,

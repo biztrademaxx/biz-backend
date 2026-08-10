@@ -570,6 +570,13 @@ model Event {
   /// Internal listing clicks — not exposed on public event APIs.
   listingClicks Int   @default(0)
 
+  /// Denormalized active organizer dashboard plan tier for listing rank (free|silver|gold|platinum).
+  organizerPlanTier      String    @default("free")
+  organizerPlanUpdatedAt DateTime?
+
+  /// Postgres FTS document — maintained by DB trigger (Phase 3). Not selected via Prisma normally.
+  searchVector Unsupported("tsvector")? @map("search_vector")
+
   rejectionReason String?
   rejectedAt      DateTime?
   rejectedById    String? @db.Uuid
@@ -592,9 +599,79 @@ model Event {
   appointments     Appointment[]
   conferences      Conference[]
   exhibitorManuals ExhibitorManual[]
+  searchStats      EventSearchStats?
 
   @@index([status, isPublic, createdAt])
+  @@index([organizerPlanTier])
+  @@index([status, isPublic, organizerPlanTier])
   @@map("events")
+}
+
+/// Denormalized engagement + precomputed rank features for public listing (Phase 2+).
+model EventSearchStats {
+  eventId String @id @db.Uuid
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  followersCount     Int   @default(0)
+  confirmedRegsCount Int   @default(0)
+  listingClicks      Int   @default(0)
+  averageRating      Float @default(0)
+
+  /// Rolling 7-day windows (Phase 3 trending).
+  saves7d  Int @default(0)
+  regs7d   Int @default(0)
+  clicks7d Int @default(0)
+
+  subscriptionScore Float @default(0.15)
+  popularityScore   Float @default(0)
+  trendingScore     Float @default(0)
+  freshnessScore    Float @default(0)
+  /// Weighted score without text relevance (S_rel added live when searching).
+  rankScore Float @default(0)
+
+  rankingVersion String   @default("v1")
+  statsUpdatedAt DateTime @default(now())
+
+  @@index([rankScore(sort: Desc)])
+  @@map("event_search_stats")
+}
+
+/// Aggregated search demand / zero-result monitoring (Phase 4).
+model SearchQuery {
+  id               String   @id @default(uuid()) @db.Uuid
+  normalizedQuery  String   @unique
+  rawQuerySample   String?
+  /// Last observed result count for this query.
+  resultCount      Int      @default(0)
+  hitCount         Int      @default(0)
+  zeroResultCount  Int      @default(0)
+  lastSeenAt       DateTime @default(now())
+  createdAt        DateTime @default(now())
+
+  @@index([hitCount])
+  @@index([zeroResultCount])
+  @@index([lastSeenAt])
+  @@map("search_queries")
+}
+
+/// Click-through feedback for ranking evaluation (Phase 4).
+model SearchClick {
+  id               String   @id @default(uuid()) @db.Uuid
+  queryNormalized  String?
+  eventId          String   @db.Uuid
+  position         Int?
+  page             Int?
+  userId           String?  @db.Uuid
+  sessionId        String?
+  /// navbar | events_list
+  listingSource    String   @default("events_list")
+  createdAt        DateTime @default(now())
+
+  @@index([eventId, createdAt])
+  @@index([queryNormalized])
+  @@index([createdAt])
+  @@index([listingSource, createdAt])
+  @@map("search_clicks")
 }
 
 // Exhibitor manual PDFs (per event)
