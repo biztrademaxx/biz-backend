@@ -20,9 +20,11 @@ import { hasPublicProfileImage } from "../../utils/profile-image";
 import { getDisplayName } from "../../utils/display-name";
 import { getPublicProfileSlug, isUuidLike, publicSlugRequestMatches } from "../../utils/profile-slug";
 import {
-  sortOrganizerRowsByCountryPriority,
+  sortOrganizerRowsForPublicListing,
   type OrganizerCountryPriorityInput,
 } from "../../utils/organizer-country-priority";
+import { planTierSortRank } from "../events/event-fts";
+import { tierFromPlanSlug } from "../events/event-ranking";
 
 // ---------- List organizers ----------
 
@@ -87,7 +89,10 @@ function toSortedFacetCounts(map: Map<string, number>, limit?: number): Organize
 
 /** Card/list payload only — omit contact fields and internal metrics scrapers could harvest. */
 export function sanitizePublicOrganizerListItem(
-  item: Awaited<ReturnType<typeof mapOrganizerListRows>>[number],
+  item: Awaited<ReturnType<typeof mapOrganizerListRows>>[number] & {
+    planSlug?: string;
+    planTier?: string;
+  },
 ) {
   return {
     id: item.id,
@@ -106,6 +111,8 @@ export function sanitizePublicOrganizerListItem(
     specialties: item.specialties,
     verified: item.verified,
     featured: item.featured,
+    planSlug: item.planSlug ?? "organizer-free",
+    planTier: item.planTier ?? "free",
   };
 }
 
@@ -404,6 +411,34 @@ export async function listOrganizers(options: ListOrganizersOptions = {}): Promi
   return cached(key, CACHE_TTL.ORGANIZERS_LIST, () => listOrganizersFromDb(options));
 }
 
+async function fetchPublicOrganizerPlanMap(
+  userIds: string[],
+): Promise<Map<string, { planSlug: string; planTier: string }>> {
+  const map = new Map<string, { planSlug: string; planTier: string }>();
+  if (userIds.length === 0) return map;
+
+  const now = new Date();
+  const subs = await prisma.userPlanSubscription.findMany({
+    where: {
+      userId: { in: userIds },
+      role: "ORGANIZER",
+      status: "ACTIVE",
+      OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+    },
+    orderBy: { startedAt: "desc" },
+    select: { userId: true, planSlug: true },
+  });
+
+  for (const sub of subs) {
+    if (map.has(sub.userId)) continue;
+    map.set(sub.userId, {
+      planSlug: sub.planSlug,
+      planTier: tierFromPlanSlug(sub.planSlug),
+    });
+  }
+  return map;
+}
+
 async function listOrganizersFromDb(options: ListOrganizersOptions = {}): Promise<ListOrganizersResult> {
   const requireProfileImage = options.requireProfileImage ?? false;
   /** Directory listing is always paginated unless this is the small featured-home subset. */
@@ -431,64 +466,62 @@ async function listOrganizersFromDb(options: ListOrganizersOptions = {}): Promis
     countryCode: String(options.prioritizeCountryCode ?? "").trim() || undefined,
     city: String(options.prioritizeCity ?? "").trim() || undefined,
   };
-  const useCountryPriority =
-    paginate &&
-    Boolean(priorityInput.countryName || priorityInput.countryCode);
+  const countryPriorityForSort = paginate ? priorityInput : null;
 
-  let organizers: Awaited<
-    ReturnType<
-      typeof prisma.user.findMany<{ select: typeof organizerListSelect }>
-    >
-  >;
-  let total: number;
+  const sortRows = await prisma.user.findMany({
+    where,
+    select: {
+      id: true,
+      organizerCountry: true,
+      organizerCity: true,
+      location: true,
+      headquarters: true,
+      organizationName: true,
+      company: true,
+    },
+  });
+  const planMap = await fetchPublicOrganizerPlanMap(sortRows.map((r) => r.id));
+  const enriched = sortRows.map((row) => {
+    const plan = planMap.get(row.id);
+    const planSlug = plan?.planSlug ?? "organizer-free";
+    const planTier = plan?.planTier ?? tierFromPlanSlug(planSlug);
+    return {
+      ...row,
+      planSlug,
+      planTier,
+      planTierRank: planTierSortRank(planTier),
+    };
+  });
+  const sorted = sortOrganizerRowsForPublicListing(
+    enriched,
+    countryPriorityForSort,
+    (r) =>
+      String(r.organizationName ?? "").trim() ||
+      String(r.company ?? "").trim() ||
+      r.id,
+  );
+  const total = sorted.length;
+  const pageSlice = paginate ? sorted.slice(skip, skip + limit) : sorted.slice(0, take);
+  const pageIds = pageSlice.map((r) => r.id);
+  const planById = new Map(pageSlice.map((r) => [r.id, { planSlug: r.planSlug, planTier: r.planTier }]));
 
-  if (useCountryPriority) {
-    const sortRows = await prisma.user.findMany({
-      where,
-      select: {
-        id: true,
-        organizerCountry: true,
-        organizerCity: true,
-        location: true,
-        headquarters: true,
-        organizationName: true,
-        company: true,
-      },
-    });
-    const sorted = sortOrganizerRowsByCountryPriority(
-      sortRows,
-      priorityInput,
-      (r) =>
-        String(r.organizationName ?? "").trim() ||
-        String(r.company ?? "").trim() ||
-        r.id,
-    );
-    total = sorted.length;
-    const pageIds = sorted.slice(skip, skip + limit).map((r) => r.id);
-    const fetched =
-      pageIds.length > 0
-        ? await prisma.user.findMany({
-            where: { id: { in: pageIds } },
-            select: organizerListSelect,
-          })
-        : [];
-    const byId = new Map(fetched.map((row) => [row.id, row]));
-    organizers = pageIds.map((id) => byId.get(id)).filter((row): row is NonNullable<typeof row> => !!row);
-  } else {
-    [organizers, total] = await Promise.all([
-      prisma.user.findMany({
-        where,
-        select: organizerListSelect,
-        skip,
-        take,
-        orderBy: [{ organizationName: "asc" }, { company: "asc" }, { createdAt: "desc" }],
-      }),
-      prisma.user.count({ where }),
-    ]);
-  }
+  const fetched =
+    pageIds.length > 0
+      ? await prisma.user.findMany({
+          where: { id: { in: pageIds } },
+          select: organizerListSelect,
+        })
+      : [];
+  const byId = new Map(fetched.map((row) => [row.id, row]));
+  const organizers = pageIds
+    .map((id) => byId.get(id))
+    .filter((row): row is NonNullable<typeof row> => !!row);
 
   const mapped = await mapOrganizerListRows(organizers, requireProfileImage);
-  const sanitized = mapped.map(sanitizePublicOrganizerListItem);
+  const sanitized = mapped.map((item) => {
+    const plan = planById.get(item.id) ?? { planSlug: "organizer-free", planTier: "free" };
+    return sanitizePublicOrganizerListItem({ ...item, ...plan });
+  });
   const effectiveLimit = paginate ? limit : Math.max(sanitized.length, 1);
   const totalPages = paginate ? Math.max(1, Math.ceil(total / limit)) : 1;
 

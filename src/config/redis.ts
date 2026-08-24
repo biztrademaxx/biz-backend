@@ -116,7 +116,8 @@ export async function eventsStatsCacheKey(include: string): Promise<string> {
 
 export async function organizersListCacheKey(params: Record<string, unknown>): Promise<string> {
   const version = await getCacheVersion(CACHE_VERSION_KEYS.organizersList);
-  return `organizers:list:v${version}:${hashCacheParams(params)}`;
+  // plan2: public directory sorts by subscription package (platinum → gold → silver → free)
+  return `organizers:list:plan2:v${version}:${hashCacheParams(params)}`;
 }
 
 export async function organizersFacetsCacheKey(): Promise<string> {
