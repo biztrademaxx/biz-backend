@@ -11,7 +11,10 @@ export type FacetNameCount = { name: string; count: number };
 
 export type EventListingFacets = {
   categories: FacetNameCount[];
+  /** @deprecated Prefer `cities` — kept for older clients */
   locations: FacetNameCount[];
+  cities: FacetNameCount[];
+  countries: FacetNameCount[];
   formats: FacetNameCount[];
   totalEvents: number;
 };
@@ -77,7 +80,7 @@ async function getEventListingFacetsFromDb(excludePast: boolean): Promise<EventL
           AND TRIM(COALESCE(NULLIF(v."venueCity", ''), NULLIF(e.city, ''))) <> ''
         GROUP BY 1
         ORDER BY count DESC, name ASC
-        LIMIT 60
+        LIMIT 200
       `
     : await prisma.$queryRaw<Array<{ name: string; count: number }>>`
         SELECT TRIM(COALESCE(NULLIF(v."venueCity", ''), NULLIF(e.city, ''))) AS name,
@@ -93,7 +96,42 @@ async function getEventListingFacetsFromDb(excludePast: boolean): Promise<EventL
           AND TRIM(COALESCE(NULLIF(v."venueCity", ''), NULLIF(e.city, ''))) <> ''
         GROUP BY 1
         ORDER BY count DESC, name ASC
-        LIMIT 60
+        LIMIT 200
+      `;
+
+  const countryRows = excludePast
+    ? await prisma.$queryRaw<Array<{ name: string; count: number }>>`
+        SELECT TRIM(COALESCE(NULLIF(v."venueCountry", ''), NULLIF(e.country, ''))) AS name,
+               COUNT(*)::int AS count
+        FROM events e
+        INNER JOIN users o ON o.id = e."organizerId"
+        LEFT JOIN users v ON v.id = e."venueId"
+        WHERE e.status = 'PUBLISHED'
+          AND e."isPublic" = true
+          AND o."isActive" = true
+          AND o."isVerified" = true
+          AND (o."profileVisibility" IS DISTINCT FROM 'private')
+          AND e."endDate" >= CURRENT_DATE
+          AND TRIM(COALESCE(NULLIF(v."venueCountry", ''), NULLIF(e.country, ''))) <> ''
+        GROUP BY 1
+        ORDER BY count DESC, name ASC
+        LIMIT 200
+      `
+    : await prisma.$queryRaw<Array<{ name: string; count: number }>>`
+        SELECT TRIM(COALESCE(NULLIF(v."venueCountry", ''), NULLIF(e.country, ''))) AS name,
+               COUNT(*)::int AS count
+        FROM events e
+        INNER JOIN users o ON o.id = e."organizerId"
+        LEFT JOIN users v ON v.id = e."venueId"
+        WHERE e.status = 'PUBLISHED'
+          AND e."isPublic" = true
+          AND o."isActive" = true
+          AND o."isVerified" = true
+          AND (o."profileVisibility" IS DISTINCT FROM 'private')
+          AND TRIM(COALESCE(NULLIF(v."venueCountry", ''), NULLIF(e.country, ''))) <> ''
+        GROUP BY 1
+        ORDER BY count DESC, name ASC
+        LIMIT 200
       `;
 
   const formatRows = excludePast
@@ -162,10 +200,14 @@ async function getEventListingFacetsFromDb(excludePast: boolean): Promise<EventL
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 
   const totalEvents = Number(totalRow[0]?.count ?? 0);
+  const cities = locationRows.map((r) => ({ name: r.name, count: Number(r.count) }));
+  const countries = countryRows.map((r) => ({ name: r.name, count: Number(r.count) }));
 
   return {
     categories: categoryRows.map((r) => ({ name: r.name, count: Number(r.count) })),
-    locations: locationRows.map((r) => ({ name: r.name, count: Number(r.count) })),
+    locations: cities,
+    cities,
+    countries,
     formats: [{ name: "All Formats", count: totalEvents }, ...formats],
     totalEvents,
   };
@@ -173,10 +215,15 @@ async function getEventListingFacetsFromDb(excludePast: boolean): Promise<EventL
 
 export async function getEventListingFacets(options?: { excludePast?: boolean }) {
   const excludePast = options?.excludePast !== false;
-  const key = CACHE_KEYS.eventsFacets(excludePast ? "future" : "all");
+  const key = CACHE_KEYS.eventsFacets(excludePast ? "future:v2" : "all:v2");
   return cached(key, CACHE_TTL.EVENTS_FACETS, () => getEventListingFacetsFromDb(excludePast));
 }
 
 export async function invalidateEventFacetsCache() {
-  await cacheDel(CACHE_KEYS.eventsFacets("future"), CACHE_KEYS.eventsFacets("all"));
+  await cacheDel(
+    CACHE_KEYS.eventsFacets("future"),
+    CACHE_KEYS.eventsFacets("all"),
+    CACHE_KEYS.eventsFacets("future:v2"),
+    CACHE_KEYS.eventsFacets("all:v2")
+  );
 }
