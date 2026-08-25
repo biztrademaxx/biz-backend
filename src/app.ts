@@ -59,8 +59,9 @@ export function createApp(): express.Application {
   const app = express();
 
   app.use(helmet());
-  app.use(express.json());
 
+  // CORS must run before body parsers so parse failures (e.g. PayloadTooLarge)
+  // still return Access-Control-Allow-Origin — otherwise browsers report a CORS error.
   const { allowAny, origins } = corsAllowedOrigins();
   const allowVercelApp =
     process.env.CORS_ALLOW_VERCEL_APP?.trim().toLowerCase() === "true";
@@ -88,6 +89,12 @@ export function createApp(): express.Application {
       methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     })
   );
+
+  // Admin event edits may include base64 media; default 100kb limit rejects those as PayloadTooLarge.
+  const jsonLimit = process.env.JSON_BODY_LIMIT?.trim() || "50mb";
+  app.use(express.json({ limit: jsonLimit }));
+  app.use(express.urlencoded({ extended: true, limit: jsonLimit }));
+
   app.use(compression());
 
   if (process.env.NODE_ENV === "development") {
