@@ -135,6 +135,14 @@ export async function listEvents(params: ListEventsParams) {
 }
 
 async function listEventsFromDb(params: ListEventsParams) {
+  const perfEnabled = process.env.EVENTS_LIST_PERF !== "0";
+  const t0 = perfEnabled ? Date.now() : 0;
+  let tAfterFilters = 0;
+  let tFtsMs = 0;
+  let tFindManyMs = 0;
+  let tCountMs = 0;
+  let tTransformMs = 0;
+
   const page = params.page && params.page > 0 ? params.page : 1;
   const rawLimit = params.limit && params.limit > 0 ? params.limit : 12;
   const limit = Math.min(rawLimit, LIST_EVENTS_MAX_LIMIT);
@@ -152,7 +160,9 @@ async function listEventsFromDb(params: ListEventsParams) {
   const search = params.search?.trim() ?? "";
   let ftsRelevance: Map<string, number> | null = null;
   if (search) {
+    const tFts0 = perfEnabled ? Date.now() : 0;
     ftsRelevance = await fetchEventFtsRelevanceMap(search, 2000);
+    if (perfEnabled) tFtsMs = Date.now() - tFts0;
     if (ftsRelevance.size > 0) {
       andParts.push({ id: { in: Array.from(ftsRelevance.keys()) } });
     } else {
@@ -291,6 +301,7 @@ async function listEventsFromDb(params: ListEventsParams) {
   }
 
   const where: Prisma.EventWhereInput = { AND: andParts };
+  if (perfEnabled) tAfterFilters = Date.now() - t0;
 
   const listInclude = {
     organizer: {
@@ -361,6 +372,7 @@ async function listEventsFromDb(params: ListEventsParams) {
   // Ranked listing: hard tier order (platinum → gold → silver → free), then nearest start, then score.
   // Search path adds live FTS relevance into finalScore; browse uses precomputed rankScore only.
   if (params.sort === "ranked") {
+    const tSlim0 = perfEnabled ? Date.now() : 0;
     const slimRows = await prisma.event.findMany({
       where,
       select: {
@@ -370,6 +382,7 @@ async function listEventsFromDb(params: ListEventsParams) {
         searchStats: true,
       },
     });
+    const tSlimMs = perfEnabled ? Date.now() - tSlim0 : 0;
     const ranked = sortRankedCandidates(
       slimRows.map((row) => {
         const relevanceScore =
@@ -390,6 +403,7 @@ async function listEventsFromDb(params: ListEventsParams) {
     const pageIds = ranked.slice(skip, skip + limit).map((r) => r.id);
     const scoreById = new Map(ranked.map((r) => [r.id, r]));
 
+    const tHydrate0 = perfEnabled ? Date.now() : 0;
     const events =
       pageIds.length === 0
         ? []
@@ -398,10 +412,12 @@ async function listEventsFromDb(params: ListEventsParams) {
             omit: { description: true },
             include: listInclude,
           });
+    if (perfEnabled) tFindManyMs = Date.now() - tHydrate0;
 
     const byId = new Map(events.map((e) => [e.id, e]));
     const ordered = pageIds.map((id) => byId.get(id)).filter(Boolean) as typeof events;
 
+    const tTx0 = perfEnabled ? Date.now() : 0;
     const transformedEvents = ordered.map((event: any) => {
       const scored = scoreById.get(event.id);
       return {
@@ -417,6 +433,14 @@ async function listEventsFromDb(params: ListEventsParams) {
           : undefined,
       };
     });
+    if (perfEnabled) tTransformMs = Date.now() - tTx0;
+
+    if (perfEnabled) {
+      // eslint-disable-next-line no-console
+      console.info(
+        `[events.list] sort=ranked page=${page} limit=${limit} filters=${tAfterFilters}ms fts=${tFtsMs}ms slim=${tSlimMs}ms hydrate=${tFindManyMs}ms transform=${tTransformMs}ms total=${Date.now() - t0}ms rows=${transformedEvents.length}/${total}`,
+      );
+    }
 
     return {
       events: transformedEvents,
@@ -453,8 +477,9 @@ async function listEventsFromDb(params: ListEventsParams) {
       orderBy = { createdAt: "desc" };
   }
 
-  const [events, total] = await Promise.all([
-    prisma.event.findMany({
+  const findManyPromise = (async () => {
+    const t = perfEnabled ? Date.now() : 0;
+    const rows = await prisma.event.findMany({
       where,
       omit: {
         description: true,
@@ -463,11 +488,30 @@ async function listEventsFromDb(params: ListEventsParams) {
       orderBy,
       skip,
       take: limit,
-    }),
-    prisma.event.count({ where }),
-  ]);
+    });
+    if (perfEnabled) tFindManyMs = Date.now() - t;
+    return rows;
+  })();
 
+  const countPromise = (async () => {
+    const t = perfEnabled ? Date.now() : 0;
+    const n = await prisma.event.count({ where });
+    if (perfEnabled) tCountMs = Date.now() - t;
+    return n;
+  })();
+
+  const [events, total] = await Promise.all([findManyPromise, countPromise]);
+
+  const tTx0 = perfEnabled ? Date.now() : 0;
   const transformedEvents = events.map((event: any) => transformListEvent(event));
+  if (perfEnabled) tTransformMs = Date.now() - tTx0;
+
+  if (perfEnabled) {
+    // eslint-disable-next-line no-console
+    console.info(
+      `[events.list] sort=${params.sort ?? "newest"} page=${page} limit=${limit} filters=${tAfterFilters}ms fts=${tFtsMs}ms findMany=${tFindManyMs}ms count=${tCountMs}ms transform=${tTransformMs}ms total=${Date.now() - t0}ms rows=${transformedEvents.length}/${total}`,
+    );
+  }
 
   return {
     events: transformedEvents,
