@@ -794,6 +794,8 @@ model TicketType {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  /// List cheapest active ticket: WHERE eventId IN (…) AND isActive ORDER BY price
+  @@index([eventId, isActive, price])
   @@map("ticket_types")
 }
 
@@ -1090,6 +1092,8 @@ model SavedEvent {
   savedAt DateTime @default(now())
 
   @@unique([userId, eventId])
+  /// List follower preview / _count by event: WHERE eventId IN (…) ORDER BY savedAt DESC
+  @@index([eventId, savedAt])
   @@map("saved_events")
 }
 
@@ -1107,6 +1111,8 @@ model EventRegistration {
   registeredAt DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  /// Confirmed attendee counts: WHERE eventId IN (…) AND status = 'CONFIRMED'
+  @@index([eventId, status])
   @@map("event_registrations")
 }
 
@@ -1128,6 +1134,7 @@ model Review {
   updatedAt    DateTime      @updatedAt
   replies      ReviewReply[]
 
+  @@index([eventId])
   @@map("reviews")
 }
 

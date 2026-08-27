@@ -334,12 +334,10 @@ async function listEventsFromDb(params: ListEventsParams) {
       orderBy: { price: "asc" as const },
       take: 1,
     },
+    // attendees + totalReviews use denormalized Event columns (same as organizer/venue cards).
+    // Only followersCount still needs a live relation count.
     _count: {
       select: {
-        registrations: {
-          where: { status: "CONFIRMED" },
-        },
-        reviews: true,
         savedEvents: true,
       },
     },
@@ -477,14 +475,20 @@ async function listEventsFromDb(params: ListEventsParams) {
       orderBy = { createdAt: "desc" };
   }
 
-  const findManyPromise = (async () => {
+  /**
+   * Two-phase list (measured faster than single findMany+include on Neon):
+   * 1) page ids + count in parallel (heavy WHERE, no relation fan-out)
+   * 2) hydrate only those ids with includes (_count / tickets / preview)
+   */
+  let tPhase1Ms = 0;
+  let tHydrateMs = 0;
+  const tPhase1Start = perfEnabled ? Date.now() : 0;
+
+  const pageIdPromise = (async () => {
     const t = perfEnabled ? Date.now() : 0;
     const rows = await prisma.event.findMany({
       where,
-      omit: {
-        description: true,
-      },
-      include: listInclude,
+      select: { id: true },
       orderBy,
       skip,
       take: limit,
@@ -500,7 +504,23 @@ async function listEventsFromDb(params: ListEventsParams) {
     return n;
   })();
 
-  const [events, total] = await Promise.all([findManyPromise, countPromise]);
+  const [pageIdRows, total] = await Promise.all([pageIdPromise, countPromise]);
+  if (perfEnabled) tPhase1Ms = Date.now() - tPhase1Start;
+
+  const pageIds = pageIdRows.map((r) => r.id);
+  const tHydrate0 = perfEnabled ? Date.now() : 0;
+  const eventsUnordered =
+    pageIds.length === 0
+      ? []
+      : await prisma.event.findMany({
+          where: { id: { in: pageIds } },
+          omit: { description: true },
+          include: listInclude,
+        });
+  if (perfEnabled) tHydrateMs = Date.now() - tHydrate0;
+
+  const byId = new Map(eventsUnordered.map((e) => [e.id, e]));
+  const events = pageIds.map((id) => byId.get(id)).filter(Boolean) as typeof eventsUnordered;
 
   const tTx0 = perfEnabled ? Date.now() : 0;
   const transformedEvents = events.map((event: any) => transformListEvent(event));
@@ -509,7 +529,7 @@ async function listEventsFromDb(params: ListEventsParams) {
   if (perfEnabled) {
     // eslint-disable-next-line no-console
     console.info(
-      `[events.list] sort=${params.sort ?? "newest"} page=${page} limit=${limit} filters=${tAfterFilters}ms fts=${tFtsMs}ms findMany=${tFindManyMs}ms count=${tCountMs}ms transform=${tTransformMs}ms total=${Date.now() - t0}ms rows=${transformedEvents.length}/${total}`,
+      `[events.list] sort=${params.sort ?? "newest"} page=${page} limit=${limit} filters=${tAfterFilters}ms fts=${tFtsMs}ms ids=${tFindManyMs}ms count=${tCountMs}ms phase1=${tPhase1Ms}ms hydrate=${tHydrateMs}ms transform=${tTransformMs}ms total=${Date.now() - t0}ms rows=${transformedEvents.length}/${total}`,
     );
   }
 
@@ -576,9 +596,9 @@ function transformListEvent(event: any) {
     verifiedAt: event.verifiedAt?.toISOString() ?? null,
     verifiedBy: event.verifiedBy || "",
     verifiedBadgeImage: event.verifiedBadgeImage ?? null,
-    attendees: event._count.registrations,
-    totalReviews: event._count.reviews,
-    followersCount: event._count.savedEvents ?? 0,
+    attendees: event.currentAttendees ?? event._count?.registrations ?? 0,
+    totalReviews: event.totalReviews ?? event._count?.reviews ?? 0,
+    followersCount: event._count?.savedEvents ?? 0,
     followerPreview: Array.isArray(event.savedEvents)
       ? event.savedEvents.map(
           (se: {

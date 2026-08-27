@@ -58,6 +58,18 @@ function isVercelAppHttpsOrigin(origin: string): boolean {
 export function createApp(): express.Application {
   const app = express();
 
+  // Behind Nginx/ALB, clients send X-Forwarded-For. express-rate-limit requires trust proxy
+  // or it throws ERR_ERL_UNEXPECTED_X_FORWARDED_FOR and cannot key clients correctly.
+  // TRUST_PROXY=0 disables; unset defaults to 1 hop in production, off otherwise.
+  const trustProxyEnv = process.env.TRUST_PROXY?.trim().toLowerCase();
+  if (trustProxyEnv === "0" || trustProxyEnv === "false") {
+    // leave default (false)
+  } else if (trustProxyEnv && /^\d+$/.test(trustProxyEnv)) {
+    app.set("trust proxy", Number(trustProxyEnv));
+  } else if (trustProxyEnv === "true" || process.env.NODE_ENV === "production") {
+    app.set("trust proxy", 1);
+  }
+
   app.use(helmet());
 
   // CORS must run before body parsers so parse failures (e.g. PayloadTooLarge)
