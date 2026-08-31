@@ -88,12 +88,26 @@ function toSortedFacetCounts(map: Map<string, number>, limit?: number): Organize
 }
 
 /** Card/list payload only — omit contact fields and internal metrics scrapers could harvest. */
-export function sanitizePublicOrganizerListItem(
-  item: Awaited<ReturnType<typeof mapOrganizerListRows>>[number] & {
-    planSlug?: string;
-    planTier?: string;
-  },
-) {
+export function sanitizePublicOrganizerListItem(item: {
+  id: string;
+  name: string;
+  displayName: string;
+  publicSlug: string;
+  company: string;
+  city: string;
+  country: string;
+  image: string | null;
+  avgRating: number;
+  totalReviews: number;
+  category: string;
+  eventsOrganized: number;
+  yearsOfExperience: number;
+  specialties: string[];
+  verified: boolean;
+  featured: boolean;
+  planSlug?: string;
+  planTier?: string;
+}) {
   return {
     id: item.id,
     name: item.name,
@@ -255,91 +269,41 @@ async function resolveBucketFilteredOrganizerIds(
   return new Set(rows.map((r) => r.id));
 }
 
-const organizerListSelect = {
+const organizerPublicListSelect = {
   id: true,
   firstName: true,
   lastName: true,
-  email: true,
-  phone: true,
   avatar: true,
-  bio: true,
-  website: true,
-  location: true,
   organizationName: true,
   company: true,
-  description: true,
-  headquarters: true,
   organizerCountry: true,
-  organizerState: true,
   organizerCity: true,
   totalReviews: true,
   averageRating: true,
   founded: true,
-  teamSize: true,
   specialties: true,
   isVerified: true,
-  isActive: true,
-  profileVisibility: true,
-  createdAt: true,
-  updatedAt: true,
-  organizedEvents: {
-    where: { status: "PUBLISHED" },
-    select: { id: true },
-  },
 } as const;
 
-async function mapOrganizerListRows(
+function mapPublicOrganizerListRows(
   rows: Array<
     Prisma.UserGetPayload<{
-      select: typeof organizerListSelect;
+      select: typeof organizerPublicListSelect;
     }>
   >,
+  eventCountByOrganizerId: Map<string, number>,
   requireProfileImage: boolean,
 ) {
   const filteredRows = requireProfileImage
     ? rows.filter((o) => hasPublicProfileImage(o.avatar))
     : rows;
 
-  /** One grouped query instead of 2×N concurrent queries (avoids exhausting the DB pool on small VPS). */
-  const allEventIds = [...new Set(filteredRows.flatMap((o) => o.organizedEvents.map((e) => e.id)))];
-  const statsByEventId = new Map<string, { registrations: number; revenue: number }>();
-  if (allEventIds.length > 0) {
-    const grouped = await prisma.eventRegistration.groupBy({
-      by: ["eventId"],
-      where: {
-        eventId: { in: allEventIds },
-        status: "CONFIRMED",
-      },
-      _count: { _all: true },
-      _sum: { totalAmount: true },
-    });
-    for (const g of grouped) {
-      statsByEventId.set(g.eventId, {
-        registrations: g._count._all,
-        revenue: g._sum.totalAmount ?? 0,
-      });
-    }
-  }
-
   return filteredRows.map((organizer) => {
-    const eventIds = organizer.organizedEvents.map((e) => e.id);
-    let attendeeCount = 0;
-    let totalRevenue = 0;
-    for (const id of eventIds) {
-      const s = statsByEventId.get(id);
-      if (s) {
-        attendeeCount += s.registrations;
-        totalRevenue += s.revenue;
-      }
-    }
-
     const foundedYear = organizer.founded ? parseInt(organizer.founded) : new Date().getFullYear();
     const yearsOfExperience = Number.isNaN(foundedYear) ? 0 : new Date().getFullYear() - foundedYear;
 
     const city = String(organizer.organizerCity ?? "").trim();
-    const state = String(organizer.organizerState ?? "").trim();
     const country = String(organizer.organizerCountry ?? "").trim();
-    const structuredLocation = [city, state, country].filter(Boolean).join(", ");
 
     const displayName = getDisplayName({
       role: "ORGANIZER",
@@ -353,14 +317,7 @@ async function mapOrganizerListRows(
       String(organizer.company ?? "").trim() ||
       displayName;
 
-    const hqRaw = String(organizer.headquarters ?? "").trim();
-    const locRaw = String(organizer.location ?? "").trim();
-    const locationLine =
-      structuredLocation ||
-      (hqRaw && !/^not specified$/i.test(hqRaw) ? hqRaw : "") ||
-      (locRaw && !/^not specified$/i.test(locRaw) ? locRaw : "");
-
-    return {
+    return sanitizePublicOrganizerListItem({
       id: organizer.id,
       name: displayName,
       displayName,
@@ -376,33 +333,17 @@ async function mapOrganizerListRows(
       ),
       company: companyLabel,
       city,
-      state,
       country,
-      image: requireProfileImage
-        ? organizer.avatar ?? ""
-        : organizer.avatar || null,
+      image: requireProfileImage ? organizer.avatar ?? "" : organizer.avatar || null,
       avgRating: organizer.averageRating || 0,
       totalReviews: organizer.totalReviews || 0,
-      headquarters: locationLine || "Location not specified",
-      reviewCount: organizer.totalReviews || 0,
-      location: locationLine || locRaw || "Location not specified",
       category: organizer.specialties?.[0] || "General Events",
-      eventsOrganized: organizer.organizedEvents.length,
+      eventsOrganized: eventCountByOrganizerId.get(organizer.id) ?? 0,
       yearsOfExperience,
       specialties: organizer.specialties || ["Event Management"],
-      description: organizer.description || organizer.bio || "No description provided",
-      phone: organizer.phone || "Not provided",
-      email: organizer.email,
-      website: organizer.website || "",
       verified: organizer.isVerified || false,
-      active: organizer.isActive || false,
       featured: false,
-      totalAttendees: attendeeCount,
-      totalRevenue,
-      successRate: organizer.organizedEvents.length > 0 ? 95 : 0,
-      joinDate: organizer.createdAt.toISOString().split("T")[0],
-      lastActive: organizer.updatedAt.toISOString().split("T")[0],
-    };
+    });
   });
 }
 
@@ -411,16 +352,13 @@ export async function listOrganizers(options: ListOrganizersOptions = {}): Promi
   return cached(key, CACHE_TTL.ORGANIZERS_LIST, () => listOrganizersFromDb(options));
 }
 
-async function fetchPublicOrganizerPlanMap(
-  userIds: string[],
-): Promise<Map<string, { planSlug: string; planTier: string }>> {
+async function fetchActiveOrganizerPlanMap(): Promise<
+  Map<string, { planSlug: string; planTier: string }>
+> {
   const map = new Map<string, { planSlug: string; planTier: string }>();
-  if (userIds.length === 0) return map;
-
   const now = new Date();
   const subs = await prisma.userPlanSubscription.findMany({
     where: {
-      userId: { in: userIds },
       role: "ORGANIZER",
       status: "ACTIVE",
       OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
@@ -468,19 +406,21 @@ async function listOrganizersFromDb(options: ListOrganizersOptions = {}): Promis
   };
   const countryPriorityForSort = paginate ? priorityInput : null;
 
-  const sortRows = await prisma.user.findMany({
-    where,
-    select: {
-      id: true,
-      organizerCountry: true,
-      organizerCity: true,
-      location: true,
-      headquarters: true,
-      organizationName: true,
-      company: true,
-    },
-  });
-  const planMap = await fetchPublicOrganizerPlanMap(sortRows.map((r) => r.id));
+  const [sortRows, planMap] = await Promise.all([
+    prisma.user.findMany({
+      where,
+      select: {
+        id: true,
+        organizerCountry: true,
+        organizerCity: true,
+        location: true,
+        headquarters: true,
+        organizationName: true,
+        company: true,
+      },
+    }),
+    fetchActiveOrganizerPlanMap(),
+  ]);
   const enriched = sortRows.map((row) => {
     const plan = planMap.get(row.id);
     const planSlug = plan?.planSlug ?? "organizer-free";
@@ -505,22 +445,36 @@ async function listOrganizersFromDb(options: ListOrganizersOptions = {}): Promis
   const pageIds = pageSlice.map((r) => r.id);
   const planById = new Map(pageSlice.map((r) => [r.id, { planSlug: r.planSlug, planTier: r.planTier }]));
 
-  const fetched =
+  const [fetched, eventCountRows] =
     pageIds.length > 0
-      ? await prisma.user.findMany({
-          where: { id: { in: pageIds } },
-          select: organizerListSelect,
-        })
-      : [];
+      ? await Promise.all([
+          prisma.user.findMany({
+            where: { id: { in: pageIds } },
+            select: organizerPublicListSelect,
+          }),
+          prisma.event.groupBy({
+            by: ["organizerId"],
+            where: { organizerId: { in: pageIds }, status: "PUBLISHED" },
+            _count: { _all: true },
+          }),
+        ])
+      : [[], []];
+  const eventCountByOrganizerId = new Map(
+    eventCountRows.map((row) => [row.organizerId, row._count._all]),
+  );
   const byId = new Map(fetched.map((row) => [row.id, row]));
   const organizers = pageIds
     .map((id) => byId.get(id))
     .filter((row): row is NonNullable<typeof row> => !!row);
 
-  const mapped = await mapOrganizerListRows(organizers, requireProfileImage);
+  const mapped = mapPublicOrganizerListRows(
+    organizers,
+    eventCountByOrganizerId,
+    requireProfileImage,
+  );
   const sanitized = mapped.map((item) => {
     const plan = planById.get(item.id) ?? { planSlug: "organizer-free", planTier: "free" };
-    return sanitizePublicOrganizerListItem({ ...item, ...plan });
+    return { ...item, ...plan };
   });
   const effectiveLimit = paginate ? limit : Math.max(sanitized.length, 1);
   const totalPages = paginate ? Math.max(1, Math.ceil(total / limit)) : 1;
@@ -540,19 +494,33 @@ export async function listOrganizerFilterFacets() {
 }
 
 async function listOrganizerFilterFacetsFromDb() {
-  const rows = await prisma.user.findMany({
-    where: publicOrganizerListingWhere(),
-    select: {
-      organizerCity: true,
-      organizerCountry: true,
-      specialties: true,
-      organizedEvents: {
-        where: publicPublishedEventWhere(),
-        select: { id: true },
+  const listingWhere = publicOrganizerListingWhere();
+  const [rows, eventCountRows, followerCountRows] = await Promise.all([
+    prisma.user.findMany({
+      where: listingWhere,
+      select: {
+        id: true,
+        organizerCity: true,
+        organizerCountry: true,
+        specialties: true,
       },
-      followersAsFollowed: { select: { id: true } },
-    },
-  });
+    }),
+    prisma.event.groupBy({
+      by: ["organizerId"],
+      where: { status: "PUBLISHED", organizer: listingWhere },
+      _count: { _all: true },
+    }),
+    prisma.follow.groupBy({
+      by: ["followingId"],
+      where: { following: listingWhere },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const eventCountById = new Map(eventCountRows.map((r) => [r.organizerId, r._count._all]));
+  const followerCountById = new Map(
+    followerCountRows.map((r) => [r.followingId, r._count._all]),
+  );
 
   const cityCounts = new Map<string, number>();
   const countryCounts = new Map<string, number>();
@@ -574,14 +542,14 @@ async function listOrganizerFilterFacetsFromDb() {
       if (s) categoryCounts.set(s, (categoryCounts.get(s) ?? 0) + 1);
     }
 
-    const eventCount = row.organizedEvents.length;
+    const eventCount = eventCountById.get(row.id) ?? 0;
     for (const bucket of ORGANIZER_EVENT_BUCKETS) {
       if (eventCountMatchesBucket(eventCount, bucket.id)) {
         eventBucketCounts.set(bucket.id, (eventBucketCounts.get(bucket.id) ?? 0) + 1);
       }
     }
 
-    const followerCount = row.followersAsFollowed.length;
+    const followerCount = followerCountById.get(row.id) ?? 0;
     for (const bucket of ORGANIZER_FOLLOWER_BUCKETS) {
       if (followerCountMatchesBucket(followerCount, bucket.id)) {
         followerBucketCounts.set(bucket.id, (followerBucketCounts.get(bucket.id) ?? 0) + 1);

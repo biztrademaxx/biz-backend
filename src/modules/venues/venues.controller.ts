@@ -17,6 +17,11 @@ export async function getVenuesHandler(req: Request, res: Response) {
     const requireVenueImage =
       req.query.requireVenueImage === "1" || req.query.requireVenueImage === "true";
     const country = (req.query.country as string | undefined) ?? undefined;
+    const city = (req.query.city as string | undefined) ?? undefined;
+    const prioritizeCountry = (req.query.prioritizeCountry as string | undefined) ?? undefined;
+    const prioritizeCountryCode =
+      (req.query.prioritizeCountryCode as string | undefined) ?? undefined;
+    const prioritizeCity = (req.query.prioritizeCity as string | undefined) ?? undefined;
 
     const { venues, pagination } = await listVenues({
       search,
@@ -24,11 +29,16 @@ export async function getVenuesHandler(req: Request, res: Response) {
       limit,
       requireVenueImage,
       country,
+      city,
+      prioritizeCountry,
+      prioritizeCountryCode,
+      prioritizeCity,
     });
 
     return res.json({
       success: true,
       data: venues,
+      venues,
       pagination,
     });
   } catch (error: any) {

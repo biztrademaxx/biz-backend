@@ -5,14 +5,23 @@ import {
   canUserViewOwnPrivateProfile,
   publicPublishedEventWhere,
 } from "../../utils/public-profile";
+import {
+  organizerCountryPriorityScore,
+  type OrganizerCountryPriorityInput,
+} from "../../utils/organizer-country-priority";
 
 export interface ListVenuesParams {
   search?: string;
   page?: number;
   limit?: number;
   requireVenueImage?: boolean;
-  /** Case-insensitive match on venueCountry (e.g. India). */
+  /** Comma-separated venueCountry values. */
   country?: string;
+  /** Comma-separated city names (venueCity / address). */
+  city?: string;
+  prioritizeCountry?: string;
+  prioritizeCountryCode?: string;
+  prioritizeCity?: string;
 }
 
 export async function listVenues(params: ListVenuesParams) {
@@ -20,98 +29,181 @@ export async function listVenues(params: ListVenuesParams) {
   return cached(key, CACHE_TTL.VENUES_LIST, () => listVenuesFromDb(params));
 }
 
-async function listVenuesFromDb(params: ListVenuesParams) {
-  const page = params.page && params.page > 0 ? params.page : 1;
-  const limit = params.limit && params.limit > 0 ? params.limit : 10;
-  const skip = (page - 1) * limit;
-  const requireVenueImage = params.requireVenueImage === true;
+const VENUE_LIST_MAX_LIMIT = 100;
 
-  const where: any = {
-    role: "VENUE_MANAGER",
-    NOT: { profileVisibility: "private" },
-    /** Public /venues directory: admin-listed only (not tied to account isActive). */
-    isVerified: true,
-  };
-  if (requireVenueImage) {
-    where.venueImages = { isEmpty: false };
+const venuePublicListSelect = {
+  id: true,
+  venueName: true,
+  venueAddress: true,
+  venueCity: true,
+  venueState: true,
+  venueCountry: true,
+  averageRating: true,
+  totalReviews: true,
+  avatar: true,
+  venueImages: true,
+} as const;
+
+function buildPublicVenueListWhere(params: ListVenuesParams): Prisma.UserWhereInput {
+  const filters: Prisma.UserWhereInput[] = [
+    {
+      role: "VENUE_MANAGER",
+      NOT: { profileVisibility: "private" },
+      isVerified: true,
+    },
+  ];
+  if (params.requireVenueImage === true) {
+    filters.push({ venueImages: { isEmpty: false } });
   }
 
   const search = params.search?.trim() ?? "";
   if (search) {
-    where.OR = [
-      { venueName: { contains: search, mode: "insensitive" } },
-      { venueDescription: { contains: search, mode: "insensitive" } },
-      { venueAddress: { contains: search, mode: "insensitive" } },
-    ];
+    filters.push({
+      OR: [
+        { venueName: { contains: search, mode: "insensitive" } },
+        { venueDescription: { contains: search, mode: "insensitive" } },
+        { venueAddress: { contains: search, mode: "insensitive" } },
+        { venueCity: { contains: search, mode: "insensitive" } },
+        { venueCountry: { contains: search, mode: "insensitive" } },
+      ],
+    });
   }
 
-  const country = params.country?.trim() ?? "";
-  if (country) {
-    where.venueCountry = { equals: country, mode: "insensitive" };
+  const countries = String(params.country ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s && s.toLowerCase() !== "all");
+  if (countries.length > 0) {
+    filters.push({
+      OR: countries.flatMap((country) => [
+        { venueCountry: { equals: country, mode: "insensitive" } },
+        { venueCountry: { contains: country, mode: "insensitive" } },
+      ]),
+    });
   }
 
-  const [venues, total] = await Promise.all([
-    prisma.user.findMany({
+  const cities = String(params.city ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s && s.toLowerCase() !== "all");
+  if (cities.length > 0) {
+    filters.push({
+      OR: cities.flatMap((city) => [
+        { venueCity: { contains: city, mode: "insensitive" } },
+        { venueAddress: { contains: city, mode: "insensitive" } },
+      ]),
+    });
+  }
+
+  return filters.length === 1 ? filters[0]! : { AND: filters };
+}
+
+function mapVenueListRow(
+  v: Prisma.UserGetPayload<{ select: typeof venuePublicListSelect }>,
+) {
+  const images = Array.isArray(v.venueImages) ? v.venueImages.slice(0, 4) : [];
+  const addressParts = [v.venueAddress, v.venueCity, v.venueState, v.venueCountry].filter(Boolean);
+  return {
+    id: v.id,
+    venueName: v.venueName || "Venue",
+    name: v.venueName || "Venue",
+    venueAddress: v.venueAddress || "",
+    venueCity: v.venueCity || "",
+    venueState: v.venueState || "",
+    venueCountry: v.venueCountry || "",
+    city: v.venueCity || "",
+    state: v.venueState || "",
+    country: v.venueCountry || "",
+    address: addressParts.length > 0 ? addressParts.join(", ") : "",
+    avatar: v.avatar,
+    venueImages: images,
+    images,
+    averageRating: v.averageRating != null ? Number(v.averageRating) : 0,
+    totalReviews: v.totalReviews != null ? Number(v.totalReviews) : 0,
+    rating: v.averageRating != null ? Number(v.averageRating) : 0,
+    reviewCount: v.totalReviews != null ? Number(v.totalReviews) : 0,
+  };
+}
+
+async function listVenuesFromDb(params: ListVenuesParams) {
+  const page = params.page && params.page > 0 ? params.page : 1;
+  const limit =
+    params.limit && params.limit > 0
+      ? Math.min(params.limit, VENUE_LIST_MAX_LIMIT)
+      : 10;
+  const skip = (page - 1) * limit;
+  const where = buildPublicVenueListWhere(params);
+
+  const priorityInput: OrganizerCountryPriorityInput = {
+    countryName: String(params.prioritizeCountry ?? "").trim() || undefined,
+    countryCode: String(params.prioritizeCountryCode ?? "").trim() || undefined,
+    city: String(params.prioritizeCity ?? "").trim() || undefined,
+  };
+  const useGeoSort = Boolean(priorityInput.countryName || priorityInput.countryCode);
+
+  let rows: Prisma.UserGetPayload<{ select: typeof venuePublicListSelect }>[];
+  let total: number;
+
+  if (useGeoSort) {
+    const sortRows = await prisma.user.findMany({
       where,
       select: {
         id: true,
-        firstName: true,
-        lastName: true,
-        organizerIdForVenueManager: true,
-        venueName: true,
-        venueDescription: true,
-        venueAddress: true,
-        venueCity: true,
-        venueState: true,
         venueCountry: true,
-        venueZipCode: true,
-        maxCapacity: true,
-        totalHalls: true,
-        averageRating: true,
-        totalReviews: true,
-        amenities: true,
-        venueCurrency: true,
-        avatar: true,
-        venueImages: true,
-        venueTimezone: true,
+        venueCity: true,
+        venueAddress: true,
         createdAt: true,
-        updatedAt: true,
-        _count: {
-          select: { venueEvents: true },
+      },
+    });
+    const sorted = [...sortRows].sort((a, b) => {
+      const scoreA = organizerCountryPriorityScore(
+        {
+          organizerCountry: a.venueCountry,
+          organizerCity: a.venueCity,
+          location: a.venueAddress,
         },
-      },
-      skip,
-      take: limit,
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.user.count({ where }),
-  ]);
+        priorityInput,
+      );
+      const scoreB = organizerCountryPriorityScore(
+        {
+          organizerCountry: b.venueCountry,
+          organizerCity: b.venueCity,
+          location: b.venueAddress,
+        },
+        priorityInput,
+      );
+      if (scoreA !== scoreB) return scoreA - scoreB;
+      return b.createdAt.getTime() - a.createdAt.getTime();
+    });
+    total = sorted.length;
+    const pageIds = sorted.slice(skip, skip + limit).map((r) => r.id);
+    const fetched =
+      pageIds.length > 0
+        ? await prisma.user.findMany({
+            where: { id: { in: pageIds } },
+            select: venuePublicListSelect,
+          })
+        : [];
+    const byId = new Map(fetched.map((row) => [row.id, row]));
+    rows = pageIds
+      .map((id) => byId.get(id))
+      .filter((row): row is NonNullable<typeof row> => !!row);
+  } else {
+    const [fetched, count] = await Promise.all([
+      prisma.user.findMany({
+        where,
+        select: venuePublicListSelect,
+        skip,
+        take: limit,
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.user.count({ where }),
+    ]);
+    rows = fetched;
+    total = count;
+  }
 
-  const sourceVenues = requireVenueImage
-    ? venues.filter((v: any) => Array.isArray(v.venueImages) && v.venueImages.length > 0)
-    : venues;
-
-  const transformedVenues = sourceVenues.map((v: any) => {
-    const images = Array.isArray(v.venueImages) ? v.venueImages : [];
-    const addressParts = [v.venueAddress, v.venueCity, v.venueState, v.venueCountry].filter(Boolean);
-    const address = addressParts.length > 0 ? addressParts.join(", ") : "";
-    return {
-      ...v,
-      name: v.venueName || "Venue",
-      images,
-      eventCount: v._count?.venueEvents ?? 0,
-      rating: v.averageRating != null ? Number(v.averageRating) : null,
-      reviewCount: v.totalReviews != null ? Number(v.totalReviews) : 0,
-      location: {
-        address: v.venueAddress || "",
-        city: v.venueCity || "",
-        state: v.venueState || "",
-        country: v.venueCountry || "",
-        timezone: v.venueTimezone || "",
-      },
-      address,
-    };
-  });
+  const transformedVenues = rows.map(mapVenueListRow);
 
   return {
     venues: transformedVenues,
@@ -119,7 +211,7 @@ async function listVenuesFromDb(params: ListVenuesParams) {
       page,
       limit,
       total,
-      totalPages: Math.ceil(total / limit),
+      totalPages: Math.max(1, Math.ceil(total / limit)),
     },
   };
 }

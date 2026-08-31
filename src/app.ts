@@ -70,7 +70,16 @@ export function createApp(): express.Application {
     app.set("trust proxy", 1);
   }
 
-  app.use(helmet());
+  // Public JSON API consumed by https://*.biztradefairs.com. Helmet's HTML-app
+  // defaults (CORP: same-origin, document CSP) would block cross-origin fetch()
+  // even when CORS_ORIGIN allows the app.
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginEmbedderPolicy: false,
+      crossOriginResourcePolicy: { policy: "cross-origin" },
+    }),
+  );
 
   // CORS must run before body parsers so parse failures (e.g. PayloadTooLarge)
   // still return Access-Control-Allow-Origin — otherwise browsers report a CORS error.
