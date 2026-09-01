@@ -5,6 +5,7 @@ export type DisplayNameUserInput = {
   lastName?: string | null;
   organizationName?: string | null;
   company?: string | null;
+  venueName?: string | null;
 };
 
 function normalizeWhitespace(value: string | null | undefined): string {
@@ -18,16 +19,48 @@ function fullName(first?: string | null, last?: string | null): string {
 }
 
 /**
+ * Display name from the email local-part (text before `@`).
+ * `john.doe@gmail.com` → `John Doe`; `maxxmedia@biz.com` → `Maxxmedia`.
+ */
+export function nameFromEmailLocalPart(email: string | null | undefined): string {
+  const raw = String(email ?? "").trim();
+  if (!raw) return "";
+  const at = raw.indexOf("@");
+  const local = (at >= 0 ? raw.slice(0, at) : raw).trim();
+  if (!local) return "";
+  const cleaned = local
+    .replace(/[._+-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const source = cleaned || local;
+  return source
+    .split(" ")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+/**
  * Role-based display name for dashboards and API payloads.
  * - ORGANIZER: organizationName → firstName → "User"
  * - EXHIBITOR: organizationName || company → firstName → "User"
  * - SPEAKER / ATTENDEE: firstName + lastName → "User"
+ * - VENUE_MANAGER: venueName → firstName + lastName → "User"
  * - Other roles: firstName + lastName → "User"
  */
 export function getDisplayName(user: DisplayNameUserInput): string {
   const role = String(user.role ?? "").toUpperCase();
 
   switch (role) {
+    case "VENUE_MANAGER": {
+      const venue = normalizeWhitespace(user.venueName) || normalizeWhitespace(user.company);
+      if (venue) return venue;
+      const n = fullName(user.firstName, user.lastName);
+      if (n && n.toLowerCase() !== "user user" && n.toLowerCase() !== "venue manager") {
+        return n;
+      }
+      return "User";
+    }
     case "ORGANIZER": {
       const org =
         normalizeWhitespace(user.organizationName) || normalizeWhitespace(user.company);

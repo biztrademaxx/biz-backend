@@ -84,8 +84,8 @@ function mapVenueListRow(v) {
     const addressParts = [v.venueAddress, v.venueCity, v.venueState, v.venueCountry].filter(Boolean);
     return {
         id: v.id,
-        venueName: v.venueName || "Venue",
-        name: v.venueName || "Venue",
+        venueName: v.venueName || "",
+        name: v.venueName || "",
         venueAddress: v.venueAddress || "",
         venueCity: v.venueCity || "",
         venueState: v.venueState || "",

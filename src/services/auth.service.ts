@@ -4,7 +4,7 @@ import crypto from "crypto";
 import type { UserRole } from "@prisma/client";
 import prisma from "../config/prisma";
 import { AuthTokenPayload, AuthRole, AuthDomain } from "../modules/auth.types";
-import { getDisplayName } from "../utils/display-name";
+import { getDisplayName, nameFromEmailLocalPart } from "../utils/display-name";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-jwt-secret";
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || "dev-jwt-refresh-secret";
@@ -165,9 +165,14 @@ export class AuthService {
 
     const rawName = (input.name || "").trim();
     const nameParts = rawName.split(/\s+/).filter(Boolean);
-    const firstName = nameParts[0] || "User";
+    const fromEmail = nameFromEmailLocalPart(normalizedEmail);
+    const firstName = nameParts[0] || fromEmail.split(" ")[0] || "User";
     const lastName =
-      nameParts.length > 1 ? nameParts.slice(1).join(" ") : "User";
+      nameParts.length > 1
+        ? nameParts.slice(1).join(" ")
+        : nameParts[0]
+          ? "User"
+          : fromEmail.split(" ").slice(1).join(" ") || "User";
 
     let user = await prisma.user.findUnique({
       where: { email: normalizedEmail },
@@ -189,14 +194,17 @@ export class AuthService {
         crypto.randomBytes(32).toString("hex"),
         10
       );
+      const venueName =
+        roleForCreate === "VENUE_MANAGER" ? fromEmail || undefined : undefined;
       user = await prisma.user.create({
         data: {
           email: normalizedEmail,
-          firstName,
-          lastName,
+          firstName: roleForCreate === "VENUE_MANAGER" ? "Venue" : firstName,
+          lastName: roleForCreate === "VENUE_MANAGER" ? "Manager" : lastName,
           password: hashedPassword,
           avatar: input.image || undefined,
           role: roleForCreate,
+          ...(venueName ? { venueName, company: venueName } : {}),
           ...(roleForCreate === "VENUE_MANAGER" || roleForCreate === "ORGANIZER"
             ? { isVerified: false, isActive: true }
             : { isVerified: true, isActive: true }),
@@ -205,11 +213,16 @@ export class AuthService {
         },
       });
     } else {
+      const missingVenueName =
+        user.role === "VENUE_MANAGER" && !String(user.venueName ?? "").trim();
       await prisma.user.update({
         where: { id: user.id },
         data: {
           ...(input.image ? { avatar: input.image } : {}),
           lastLogin: new Date(),
+          ...(missingVenueName && fromEmail
+            ? { venueName: fromEmail, company: user.company || fromEmail }
+            : {}),
         },
       });
       const refreshed = await prisma.user.findUnique({

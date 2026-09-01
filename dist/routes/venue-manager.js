@@ -8,6 +8,7 @@ const prisma_1 = __importDefault(require("../config/prisma"));
 const iana_timezones_1 = require("../utils/iana-timezones");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const venue_slug_1 = require("../utils/venue-slug");
+const display_name_1 = require("../utils/display-name");
 const router = (0, express_1.Router)();
 async function syncLocationMasterFromVenue(input) {
     const countryName = String(input.country ?? "").trim();
@@ -93,6 +94,20 @@ router.get("/venue-manager/:id", auth_middleware_1.optionalUser, async (req, res
                 });
             }
         }
+        if (venueManager?.role === "VENUE_MANAGER" &&
+            !String(venueManager.venueName ?? "").trim() &&
+            venueManager.email) {
+            const derived = (0, display_name_1.nameFromEmailLocalPart)(venueManager.email);
+            if (derived) {
+                venueManager = await prisma_1.default.user.update({
+                    where: { id: venueManager.id },
+                    data: {
+                        venueName: derived,
+                        company: venueManager.company || derived,
+                    },
+                });
+            }
+        }
         if (!venueManager) {
             return res.status(404).json({
                 success: false,
@@ -129,7 +144,7 @@ router.get("/venue-manager/:id", auth_middleware_1.optionalUser, async (req, res
         const website = venueManager.venueWebsite || venueManager.website || "";
         const data = {
             id: venueManager.id,
-            name: venueManager.venueName || venueManager.company || "Unnamed Venue",
+            name: venueManager.venueName || venueManager.company || "",
             description: venueManager.venueDescription ||
                 venueManager.bio ||
                 "No description available",
@@ -148,7 +163,7 @@ router.get("/venue-manager/:id", auth_middleware_1.optionalUser, async (req, res
                 website: venueManager.website ?? "",
                 address: venueManager.venueAddress ?? "",
                 description: venueManager.venueDescription ?? "",
-                venueName: venueManager.venueName || "Unnamed Venue",
+                venueName: venueManager.venueName || "",
             },
             location: {
                 address: venueManager.venueAddress ?? "",

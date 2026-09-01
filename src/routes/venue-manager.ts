@@ -3,6 +3,7 @@ import prisma from "../config/prisma";
 import { normalizeVenueTimezoneInput } from "../utils/iana-timezones";
 import { optionalUser } from "../middleware/auth.middleware";
 import { isUuidParam, slugifyVenueSegment } from "../utils/venue-slug";
+import { nameFromEmailLocalPart } from "../utils/display-name";
 
 const router = Router();
 
@@ -98,6 +99,23 @@ router.get("/venue-manager/:id", optionalUser, async (req, res) => {
       }
     }
 
+    if (
+      venueManager?.role === "VENUE_MANAGER" &&
+      !String(venueManager.venueName ?? "").trim() &&
+      venueManager.email
+    ) {
+      const derived = nameFromEmailLocalPart(venueManager.email);
+      if (derived) {
+        venueManager = await prisma.user.update({
+          where: { id: venueManager.id },
+          data: {
+            venueName: derived,
+            company: venueManager.company || derived,
+          },
+        });
+      }
+    }
+
     if (!venueManager) {
       return res.status(404).json({
         success: false,
@@ -142,7 +160,7 @@ router.get("/venue-manager/:id", optionalUser, async (req, res) => {
 
     const data = {
       id: venueManager.id,
-      name: venueManager.venueName || venueManager.company || "Unnamed Venue",
+      name: venueManager.venueName || venueManager.company || "",
       description:
         venueManager.venueDescription ||
         venueManager.bio ||
@@ -165,7 +183,7 @@ router.get("/venue-manager/:id", optionalUser, async (req, res) => {
         website: venueManager.website ?? "",
         address: venueManager.venueAddress ?? "",
         description: venueManager.venueDescription ?? "",
-        venueName: venueManager.venueName || "Unnamed Venue",
+        venueName: venueManager.venueName || "",
       },
       location: {
         address: venueManager.venueAddress ?? "",

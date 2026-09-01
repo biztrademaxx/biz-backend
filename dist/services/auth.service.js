@@ -129,8 +129,13 @@ class AuthService {
         }
         const rawName = (input.name || "").trim();
         const nameParts = rawName.split(/\s+/).filter(Boolean);
-        const firstName = nameParts[0] || "User";
-        const lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "User";
+        const fromEmail = (0, display_name_1.nameFromEmailLocalPart)(normalizedEmail);
+        const firstName = nameParts[0] || fromEmail.split(" ")[0] || "User";
+        const lastName = nameParts.length > 1
+            ? nameParts.slice(1).join(" ")
+            : nameParts[0]
+                ? "User"
+                : fromEmail.split(" ").slice(1).join(" ") || "User";
         let user = await prisma_1.default.user.findUnique({
             where: { email: normalizedEmail },
         });
@@ -145,14 +150,16 @@ class AuthService {
             const raw = (input.intendedRole ?? "").trim().toUpperCase();
             const roleForCreate = raw && allowed.includes(raw) ? raw : "ATTENDEE";
             const hashedPassword = await bcryptjs_1.default.hash(crypto_1.default.randomBytes(32).toString("hex"), 10);
+            const venueName = roleForCreate === "VENUE_MANAGER" ? fromEmail || undefined : undefined;
             user = await prisma_1.default.user.create({
                 data: {
                     email: normalizedEmail,
-                    firstName,
-                    lastName,
+                    firstName: roleForCreate === "VENUE_MANAGER" ? "Venue" : firstName,
+                    lastName: roleForCreate === "VENUE_MANAGER" ? "Manager" : lastName,
                     password: hashedPassword,
                     avatar: input.image || undefined,
                     role: roleForCreate,
+                    ...(venueName ? { venueName, company: venueName } : {}),
                     ...(roleForCreate === "VENUE_MANAGER" || roleForCreate === "ORGANIZER"
                         ? { isVerified: false, isActive: true }
                         : { isVerified: true, isActive: true }),
@@ -162,11 +169,15 @@ class AuthService {
             });
         }
         else {
+            const missingVenueName = user.role === "VENUE_MANAGER" && !String(user.venueName ?? "").trim();
             await prisma_1.default.user.update({
                 where: { id: user.id },
                 data: {
                     ...(input.image ? { avatar: input.image } : {}),
                     lastLogin: new Date(),
+                    ...(missingVenueName && fromEmail
+                        ? { venueName: fromEmail, company: user.company || fromEmail }
+                        : {}),
                 },
             });
             const refreshed = await prisma_1.default.user.findUnique({
