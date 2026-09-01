@@ -21,7 +21,43 @@ const admin_response_1 = require("../../../lib/admin-response");
 const crypto_1 = require("crypto");
 const email_service_1 = require("../../../services/email.service");
 const organizer_location_resolve_1 = require("../../../utils/organizer-location-resolve");
+const event_ranking_1 = require("../../events/event-ranking");
 const ROLE = "ORGANIZER";
+const DEFAULT_ORGANIZER_PLAN_SLUG = "organizer-free";
+const DEFAULT_ORGANIZER_PLAN_NAME = "Free Plan";
+async function fetchOrganizerPlanMap(userIds) {
+    const map = new Map();
+    if (userIds.length === 0)
+        return map;
+    const now = new Date();
+    const subs = await prisma_1.default.userPlanSubscription.findMany({
+        where: {
+            userId: { in: userIds },
+            role: "ORGANIZER",
+            status: "ACTIVE",
+            OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+        },
+        orderBy: { startedAt: "desc" },
+        select: { userId: true, planSlug: true, planName: true },
+    });
+    for (const sub of subs) {
+        if (map.has(sub.userId))
+            continue;
+        map.set(sub.userId, {
+            planSlug: sub.planSlug,
+            planName: sub.planName,
+            planTier: (0, event_ranking_1.tierFromPlanSlug)(sub.planSlug),
+        });
+    }
+    return map;
+}
+function defaultOrganizerPlan() {
+    return {
+        planSlug: DEFAULT_ORGANIZER_PLAN_SLUG,
+        planName: DEFAULT_ORGANIZER_PLAN_NAME,
+        planTier: "free",
+    };
+}
 /** Lighter projection for paginated admin list (table + inline view dialog). */
 const ORGANIZER_LIST_SELECT = {
     id: true,
@@ -105,8 +141,9 @@ const ORGANIZER_ADMIN_SELECT = {
         },
     },
 };
-function mapOrganizerForAdmin(u) {
+function mapOrganizerForAdmin(u, plan) {
     const loc = (0, organizer_location_resolve_1.resolveOrganizerLocationFields)(u);
+    const resolvedPlan = plan ?? defaultOrganizerPlan();
     return {
         id: u.id,
         firstName: u.firstName,
@@ -145,6 +182,9 @@ function mapOrganizerForAdmin(u) {
         averageRating: u.averageRating ?? 0,
         totalReviews: u.totalReviews ?? 0,
         _count: u._count,
+        planSlug: resolvedPlan.planSlug,
+        planName: resolvedPlan.planName,
+        planTier: resolvedPlan.planTier,
     };
 }
 async function listOrganizers(query) {
@@ -249,7 +289,8 @@ async function listOrganizersFromDb(query) {
         prisma_1.default.user.count({ where }),
         getOrganizerListStats(statsWhere),
     ]);
-    const data = items.map((u) => mapOrganizerForAdmin(u));
+    const planMap = await fetchOrganizerPlanMap(items.map((u) => u.id));
+    const data = items.map((u) => mapOrganizerForAdmin(u, planMap.get(u.id) ?? defaultOrganizerPlan()));
     return {
         data,
         pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
@@ -263,7 +304,8 @@ async function getOrganizerById(id) {
     });
     if (!user)
         return null;
-    const mapped = mapOrganizerForAdmin(user);
+    const planMap = await fetchOrganizerPlanMap([user.id]);
+    const mapped = mapOrganizerForAdmin(user, planMap.get(user.id) ?? defaultOrganizerPlan());
     return {
         ...mapped,
         name: `${user.firstName || ""} ${user.lastName || ""}`.trim(),

@@ -12,103 +12,173 @@ exports.deleteVenueReviewReply = deleteVenueReviewReply;
 const prisma_1 = __importDefault(require("../../config/prisma"));
 const redis_1 = require("../../config/redis");
 const public_profile_1 = require("../../utils/public-profile");
+const organizer_country_priority_1 = require("../../utils/organizer-country-priority");
 async function listVenues(params) {
     const key = await (0, redis_1.venuesListCacheKey)(params);
     return (0, redis_1.cached)(key, redis_1.CACHE_TTL.VENUES_LIST, () => listVenuesFromDb(params));
 }
-async function listVenuesFromDb(params) {
-    const page = params.page && params.page > 0 ? params.page : 1;
-    const limit = params.limit && params.limit > 0 ? params.limit : 10;
-    const skip = (page - 1) * limit;
-    const requireVenueImage = params.requireVenueImage === true;
-    const where = {
-        role: "VENUE_MANAGER",
-        NOT: { profileVisibility: "private" },
-        /** Public /venues directory: admin-listed only (not tied to account isActive). */
-        isVerified: true,
-    };
-    if (requireVenueImage) {
-        where.venueImages = { isEmpty: false };
+const VENUE_LIST_MAX_LIMIT = 100;
+const venuePublicListSelect = {
+    id: true,
+    venueName: true,
+    venueAddress: true,
+    venueCity: true,
+    venueState: true,
+    venueCountry: true,
+    averageRating: true,
+    totalReviews: true,
+    avatar: true,
+    venueImages: true,
+};
+function buildPublicVenueListWhere(params) {
+    const filters = [
+        {
+            role: "VENUE_MANAGER",
+            NOT: { profileVisibility: "private" },
+            isVerified: true,
+        },
+    ];
+    if (params.requireVenueImage === true) {
+        filters.push({ venueImages: { isEmpty: false } });
     }
     const search = params.search?.trim() ?? "";
     if (search) {
-        where.OR = [
-            { venueName: { contains: search, mode: "insensitive" } },
-            { venueDescription: { contains: search, mode: "insensitive" } },
-            { venueAddress: { contains: search, mode: "insensitive" } },
-        ];
+        filters.push({
+            OR: [
+                { venueName: { contains: search, mode: "insensitive" } },
+                { venueDescription: { contains: search, mode: "insensitive" } },
+                { venueAddress: { contains: search, mode: "insensitive" } },
+                { venueCity: { contains: search, mode: "insensitive" } },
+                { venueCountry: { contains: search, mode: "insensitive" } },
+            ],
+        });
     }
-    const country = params.country?.trim() ?? "";
-    if (country) {
-        where.venueCountry = { equals: country, mode: "insensitive" };
+    const countries = String(params.country ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s && s.toLowerCase() !== "all");
+    if (countries.length > 0) {
+        filters.push({
+            OR: countries.flatMap((country) => [
+                { venueCountry: { equals: country, mode: "insensitive" } },
+                { venueCountry: { contains: country, mode: "insensitive" } },
+            ]),
+        });
     }
-    const [venues, total] = await Promise.all([
-        prisma_1.default.user.findMany({
+    const cities = String(params.city ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s && s.toLowerCase() !== "all");
+    if (cities.length > 0) {
+        filters.push({
+            OR: cities.flatMap((city) => [
+                { venueCity: { contains: city, mode: "insensitive" } },
+                { venueAddress: { contains: city, mode: "insensitive" } },
+            ]),
+        });
+    }
+    return filters.length === 1 ? filters[0] : { AND: filters };
+}
+function mapVenueListRow(v) {
+    const images = Array.isArray(v.venueImages) ? v.venueImages.slice(0, 4) : [];
+    const addressParts = [v.venueAddress, v.venueCity, v.venueState, v.venueCountry].filter(Boolean);
+    return {
+        id: v.id,
+        venueName: v.venueName || "Venue",
+        name: v.venueName || "Venue",
+        venueAddress: v.venueAddress || "",
+        venueCity: v.venueCity || "",
+        venueState: v.venueState || "",
+        venueCountry: v.venueCountry || "",
+        city: v.venueCity || "",
+        state: v.venueState || "",
+        country: v.venueCountry || "",
+        address: addressParts.length > 0 ? addressParts.join(", ") : "",
+        avatar: v.avatar,
+        venueImages: images,
+        images,
+        averageRating: v.averageRating != null ? Number(v.averageRating) : 0,
+        totalReviews: v.totalReviews != null ? Number(v.totalReviews) : 0,
+        rating: v.averageRating != null ? Number(v.averageRating) : 0,
+        reviewCount: v.totalReviews != null ? Number(v.totalReviews) : 0,
+    };
+}
+async function listVenuesFromDb(params) {
+    const page = params.page && params.page > 0 ? params.page : 1;
+    const limit = params.limit && params.limit > 0
+        ? Math.min(params.limit, VENUE_LIST_MAX_LIMIT)
+        : 10;
+    const skip = (page - 1) * limit;
+    const where = buildPublicVenueListWhere(params);
+    const priorityInput = {
+        countryName: String(params.prioritizeCountry ?? "").trim() || undefined,
+        countryCode: String(params.prioritizeCountryCode ?? "").trim() || undefined,
+        city: String(params.prioritizeCity ?? "").trim() || undefined,
+    };
+    const useGeoSort = Boolean(priorityInput.countryName || priorityInput.countryCode);
+    let rows;
+    let total;
+    if (useGeoSort) {
+        const sortRows = await prisma_1.default.user.findMany({
             where,
             select: {
                 id: true,
-                firstName: true,
-                lastName: true,
-                organizerIdForVenueManager: true,
-                venueName: true,
-                venueDescription: true,
-                venueAddress: true,
-                venueCity: true,
-                venueState: true,
                 venueCountry: true,
-                venueZipCode: true,
-                maxCapacity: true,
-                totalHalls: true,
-                averageRating: true,
-                totalReviews: true,
-                amenities: true,
-                venueCurrency: true,
-                avatar: true,
-                venueImages: true,
-                venueTimezone: true,
+                venueCity: true,
+                venueAddress: true,
                 createdAt: true,
-                updatedAt: true,
-                _count: {
-                    select: { venueEvents: true },
-                },
             },
-            skip,
-            take: limit,
-            orderBy: { createdAt: "desc" },
-        }),
-        prisma_1.default.user.count({ where }),
-    ]);
-    const sourceVenues = requireVenueImage
-        ? venues.filter((v) => Array.isArray(v.venueImages) && v.venueImages.length > 0)
-        : venues;
-    const transformedVenues = sourceVenues.map((v) => {
-        const images = Array.isArray(v.venueImages) ? v.venueImages : [];
-        const addressParts = [v.venueAddress, v.venueCity, v.venueState, v.venueCountry].filter(Boolean);
-        const address = addressParts.length > 0 ? addressParts.join(", ") : "";
-        return {
-            ...v,
-            name: v.venueName || "Venue",
-            images,
-            eventCount: v._count?.venueEvents ?? 0,
-            rating: v.averageRating != null ? Number(v.averageRating) : null,
-            reviewCount: v.totalReviews != null ? Number(v.totalReviews) : 0,
-            location: {
-                address: v.venueAddress || "",
-                city: v.venueCity || "",
-                state: v.venueState || "",
-                country: v.venueCountry || "",
-                timezone: v.venueTimezone || "",
-            },
-            address,
-        };
-    });
+        });
+        const sorted = [...sortRows].sort((a, b) => {
+            const scoreA = (0, organizer_country_priority_1.organizerCountryPriorityScore)({
+                organizerCountry: a.venueCountry,
+                organizerCity: a.venueCity,
+                location: a.venueAddress,
+            }, priorityInput);
+            const scoreB = (0, organizer_country_priority_1.organizerCountryPriorityScore)({
+                organizerCountry: b.venueCountry,
+                organizerCity: b.venueCity,
+                location: b.venueAddress,
+            }, priorityInput);
+            if (scoreA !== scoreB)
+                return scoreA - scoreB;
+            return b.createdAt.getTime() - a.createdAt.getTime();
+        });
+        total = sorted.length;
+        const pageIds = sorted.slice(skip, skip + limit).map((r) => r.id);
+        const fetched = pageIds.length > 0
+            ? await prisma_1.default.user.findMany({
+                where: { id: { in: pageIds } },
+                select: venuePublicListSelect,
+            })
+            : [];
+        const byId = new Map(fetched.map((row) => [row.id, row]));
+        rows = pageIds
+            .map((id) => byId.get(id))
+            .filter((row) => !!row);
+    }
+    else {
+        const [fetched, count] = await Promise.all([
+            prisma_1.default.user.findMany({
+                where,
+                select: venuePublicListSelect,
+                skip,
+                take: limit,
+                orderBy: { createdAt: "desc" },
+            }),
+            prisma_1.default.user.count({ where }),
+        ]);
+        rows = fetched;
+        total = count;
+    }
+    const transformedVenues = rows.map(mapVenueListRow);
     return {
         venues: transformedVenues,
         pagination: {
             page,
             limit,
             total,
-            totalPages: Math.ceil(total / limit),
+            totalPages: Math.max(1, Math.ceil(total / limit)),
         },
     };
 }

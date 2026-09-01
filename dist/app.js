@@ -62,8 +62,29 @@ function isVercelAppHttpsOrigin(origin) {
  */
 function createApp() {
     const app = (0, express_1.default)();
-    app.use((0, helmet_1.default)());
-    app.use(express_1.default.json());
+    // Behind Nginx/ALB, clients send X-Forwarded-For. express-rate-limit requires trust proxy
+    // or it throws ERR_ERL_UNEXPECTED_X_FORWARDED_FOR and cannot key clients correctly.
+    // TRUST_PROXY=0 disables; unset defaults to 1 hop in production, off otherwise.
+    const trustProxyEnv = process.env.TRUST_PROXY?.trim().toLowerCase();
+    if (trustProxyEnv === "0" || trustProxyEnv === "false") {
+        // leave default (false)
+    }
+    else if (trustProxyEnv && /^\d+$/.test(trustProxyEnv)) {
+        app.set("trust proxy", Number(trustProxyEnv));
+    }
+    else if (trustProxyEnv === "true" || process.env.NODE_ENV === "production") {
+        app.set("trust proxy", 1);
+    }
+    // Public JSON API consumed by https://*.biztradefairs.com. Helmet's HTML-app
+    // defaults (CORP: same-origin, document CSP) would block cross-origin fetch()
+    // even when CORS_ORIGIN allows the app.
+    app.use((0, helmet_1.default)({
+        contentSecurityPolicy: false,
+        crossOriginEmbedderPolicy: false,
+        crossOriginResourcePolicy: { policy: "cross-origin" },
+    }));
+    // CORS must run before body parsers so parse failures (e.g. PayloadTooLarge)
+    // still return Access-Control-Allow-Origin — otherwise browsers report a CORS error.
     const { allowAny, origins } = corsAllowedOrigins();
     const allowVercelApp = process.env.CORS_ALLOW_VERCEL_APP?.trim().toLowerCase() === "true";
     app.use((0, cors_1.default)({
@@ -87,6 +108,10 @@ function createApp() {
         allowedHeaders: ["Authorization", "Content-Type", "X-Internal-Secret", "X-Requested-With"],
         methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     }));
+    // Admin event edits may include base64 media; default 100kb limit rejects those as PayloadTooLarge.
+    const jsonLimit = process.env.JSON_BODY_LIMIT?.trim() || "50mb";
+    app.use(express_1.default.json({ limit: jsonLimit }));
+    app.use(express_1.default.urlencoded({ extended: true, limit: jsonLimit }));
     app.use((0, compression_1.default)());
     if (process.env.NODE_ENV === "development") {
         app.use((0, morgan_1.default)("dev"));

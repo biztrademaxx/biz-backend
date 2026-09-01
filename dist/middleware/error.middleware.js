@@ -25,6 +25,15 @@ _next) {
     if (err instanceof Error && err.name === "ValidationError") {
         return res.status(400).json(buildError(err.message, "VALIDATION_ERROR"));
     }
+    // express.json / urlencoded body size exceeded
+    if (err instanceof Error &&
+        (err.name === "PayloadTooLargeError" ||
+            err.type === "entity.too.large" ||
+            /request entity too large/i.test(err.message))) {
+        return res
+            .status(413)
+            .json(buildError("Request body is too large. Upload media separately or reduce image/PDF size.", "PAYLOAD_TOO_LARGE"));
+    }
     // Fallback
     const isProd = process.env.NODE_ENV === "production";
     if (!isProd && err instanceof Error) {

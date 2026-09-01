@@ -66,6 +66,8 @@ const profile_image_1 = require("../../utils/profile-image");
 const display_name_1 = require("../../utils/display-name");
 const profile_slug_1 = require("../../utils/profile-slug");
 const organizer_country_priority_1 = require("../../utils/organizer-country-priority");
+const event_fts_1 = require("../events/event-fts");
+const event_ranking_1 = require("../events/event-ranking");
 /** Mutually exclusive ranges so facet counts do not double-count organizers. */
 exports.ORGANIZER_EVENT_BUCKETS = [
     { id: "lt10", label: "less than 10", min: 0, max: 9 },
@@ -121,6 +123,8 @@ function sanitizePublicOrganizerListItem(item) {
         specialties: item.specialties,
         verified: item.verified,
         featured: item.featured,
+        planSlug: item.planSlug ?? "organizer-free",
+        planTier: item.planTier ?? "free",
     };
 }
 function buildPublicOrganizerListWhere(options) {
@@ -241,79 +245,30 @@ async function resolveBucketFilteredOrganizerIds(options) {
   `;
     return new Set(rows.map((r) => r.id));
 }
-const organizerListSelect = {
+const organizerPublicListSelect = {
     id: true,
     firstName: true,
     lastName: true,
-    email: true,
-    phone: true,
     avatar: true,
-    bio: true,
-    website: true,
-    location: true,
     organizationName: true,
     company: true,
-    description: true,
-    headquarters: true,
     organizerCountry: true,
-    organizerState: true,
     organizerCity: true,
     totalReviews: true,
     averageRating: true,
     founded: true,
-    teamSize: true,
     specialties: true,
     isVerified: true,
-    isActive: true,
-    profileVisibility: true,
-    createdAt: true,
-    updatedAt: true,
-    organizedEvents: {
-        where: { status: "PUBLISHED" },
-        select: { id: true },
-    },
 };
-async function mapOrganizerListRows(rows, requireProfileImage) {
+function mapPublicOrganizerListRows(rows, eventCountByOrganizerId, requireProfileImage) {
     const filteredRows = requireProfileImage
         ? rows.filter((o) => (0, profile_image_1.hasPublicProfileImage)(o.avatar))
         : rows;
-    /** One grouped query instead of 2×N concurrent queries (avoids exhausting the DB pool on small VPS). */
-    const allEventIds = [...new Set(filteredRows.flatMap((o) => o.organizedEvents.map((e) => e.id)))];
-    const statsByEventId = new Map();
-    if (allEventIds.length > 0) {
-        const grouped = await prisma_1.default.eventRegistration.groupBy({
-            by: ["eventId"],
-            where: {
-                eventId: { in: allEventIds },
-                status: "CONFIRMED",
-            },
-            _count: { _all: true },
-            _sum: { totalAmount: true },
-        });
-        for (const g of grouped) {
-            statsByEventId.set(g.eventId, {
-                registrations: g._count._all,
-                revenue: g._sum.totalAmount ?? 0,
-            });
-        }
-    }
     return filteredRows.map((organizer) => {
-        const eventIds = organizer.organizedEvents.map((e) => e.id);
-        let attendeeCount = 0;
-        let totalRevenue = 0;
-        for (const id of eventIds) {
-            const s = statsByEventId.get(id);
-            if (s) {
-                attendeeCount += s.registrations;
-                totalRevenue += s.revenue;
-            }
-        }
         const foundedYear = organizer.founded ? parseInt(organizer.founded) : new Date().getFullYear();
         const yearsOfExperience = Number.isNaN(foundedYear) ? 0 : new Date().getFullYear() - foundedYear;
         const city = String(organizer.organizerCity ?? "").trim();
-        const state = String(organizer.organizerState ?? "").trim();
         const country = String(organizer.organizerCountry ?? "").trim();
-        const structuredLocation = [city, state, country].filter(Boolean).join(", ");
         const displayName = (0, display_name_1.getDisplayName)({
             role: "ORGANIZER",
             firstName: organizer.firstName,
@@ -324,12 +279,7 @@ async function mapOrganizerListRows(rows, requireProfileImage) {
         const companyLabel = String(organizer.organizationName ?? "").trim() ||
             String(organizer.company ?? "").trim() ||
             displayName;
-        const hqRaw = String(organizer.headquarters ?? "").trim();
-        const locRaw = String(organizer.location ?? "").trim();
-        const locationLine = structuredLocation ||
-            (hqRaw && !/^not specified$/i.test(hqRaw) ? hqRaw : "") ||
-            (locRaw && !/^not specified$/i.test(locRaw) ? locRaw : "");
-        return {
+        return sanitizePublicOrganizerListItem({
             id: organizer.id,
             name: displayName,
             displayName,
@@ -342,38 +292,44 @@ async function mapOrganizerListRows(rows, requireProfileImage) {
             }, "ORGANIZER"),
             company: companyLabel,
             city,
-            state,
             country,
-            image: requireProfileImage
-                ? organizer.avatar ?? ""
-                : organizer.avatar || null,
+            image: requireProfileImage ? organizer.avatar ?? "" : organizer.avatar || null,
             avgRating: organizer.averageRating || 0,
             totalReviews: organizer.totalReviews || 0,
-            headquarters: locationLine || "Location not specified",
-            reviewCount: organizer.totalReviews || 0,
-            location: locationLine || locRaw || "Location not specified",
             category: organizer.specialties?.[0] || "General Events",
-            eventsOrganized: organizer.organizedEvents.length,
+            eventsOrganized: eventCountByOrganizerId.get(organizer.id) ?? 0,
             yearsOfExperience,
             specialties: organizer.specialties || ["Event Management"],
-            description: organizer.description || organizer.bio || "No description provided",
-            phone: organizer.phone || "Not provided",
-            email: organizer.email,
-            website: organizer.website || "",
             verified: organizer.isVerified || false,
-            active: organizer.isActive || false,
             featured: false,
-            totalAttendees: attendeeCount,
-            totalRevenue,
-            successRate: organizer.organizedEvents.length > 0 ? 95 : 0,
-            joinDate: organizer.createdAt.toISOString().split("T")[0],
-            lastActive: organizer.updatedAt.toISOString().split("T")[0],
-        };
+        });
     });
 }
 async function listOrganizers(options = {}) {
     const key = await (0, redis_1.organizersListCacheKey)(options);
     return (0, redis_1.cached)(key, redis_1.CACHE_TTL.ORGANIZERS_LIST, () => listOrganizersFromDb(options));
+}
+async function fetchActiveOrganizerPlanMap() {
+    const map = new Map();
+    const now = new Date();
+    const subs = await prisma_1.default.userPlanSubscription.findMany({
+        where: {
+            role: "ORGANIZER",
+            status: "ACTIVE",
+            OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+        },
+        orderBy: { startedAt: "desc" },
+        select: { userId: true, planSlug: true },
+    });
+    for (const sub of subs) {
+        if (map.has(sub.userId))
+            continue;
+        map.set(sub.userId, {
+            planSlug: sub.planSlug,
+            planTier: (0, event_ranking_1.tierFromPlanSlug)(sub.planSlug),
+        });
+    }
+    return map;
 }
 async function listOrganizersFromDb(options = {}) {
     const requireProfileImage = options.requireProfileImage ?? false;
@@ -399,12 +355,9 @@ async function listOrganizersFromDb(options = {}) {
         countryCode: String(options.prioritizeCountryCode ?? "").trim() || undefined,
         city: String(options.prioritizeCity ?? "").trim() || undefined,
     };
-    const useCountryPriority = paginate &&
-        Boolean(priorityInput.countryName || priorityInput.countryCode);
-    let organizers;
-    let total;
-    if (useCountryPriority) {
-        const sortRows = await prisma_1.default.user.findMany({
+    const countryPriorityForSort = paginate ? priorityInput : null;
+    const [sortRows, planMap] = await Promise.all([
+        prisma_1.default.user.findMany({
             where,
             select: {
                 id: true,
@@ -415,35 +368,50 @@ async function listOrganizersFromDb(options = {}) {
                 organizationName: true,
                 company: true,
             },
-        });
-        const sorted = (0, organizer_country_priority_1.sortOrganizerRowsByCountryPriority)(sortRows, priorityInput, (r) => String(r.organizationName ?? "").trim() ||
-            String(r.company ?? "").trim() ||
-            r.id);
-        total = sorted.length;
-        const pageIds = sorted.slice(skip, skip + limit).map((r) => r.id);
-        const fetched = pageIds.length > 0
-            ? await prisma_1.default.user.findMany({
-                where: { id: { in: pageIds } },
-                select: organizerListSelect,
-            })
-            : [];
-        const byId = new Map(fetched.map((row) => [row.id, row]));
-        organizers = pageIds.map((id) => byId.get(id)).filter((row) => !!row);
-    }
-    else {
-        [organizers, total] = await Promise.all([
+        }),
+        fetchActiveOrganizerPlanMap(),
+    ]);
+    const enriched = sortRows.map((row) => {
+        const plan = planMap.get(row.id);
+        const planSlug = plan?.planSlug ?? "organizer-free";
+        const planTier = plan?.planTier ?? (0, event_ranking_1.tierFromPlanSlug)(planSlug);
+        return {
+            ...row,
+            planSlug,
+            planTier,
+            planTierRank: (0, event_fts_1.planTierSortRank)(planTier),
+        };
+    });
+    const sorted = (0, organizer_country_priority_1.sortOrganizerRowsForPublicListing)(enriched, countryPriorityForSort, (r) => String(r.organizationName ?? "").trim() ||
+        String(r.company ?? "").trim() ||
+        r.id);
+    const total = sorted.length;
+    const pageSlice = paginate ? sorted.slice(skip, skip + limit) : sorted.slice(0, take);
+    const pageIds = pageSlice.map((r) => r.id);
+    const planById = new Map(pageSlice.map((r) => [r.id, { planSlug: r.planSlug, planTier: r.planTier }]));
+    const [fetched, eventCountRows] = pageIds.length > 0
+        ? await Promise.all([
             prisma_1.default.user.findMany({
-                where,
-                select: organizerListSelect,
-                skip,
-                take,
-                orderBy: [{ organizationName: "asc" }, { company: "asc" }, { createdAt: "desc" }],
+                where: { id: { in: pageIds } },
+                select: organizerPublicListSelect,
             }),
-            prisma_1.default.user.count({ where }),
-        ]);
-    }
-    const mapped = await mapOrganizerListRows(organizers, requireProfileImage);
-    const sanitized = mapped.map(sanitizePublicOrganizerListItem);
+            prisma_1.default.event.groupBy({
+                by: ["organizerId"],
+                where: { organizerId: { in: pageIds }, status: "PUBLISHED" },
+                _count: { _all: true },
+            }),
+        ])
+        : [[], []];
+    const eventCountByOrganizerId = new Map(eventCountRows.map((row) => [row.organizerId, row._count._all]));
+    const byId = new Map(fetched.map((row) => [row.id, row]));
+    const organizers = pageIds
+        .map((id) => byId.get(id))
+        .filter((row) => !!row);
+    const mapped = mapPublicOrganizerListRows(organizers, eventCountByOrganizerId, requireProfileImage);
+    const sanitized = mapped.map((item) => {
+        const plan = planById.get(item.id) ?? { planSlug: "organizer-free", planTier: "free" };
+        return { ...item, ...plan };
+    });
     const effectiveLimit = paginate ? limit : Math.max(sanitized.length, 1);
     const totalPages = paginate ? Math.max(1, Math.ceil(total / limit)) : 1;
     return {
@@ -459,19 +427,30 @@ async function listOrganizerFilterFacets() {
     return (0, redis_1.cached)(key, redis_1.CACHE_TTL.ORGANIZERS_FACETS, listOrganizerFilterFacetsFromDb);
 }
 async function listOrganizerFilterFacetsFromDb() {
-    const rows = await prisma_1.default.user.findMany({
-        where: (0, public_profile_1.publicOrganizerListingWhere)(),
-        select: {
-            organizerCity: true,
-            organizerCountry: true,
-            specialties: true,
-            organizedEvents: {
-                where: (0, public_profile_1.publicPublishedEventWhere)(),
-                select: { id: true },
+    const listingWhere = (0, public_profile_1.publicOrganizerListingWhere)();
+    const [rows, eventCountRows, followerCountRows] = await Promise.all([
+        prisma_1.default.user.findMany({
+            where: listingWhere,
+            select: {
+                id: true,
+                organizerCity: true,
+                organizerCountry: true,
+                specialties: true,
             },
-            followersAsFollowed: { select: { id: true } },
-        },
-    });
+        }),
+        prisma_1.default.event.groupBy({
+            by: ["organizerId"],
+            where: { status: "PUBLISHED", organizer: listingWhere },
+            _count: { _all: true },
+        }),
+        prisma_1.default.follow.groupBy({
+            by: ["followingId"],
+            where: { following: listingWhere },
+            _count: { _all: true },
+        }),
+    ]);
+    const eventCountById = new Map(eventCountRows.map((r) => [r.organizerId, r._count._all]));
+    const followerCountById = new Map(followerCountRows.map((r) => [r.followingId, r._count._all]));
     const cityCounts = new Map();
     const countryCounts = new Map();
     const categoryCounts = new Map();
@@ -489,13 +468,13 @@ async function listOrganizerFilterFacetsFromDb() {
             if (s)
                 categoryCounts.set(s, (categoryCounts.get(s) ?? 0) + 1);
         }
-        const eventCount = row.organizedEvents.length;
+        const eventCount = eventCountById.get(row.id) ?? 0;
         for (const bucket of exports.ORGANIZER_EVENT_BUCKETS) {
             if (eventCountMatchesBucket(eventCount, bucket.id)) {
                 eventBucketCounts.set(bucket.id, (eventBucketCounts.get(bucket.id) ?? 0) + 1);
             }
         }
-        const followerCount = row.followersAsFollowed.length;
+        const followerCount = followerCountById.get(row.id) ?? 0;
         for (const bucket of exports.ORGANIZER_FOLLOWER_BUCKETS) {
             if (followerCountMatchesBucket(followerCount, bucket.id)) {
                 followerBucketCounts.set(bucket.id, (followerBucketCounts.get(bucket.id) ?? 0) + 1);

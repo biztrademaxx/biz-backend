@@ -21,6 +21,32 @@ function extractTokenFromHeader(req) {
         return null;
     return token;
 }
+/**
+ * Presence (lastLogin) updates must not compete with request-critical Prisma
+ * work (e.g. /api/events Promise.all findMany+count) on a small connection pool.
+ * Throttle per user and defer the write so the main handler can acquire connections first.
+ */
+const LAST_LOGIN_THROTTLE_MS = 60000;
+const LAST_LOGIN_DEFER_MS = 75;
+const lastLoginTouchedAt = new Map();
+function touchLastLoginDeferred(userId) {
+    if (!userId || userId === "internal")
+        return;
+    const now = Date.now();
+    const prev = lastLoginTouchedAt.get(userId) ?? 0;
+    if (now - prev < LAST_LOGIN_THROTTLE_MS)
+        return;
+    lastLoginTouchedAt.set(userId, now);
+    if (lastLoginTouchedAt.size > 5000) {
+        lastLoginTouchedAt.clear();
+        lastLoginTouchedAt.set(userId, now);
+    }
+    setTimeout(() => {
+        prisma_1.default.user
+            .updateMany({ where: { id: userId }, data: { lastLogin: new Date() } })
+            .catch(() => { });
+    }, LAST_LOGIN_DEFER_MS);
+}
 /** Allow either JWT or X-Internal-Secret (for Next.js server-to-backend calls). */
 function requireUserOrInternal(req, res, next) {
     const secret = process.env.INTERNAL_API_SECRET;
@@ -39,10 +65,7 @@ function optionalUser(req, _res, next) {
             return next();
         const payload = auth_service_1.AuthService.verifyAccessToken(token);
         req.auth = payload;
-        const userId = payload.sub;
-        if (userId && userId !== "internal") {
-            prisma_1.default.user.updateMany({ where: { id: userId }, data: { lastLogin: new Date() } }).catch(() => { });
-        }
+        touchLastLoginDeferred(payload.sub);
         return next();
     }
     catch {
@@ -69,11 +92,8 @@ function requireUser(req, res, next) {
         }
         const payload = auth_service_1.AuthService.verifyAccessToken(token);
         req.auth = payload;
-        // Update lastLogin for presence (green dot); fire-and-forget to avoid blocking
-        const userId = payload.sub;
-        if (userId && userId !== "internal") {
-            prisma_1.default.user.updateMany({ where: { id: userId }, data: { lastLogin: new Date() } }).catch(() => { });
-        }
+        // Presence (green dot): throttled + deferred so it does not exhaust the Prisma pool
+        touchLastLoginDeferred(payload.sub);
         return next();
     }
     catch (err) {

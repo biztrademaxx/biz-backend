@@ -152,6 +152,13 @@ async function listEvents(params) {
     return result;
 }
 async function listEventsFromDb(params) {
+    const perfEnabled = process.env.EVENTS_LIST_PERF !== "0";
+    const t0 = perfEnabled ? Date.now() : 0;
+    let tAfterFilters = 0;
+    let tFtsMs = 0;
+    let tFindManyMs = 0;
+    let tCountMs = 0;
+    let tTransformMs = 0;
     const page = params.page && params.page > 0 ? params.page : 1;
     const rawLimit = params.limit && params.limit > 0 ? params.limit : 12;
     const limit = Math.min(rawLimit, LIST_EVENTS_MAX_LIMIT);
@@ -167,7 +174,10 @@ async function listEventsFromDb(params) {
     const search = params.search?.trim() ?? "";
     let ftsRelevance = null;
     if (search) {
+        const tFts0 = perfEnabled ? Date.now() : 0;
         ftsRelevance = await (0, event_fts_1.fetchEventFtsRelevanceMap)(search, 2000);
+        if (perfEnabled)
+            tFtsMs = Date.now() - tFts0;
         if (ftsRelevance.size > 0) {
             andParts.push({ id: { in: Array.from(ftsRelevance.keys()) } });
         }
@@ -296,6 +306,8 @@ async function listEventsFromDb(params) {
         });
     }
     const where = { AND: andParts };
+    if (perfEnabled)
+        tAfterFilters = Date.now() - t0;
     const listInclude = {
         organizer: {
             select: {
@@ -327,12 +339,10 @@ async function listEventsFromDb(params) {
             orderBy: { price: "asc" },
             take: 1,
         },
+        // attendees + totalReviews use denormalized Event columns (same as organizer/venue cards).
+        // Only followersCount still needs a live relation count.
         _count: {
             select: {
-                registrations: {
-                    where: { status: "CONFIRMED" },
-                },
-                reviews: true,
                 savedEvents: true,
             },
         },
@@ -364,6 +374,7 @@ async function listEventsFromDb(params) {
     // Ranked listing: hard tier order (platinum → gold → silver → free), then nearest start, then score.
     // Search path adds live FTS relevance into finalScore; browse uses precomputed rankScore only.
     if (params.sort === "ranked") {
+        const tSlim0 = perfEnabled ? Date.now() : 0;
         const slimRows = await prisma_1.default.event.findMany({
             where,
             select: {
@@ -373,6 +384,7 @@ async function listEventsFromDb(params) {
                 searchStats: true,
             },
         });
+        const tSlimMs = perfEnabled ? Date.now() - tSlim0 : 0;
         const ranked = (0, event_fts_1.sortRankedCandidates)(slimRows.map((row) => {
             const relevanceScore = ftsRelevance && ftsRelevance.size > 0 ? ftsRelevance.get(row.id) ?? 0 : 0;
             const stats = row.searchStats;
@@ -389,6 +401,7 @@ async function listEventsFromDb(params) {
         const total = ranked.length;
         const pageIds = ranked.slice(skip, skip + limit).map((r) => r.id);
         const scoreById = new Map(ranked.map((r) => [r.id, r]));
+        const tHydrate0 = perfEnabled ? Date.now() : 0;
         const events = pageIds.length === 0
             ? []
             : await prisma_1.default.event.findMany({
@@ -396,8 +409,11 @@ async function listEventsFromDb(params) {
                 omit: { description: true },
                 include: listInclude,
             });
+        if (perfEnabled)
+            tFindManyMs = Date.now() - tHydrate0;
         const byId = new Map(events.map((e) => [e.id, e]));
         const ordered = pageIds.map((id) => byId.get(id)).filter(Boolean);
+        const tTx0 = perfEnabled ? Date.now() : 0;
         const transformedEvents = ordered.map((event) => {
             const scored = scoreById.get(event.id);
             return {
@@ -413,6 +429,12 @@ async function listEventsFromDb(params) {
                     : undefined,
             };
         });
+        if (perfEnabled)
+            tTransformMs = Date.now() - tTx0;
+        if (perfEnabled) {
+            // eslint-disable-next-line no-console
+            console.info(`[events.list] sort=ranked page=${page} limit=${limit} filters=${tAfterFilters}ms fts=${tFtsMs}ms slim=${tSlimMs}ms hydrate=${tFindManyMs}ms transform=${tTransformMs}ms total=${Date.now() - t0}ms rows=${transformedEvents.length}/${total}`);
+        }
         return {
             events: transformedEvents,
             pagination: {
@@ -446,20 +468,58 @@ async function listEventsFromDb(params) {
         default:
             orderBy = { createdAt: "desc" };
     }
-    const [events, total] = await Promise.all([
-        prisma_1.default.event.findMany({
+    /**
+     * Two-phase list (measured faster than single findMany+include on Neon):
+     * 1) page ids + count in parallel (heavy WHERE, no relation fan-out)
+     * 2) hydrate only those ids with includes (_count / tickets / preview)
+     */
+    let tPhase1Ms = 0;
+    let tHydrateMs = 0;
+    const tPhase1Start = perfEnabled ? Date.now() : 0;
+    const pageIdPromise = (async () => {
+        const t = perfEnabled ? Date.now() : 0;
+        const rows = await prisma_1.default.event.findMany({
             where,
-            omit: {
-                description: true,
-            },
-            include: listInclude,
+            select: { id: true },
             orderBy,
             skip,
             take: limit,
-        }),
-        prisma_1.default.event.count({ where }),
-    ]);
+        });
+        if (perfEnabled)
+            tFindManyMs = Date.now() - t;
+        return rows;
+    })();
+    const countPromise = (async () => {
+        const t = perfEnabled ? Date.now() : 0;
+        const n = await prisma_1.default.event.count({ where });
+        if (perfEnabled)
+            tCountMs = Date.now() - t;
+        return n;
+    })();
+    const [pageIdRows, total] = await Promise.all([pageIdPromise, countPromise]);
+    if (perfEnabled)
+        tPhase1Ms = Date.now() - tPhase1Start;
+    const pageIds = pageIdRows.map((r) => r.id);
+    const tHydrate0 = perfEnabled ? Date.now() : 0;
+    const eventsUnordered = pageIds.length === 0
+        ? []
+        : await prisma_1.default.event.findMany({
+            where: { id: { in: pageIds } },
+            omit: { description: true },
+            include: listInclude,
+        });
+    if (perfEnabled)
+        tHydrateMs = Date.now() - tHydrate0;
+    const byId = new Map(eventsUnordered.map((e) => [e.id, e]));
+    const events = pageIds.map((id) => byId.get(id)).filter(Boolean);
+    const tTx0 = perfEnabled ? Date.now() : 0;
     const transformedEvents = events.map((event) => transformListEvent(event));
+    if (perfEnabled)
+        tTransformMs = Date.now() - tTx0;
+    if (perfEnabled) {
+        // eslint-disable-next-line no-console
+        console.info(`[events.list] sort=${params.sort ?? "newest"} page=${page} limit=${limit} filters=${tAfterFilters}ms fts=${tFtsMs}ms ids=${tFindManyMs}ms count=${tCountMs}ms phase1=${tPhase1Ms}ms hydrate=${tHydrateMs}ms transform=${tTransformMs}ms total=${Date.now() - t0}ms rows=${transformedEvents.length}/${total}`);
+    }
     return {
         events: transformedEvents,
         pagination: {
@@ -518,9 +578,9 @@ function transformListEvent(event) {
         verifiedAt: event.verifiedAt?.toISOString() ?? null,
         verifiedBy: event.verifiedBy || "",
         verifiedBadgeImage: event.verifiedBadgeImage ?? null,
-        attendees: event._count.registrations,
-        totalReviews: event._count.reviews,
-        followersCount: event._count.savedEvents ?? 0,
+        attendees: event.currentAttendees ?? event._count?.registrations ?? 0,
+        totalReviews: event.totalReviews ?? event._count?.reviews ?? 0,
+        followersCount: event._count?.savedEvents ?? 0,
         followerPreview: Array.isArray(event.savedEvents)
             ? event.savedEvents.map((se) => ({
                 id: se.user.id,
