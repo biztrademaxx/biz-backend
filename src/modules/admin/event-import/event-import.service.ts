@@ -359,6 +359,7 @@ async function runImportJob(jobId: string) {
       }
 
       if (await findExistingEventDuplicate(dupFp)) {
+        seenDuplicateKeys.add(dupKey);
         throw new Error(duplicateSkipMessage(dupFp, "database"));
       }
 
@@ -467,10 +468,15 @@ async function runImportJob(jobId: string) {
     }
   }
 
+  const duplicateCount = errors.filter((e) =>
+    String(e.message).includes("Duplicate (skipped)"),
+  ).length;
+  const realErrorCount = errors.length - duplicateCount;
+
   await prisma.eventImportJob.update({
     where: { id: jobId },
     data: {
-      status: importedSummary.length === 0 ? "FAILED" : "COMPLETED",
+      status: realErrorCount === 0 ? "COMPLETED" : importedSummary.length === 0 ? "FAILED" : "COMPLETED",
       processedRows: rows.length,
       successCount: importedSummary.length,
       errorCount: errors.length,

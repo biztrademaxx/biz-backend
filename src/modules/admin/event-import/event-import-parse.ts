@@ -45,6 +45,10 @@ function normalizeDateInput(raw: unknown): unknown {
 export function parseCalendarParts(raw: unknown): CalendarParts | null {
   if (raw === null || raw === undefined) return null;
 
+  if (raw instanceof Date && !Number.isNaN(raw.getTime())) {
+    return calendarFromDateInstance(raw);
+  }
+
   const normalized = normalizeDateInput(raw);
 
   if (typeof normalized === "number" && Number.isFinite(normalized) && isExcelSerial(normalized)) {
@@ -228,6 +232,12 @@ function getZonedParts(utcMs: number, timeZone: string): CalendarParts & ClockPa
     hours: parseInt(map.hour, 10),
     minutes: parseInt(map.minute, 10),
   };
+}
+
+/** Calendar date of a stored UTC instant as seen in `timeZone`. */
+export function calendarPartsInTimeZone(date: Date, timeZone: string): CalendarParts {
+  const zoned = getZonedParts(date.getTime(), timeZone || DEFAULT_IMPORT_TIMEZONE);
+  return { year: zoned.year, month: zoned.month, day: zoned.day };
 }
 
 /** Wall-clock date + time in `timeZone` → UTC instant stored in DB. */
