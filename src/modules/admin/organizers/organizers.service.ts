@@ -504,6 +504,34 @@ export async function rejectOrganizer(id: string, reason?: string) {
   };
 }
 
+export async function bulkApproveOrganizers(input: {
+  ids?: string[];
+  allPending?: boolean;
+  search?: string;
+}): Promise<{ approvedCount: number }> {
+  const allPending = input.allPending === true;
+  const unique = [...new Set((input.ids ?? []).map((id) => String(id).trim()).filter(Boolean))];
+  if (!allPending && unique.length === 0) {
+    throw new Error("ids is required");
+  }
+
+  const where: Prisma.UserWhereInput = allPending
+    ? buildOrganizerListWhere({
+        verified: "false",
+        isActive: "true",
+        search: String(input.search ?? "").trim(),
+      })
+    : { role: ROLE, id: { in: unique } };
+
+  const result = await prisma.user.updateMany({
+    where,
+    data: { isVerified: true, isActive: true },
+  });
+  await invalidateOrganizerCaches();
+  await invalidateAdminOrganizerCaches();
+  return { approvedCount: result.count };
+}
+
 export async function deleteOrganizer(id: string) {
   const existing = await prisma.user.findFirst({ where: { id, role: ROLE } });
   if (!existing) return null;

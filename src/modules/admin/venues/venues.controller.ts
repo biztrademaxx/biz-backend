@@ -53,6 +53,21 @@ function isVenueClientError(message: unknown): boolean {
   );
 }
 
+export async function bulkApprove(req: Request, res: Response) {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    const result = await service.bulkApproveVenues(ids);
+    return res.status(200).json({
+      success: true,
+      ...result,
+      message: `Approved ${result.approvedCount} venue(s).`,
+    });
+  } catch (e: any) {
+    if (e?.message?.includes("required")) return sendError(res, 400, e.message);
+    return sendError(res, 500, "Failed to approve venues", e?.message);
+  }
+}
+
 export async function remove(req: Request, res: Response) {
   try {
     const result = await service.deleteVenue(req.params.id);

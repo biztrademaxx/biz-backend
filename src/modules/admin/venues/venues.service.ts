@@ -447,6 +447,19 @@ export async function updateVenue(id: string, body: Record<string, unknown>) {
   return getVenueById(id);
 }
 
+export async function bulkApproveVenues(ids: string[]): Promise<{ approvedCount: number }> {
+  const unique = [...new Set(ids.map((id) => String(id).trim()).filter(Boolean))];
+  if (unique.length === 0) {
+    throw new Error("ids is required");
+  }
+  const result = await prisma.user.updateMany({
+    where: { role: ROLE, id: { in: unique } },
+    data: { isVerified: true, isActive: true },
+  });
+  await invalidateVenueCaches();
+  return { approvedCount: result.count };
+}
+
 export async function deleteVenue(id: string) {
   const existing = await prisma.user.findFirst({ where: { id, role: ROLE } });
   if (!existing) return null;

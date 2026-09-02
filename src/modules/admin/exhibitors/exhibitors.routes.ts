@@ -21,6 +21,7 @@ router.get("/stats", requireAdmin, ctrl.getStats);
 router.get("/", requireAdmin, ctrl.list);
 router.get("/:id", requireAdmin, ctrl.getById);
 router.post("/", requireAdmin, ctrl.create);
+router.post("/bulk-approve", requireAdmin, ctrl.bulkApprove);
 router.patch("/:id", requireAdmin, ctrl.update);
 router.delete("/:id", requireAdmin, ctrl.remove);
 

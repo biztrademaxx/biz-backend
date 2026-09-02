@@ -23,7 +23,11 @@ export async function listExhibitors(query: Record<string, unknown>) {
 
   const status = String(query.status ?? "").trim().toLowerCase();
   if (status === "active") filters.push({ isActive: true });
-  else if (status === "suspended") filters.push({ isActive: false });
+  else if (status === "pending" || status === "suspended") filters.push({ isActive: false });
+
+  const isActiveParam = String(query.isActive ?? "").trim().toLowerCase();
+  if (isActiveParam === "true") filters.push({ isActive: true });
+  else if (isActiveParam === "false") filters.push({ isActive: false });
 
   const industry = String(query.industry ?? "").trim();
   if (industry && industry.toLowerCase() !== "all") {
@@ -161,6 +165,26 @@ export async function updateExhibitor(id: string, body: Record<string, unknown>)
   await prisma.user.update({ where: { id }, data: data as any });
   await invalidateExhibitorCaches({ id });
   return getExhibitorById(id);
+}
+
+export async function bulkApproveExhibitors(input: {
+  ids?: string[];
+  allPending?: boolean;
+}): Promise<{ approvedCount: number }> {
+  const allPending = input.allPending === true;
+  const unique = [...new Set((input.ids ?? []).map((id) => String(id).trim()).filter(Boolean))];
+  if (!allPending && unique.length === 0) {
+    throw new Error("ids is required");
+  }
+  const where = allPending
+    ? { role: ROLE, isActive: false }
+    : { role: ROLE, id: { in: unique } };
+  const result = await prisma.user.updateMany({
+    where,
+    data: { isActive: true },
+  });
+  await invalidateExhibitorCaches();
+  return { approvedCount: result.count };
 }
 
 export async function deleteExhibitor(id: string) {

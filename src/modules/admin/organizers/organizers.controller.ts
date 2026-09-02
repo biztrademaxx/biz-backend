@@ -75,6 +75,23 @@ export async function reject(req: Request, res: Response) {
   }
 }
 
+export async function bulkApprove(req: Request, res: Response) {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    const allPending = req.body?.allPending === true;
+    const search = typeof req.body?.search === "string" ? req.body.search : undefined;
+    const result = await service.bulkApproveOrganizers({ ids, allPending, search });
+    return res.status(200).json({
+      success: true,
+      ...result,
+      message: `Approved ${result.approvedCount} organizer(s).`,
+    });
+  } catch (e: any) {
+    if (e?.message?.includes("required")) return sendError(res, 400, e.message);
+    return sendError(res, 500, "Failed to approve organizers", e?.message);
+  }
+}
+
 export async function update(req: Request, res: Response) {
   try {
     const item = await service.updateOrganizer(req.params.id, req.body ?? {});
