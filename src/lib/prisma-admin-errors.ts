@@ -14,7 +14,7 @@ export function respondWithAdminError(res: Response, e: unknown, fallback500: st
       );
       return;
     }
-    if (e.code === "P2021") {
+    if (e.code === "P2021" || e.code === "P2022") {
       sendError(
         res,
         503,

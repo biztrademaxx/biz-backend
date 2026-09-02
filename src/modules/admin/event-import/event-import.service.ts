@@ -61,7 +61,10 @@ async function ensureUniqueSlug(base: string): Promise<string> {
   let n = 0;
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const hit = await prisma.event.findUnique({ where: { slug: s } });
+    const hit = await prisma.event.findUnique({
+      where: { slug: s },
+      select: { id: true },
+    });
     if (!hit) return s;
     n += 1;
     s = `${slugBase(base) || "event"}-${n}`;
