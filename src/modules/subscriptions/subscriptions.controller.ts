@@ -1,6 +1,8 @@
 // C:\bizz\biz-backend\src\modules\subscriptions\subscriptions.controller.ts
 
 import type { Request, Response } from "express";
+import { listPricedCatalogPlans } from "./plan-pricing.service";
+import type { DashboardPlanRole } from "./plan-catalog";
 import {
   activateFreePlan,
   activateSubscriptionAfterPayment,
@@ -8,6 +10,21 @@ import {
   getCurrentPlanForRole,
   getOrganizerPlansBatch,
 } from "./subscriptions.service";
+
+export async function getSubscriptionPlansHandler(req: Request, res: Response) {
+  res.set("Cache-Control", "no-store");
+  const role = String(req.query.role ?? "").trim().toUpperCase();
+  if (!["VISITOR", "EXHIBITOR", "ORGANIZER"].includes(role)) {
+    return res.status(400).json({ message: "role must be VISITOR, EXHIBITOR, or ORGANIZER" });
+  }
+  try {
+    return res.json({ success: true, data: await listPricedCatalogPlans(role as DashboardPlanRole) });
+  } catch (error) {
+    console.error("Load subscription plan prices:", error);
+    return res.status(500).json({ message: "Unable to load plan prices. Please try again." });
+  }
+}
+
 
 export async function createSubscriptionOrderHandler(req: Request, res: Response) {
   try {
@@ -24,15 +41,17 @@ export async function createSubscriptionOrderHandler(req: Request, res: Response
       return res.status(400).json({ message: "role and planSlug are required" });
     }
 
-    const result = await createSubscriptionPaymentOrder({ userId, role, planSlug, receipt });
+    const expectedAmountInr = req.body?.expectedAmountInr;
+    if (expectedAmountInr !== undefined && (typeof expectedAmountInr !== "number" || !Number.isFinite(expectedAmountInr))) {
+      return res.status(400).json({ message: "Invalid expected plan amount" });
+    }
+    const result = await createSubscriptionPaymentOrder({ userId, role, planSlug, receipt, expectedAmountInr });
 
     if ("error" in result) {
       const status =
         result.error === "GATEWAY"
           ? result.status
-          : result.error === "FREE_PLAN"
-            ? 400
-            : 400;
+          : result.error === "PRICE_CHANGED" ? 409 : 400;
       return res.status(status).json({ message: result.message });
     }
 

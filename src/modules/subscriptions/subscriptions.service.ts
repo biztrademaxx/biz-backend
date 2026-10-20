@@ -3,6 +3,7 @@
 import prisma from "../../config/prisma";
 import type { PaymentTransaction, UserPlanSubscription } from "@prisma/client";
 import { createRazorpayOrder } from "../payments/razorpay.service";
+import { getPricedCatalogPlan } from "./plan-pricing.service";
 import {
   computeExpiresAt,
   defaultFreePlanSlug,
@@ -24,8 +25,9 @@ export async function createSubscriptionPaymentOrder(input: {
   role: string;
   planSlug: string;
   receipt?: string;
+  expectedAmountInr?: number;
 }) {
-  const plan = getCatalogPlan(input.role, input.planSlug);
+  const plan = await getPricedCatalogPlan(input.role, input.planSlug);
   if (!plan) {
     return { error: "INVALID_PLAN" as const, message: "Unknown plan for this role" };
   }
@@ -37,6 +39,12 @@ export async function createSubscriptionPaymentOrder(input: {
     };
   }
 
+  if (input.expectedAmountInr !== undefined && input.expectedAmountInr !== plan.amountInr) {
+    return {
+      error: "PRICE_CHANGED" as const,
+      message: "The plan price has changed. Refresh the page to review the latest price before paying.",
+    };
+  }
   const amountPaise = Math.max(MIN_AMOUNT_PAISE, Math.round(plan.amountInr * 100));
   const receipt =
     input.receipt?.trim() || `sub_${plan.slug}_${Date.now().toString(36)}`;

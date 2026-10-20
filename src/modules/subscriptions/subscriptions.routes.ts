@@ -8,10 +8,12 @@ import {
   createSubscriptionOrderHandler,
   getCurrentPlanHandler,
   getOrganizerPlansBatchHandler,
+  getSubscriptionPlansHandler,
 } from "./subscriptions.controller";
 
 const router = Router();
 
+router.get("/subscriptions/plans", getSubscriptionPlansHandler);
 router.get("/subscriptions/current", requireUser, getCurrentPlanHandler);
 router.post("/subscriptions/create-order", requireUser, createSubscriptionOrderHandler);
 router.post("/subscriptions/activate", requireUser, activateSubscriptionHandler);
