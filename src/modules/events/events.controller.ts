@@ -202,6 +202,7 @@ export async function patchEventByIdHandler(req: Request, res: Response) {
       description?: string;
       tags?: string[];
       images?: string[];
+      bannerImage?: string | null;
       brochure?: string | null;
       layoutPlan?: string | null;
       startDate?: string;
@@ -210,6 +211,26 @@ export async function patchEventByIdHandler(req: Request, res: Response) {
 
     const hasSchedule = body.startDate != null || body.endDate != null;
     const auth = req.auth;
+
+    if (body.bannerImage !== undefined) {
+      if (!auth?.sub) {
+        return res.status(401).json({ success: false, error: "Authentication required to update banner" });
+      }
+      if (body.bannerImage !== null && typeof body.bannerImage !== "string") {
+        return res.status(400).json({ success: false, error: "Banner image must be a URL or null" });
+      }
+      const event = await prisma.event.findUnique({
+        where: { id },
+        select: { id: true, organizerId: true },
+      });
+      if (!event) {
+        return res.status(404).json({ success: false, error: "Event not found" });
+      }
+      const isAdmin = auth.role === "SUPER_ADMIN" || auth.role === "SUB_ADMIN";
+      if (event.organizerId !== auth.sub && !isAdmin) {
+        return res.status(403).json({ success: false, error: "Not allowed to update this event banner" });
+      }
+    }
 
     if (hasSchedule) {
       if (!auth?.sub) {
@@ -1165,4 +1186,3 @@ export async function createEventReviewHandler(req: Request, res: Response) {
     return res.status(500).json({ error: "Internal server error" });
   }
 }
-

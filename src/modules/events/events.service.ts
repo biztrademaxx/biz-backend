@@ -1809,13 +1809,14 @@ export async function updateEventLayoutPlan(eventId: string, layoutPlan: string 
   return updated;
 }
 
-/** Partial update for event (description, tags, images, brochure, layoutPlan). Used by event-dashboard and Next.js proxy. */
+/** Partial update for event content and media. Used by event-dashboard and Next.js proxy. */
 export async function updateEventFields(
   eventId: string,
   body: {
     description?: string;
     tags?: string[];
     images?: string[];
+    bannerImage?: string | null;
     brochure?: string | null;
     layoutPlan?: string | null;
   }
@@ -1833,13 +1834,14 @@ export async function updateEventFields(
   if (typeof body.description === "string") data.description = body.description;
   if (Array.isArray(body.tags)) data.tags = body.tags;
   if (Array.isArray(body.images)) data.images = body.images;
+  if (body.bannerImage !== undefined) data.bannerImage = body.bannerImage?.trim() || null;
   if (body.brochure !== undefined) data.brochure = body.brochure;
   if (body.layoutPlan !== undefined) data.layoutPlan = body.layoutPlan;
 
   if (Object.keys(data).length === 0) {
     return prisma.event.findUnique({
       where: { id: eventId },
-      select: { id: true, description: true, tags: true, images: true, brochure: true, layoutPlan: true },
+      select: { id: true, description: true, tags: true, images: true, bannerImage: true, brochure: true, layoutPlan: true },
     });
   }
 
@@ -1852,6 +1854,7 @@ export async function updateEventFields(
       description: true,
       tags: true,
       images: true,
+      bannerImage: true,
       brochure: true,
       layoutPlan: true,
     },
@@ -2457,4 +2460,3 @@ export async function deleteEventByOrganizer(organizerId: string, eventId: strin
   await invalidateEventCaches({ slug: existingEvent.slug, id: existingEvent.id });
   return { deleted: true };
 }
-
