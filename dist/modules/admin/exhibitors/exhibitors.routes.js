@@ -51,6 +51,7 @@ router.get("/stats", auth_middleware_1.requireAdmin, ctrl.getStats);
 router.get("/", auth_middleware_1.requireAdmin, ctrl.list);
 router.get("/:id", auth_middleware_1.requireAdmin, ctrl.getById);
 router.post("/", auth_middleware_1.requireAdmin, ctrl.create);
+router.post("/bulk-approve", auth_middleware_1.requireAdmin, ctrl.bulkApprove);
 router.patch("/:id", auth_middleware_1.requireAdmin, ctrl.update);
 router.delete("/:id", auth_middleware_1.requireAdmin, ctrl.remove);
 exports.default = router;

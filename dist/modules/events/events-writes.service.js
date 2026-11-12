@@ -48,6 +48,7 @@ exports.deleteSpeakerSession = deleteSpeakerSession;
 const crypto_1 = require("crypto");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const prisma_1 = __importDefault(require("../../config/prisma"));
+const event_date_range_1 = require("../../utils/event-date-range");
 const redis_1 = require("../../config/redis");
 const admin_activity_log_service_1 = require("../../services/admin-activity-log.service");
 const youtube_url_1 = require("../../utils/youtube-url");
@@ -359,6 +360,9 @@ async function createEventAdmin(params) {
     if (missing.length > 0) {
         return { error: "MISSING_FIELDS", missing };
     }
+    const dateError = (0, event_date_range_1.eventDateRangeError)(body.startDate, body.endDate);
+    if (dateError)
+        return { error: "INVALID_DATES", message: dateError };
     const images = Array.isArray(body.images) ? body.images : [];
     const videos = Array.isArray(body.videos) ? body.videos : [];
     const documents = Array.isArray(body.documents)

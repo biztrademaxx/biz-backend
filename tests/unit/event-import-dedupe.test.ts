@@ -137,3 +137,9 @@ describe("event-import dedupe", () => {
     expect(duplicateKeyFromFingerprint(fp)).toContain("|2025-05-01|");
   });
 });
+
+it("uses the same file-wide date order for deduplication and event creation", () => {
+  const fingerprint = buildImportDuplicateFingerprint({ eventTitle: "ARCHIBUILD EXPO", startDate: "06/11/2026" }, "MDY");
+  expect(fingerprint.calendarDay).toBe("2026-06-11");
+  expect(fingerprint.startDate.toISOString()).toBe("2026-06-11T04:30:00.000Z");
+});

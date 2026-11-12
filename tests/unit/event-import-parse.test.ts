@@ -3,6 +3,7 @@ import {
   parseCalendarParts,
   parseImportedDateTime,
   parseTimeParts,
+  inferImportDateOrder,
 } from "../../src/modules/admin/event-import/event-import-parse";
 
 describe("event-import-parse", () => {
@@ -11,9 +12,8 @@ describe("event-import-parse", () => {
     expect(parts).toEqual({ year: 2026, month: 8, day: 1 });
   });
 
-  it("does not treat 01-08-2026 as Jan 8 when passed a Date object", () => {
-    const wrong = new Date(Date.UTC(2026, 0, 8));
-    expect(parseCalendarParts(wrong)).toBeNull();
+  it("preserves the calendar day of a valid Excel Date object", () => {
+    expect(parseCalendarParts(new Date(Date.UTC(2026, 0, 8)))).toEqual({ year: 2026, month: 1, day: 8 });
   });
 
   it("parses import row dates as Aug 1 – Aug 3 2026", () => {
@@ -80,4 +80,16 @@ describe("event-import-parse", () => {
     );
     expect(utc.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false })).toBe("10:20");
   });
+});
+
+it("uses file-wide MM/DD evidence for both ambiguous and unambiguous dates", () => {
+  const order = inferImportDateOrder([{ startDate: "06/11/2026", endDate: "6/13/2026" }]);
+  expect(order).toBe("MDY");
+  expect(parseCalendarParts("06/11/2026", order)).toEqual({ year: 2026, month: 6, day: 11 });
+  expect(parseCalendarParts("6/13/2026", order)).toEqual({ year: 2026, month: 6, day: 13 });
+});
+it("keeps DD/MM files consistent and rejects mixed conventions", () => {
+  expect(inferImportDateOrder([{ startDate: "13/06/2026", endDate: "16/06/2026" }])).toBe("DMY");
+  expect(() => inferImportDateOrder([{ startDate: "13/06/2026", endDate: "6/16/2026" }])).toThrow("Mixed");
+  expect(parseCalendarParts("6/16/2026", "DMY")).toBeNull();
 });

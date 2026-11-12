@@ -8,6 +8,7 @@ exports.getOrganizerById = getOrganizerById;
 exports.createOrganizer = createOrganizer;
 exports.updateOrganizer = updateOrganizer;
 exports.rejectOrganizer = rejectOrganizer;
+exports.bulkApproveOrganizers = bulkApproveOrganizers;
 exports.deleteOrganizer = deleteOrganizer;
 exports.sendOrganizerAccountEmail = sendOrganizerAccountEmail;
 exports.listOrganizerConnectionsForAdmin = listOrganizerConnectionsForAdmin;
@@ -430,6 +431,27 @@ async function rejectOrganizer(id, reason) {
         rejected: true,
         reason: reason?.trim() || null,
     };
+}
+async function bulkApproveOrganizers(input) {
+    const allPending = input.allPending === true;
+    const unique = [...new Set((input.ids ?? []).map((id) => String(id).trim()).filter(Boolean))];
+    if (!allPending && unique.length === 0) {
+        throw new Error("ids is required");
+    }
+    const where = allPending
+        ? buildOrganizerListWhere({
+            verified: "false",
+            isActive: "true",
+            search: String(input.search ?? "").trim(),
+        })
+        : { role: ROLE, id: { in: unique } };
+    const result = await prisma_1.default.user.updateMany({
+        where,
+        data: { isVerified: true, isActive: true },
+    });
+    await (0, redis_1.invalidateOrganizerCaches)();
+    await (0, redis_1.invalidateAdminOrganizerCaches)();
+    return { approvedCount: result.count };
 }
 async function deleteOrganizer(id) {
     const existing = await prisma_1.default.user.findFirst({ where: { id, role: ROLE } });

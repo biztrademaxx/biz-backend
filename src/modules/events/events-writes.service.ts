@@ -6,6 +6,7 @@
 import { randomBytes, randomUUID } from "crypto";
 import bcrypt from "bcryptjs";
 import prisma from "../../config/prisma";
+import { eventDateRangeError } from "../../utils/event-date-range";
 import { invalidateEventCaches, invalidateSpeakerCaches } from "../../config/redis";
 import { recordAdminActivity } from "../../services/admin-activity-log.service";
 import { normalizeYoutubeVideoUrlForStorage } from "../../utils/youtube-url";
@@ -352,6 +353,9 @@ export async function createEventAdmin(params: CreateEventAdminParams) {
   if (missing.length > 0) {
     return { error: "MISSING_FIELDS" as const, missing };
   }
+
+  const dateError = eventDateRangeError(body.startDate, body.endDate);
+  if (dateError) return { error: "INVALID_DATES" as const, message: dateError };
 
   const images = Array.isArray(body.images) ? body.images : [];
   const videos = Array.isArray(body.videos) ? body.videos : [];

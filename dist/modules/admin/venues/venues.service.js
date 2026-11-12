@@ -9,6 +9,7 @@ exports.listVenues = listVenues;
 exports.getVenueById = getVenueById;
 exports.createVenue = createVenue;
 exports.updateVenue = updateVenue;
+exports.bulkApproveVenues = bulkApproveVenues;
 exports.deleteVenue = deleteVenue;
 exports.sendVenueAccountEmail = sendVenueAccountEmail;
 const prisma_1 = __importDefault(require("../../../config/prisma"));
@@ -420,6 +421,18 @@ async function updateVenue(id, body) {
     });
     await (0, redis_1.invalidateVenueCaches)();
     return getVenueById(id);
+}
+async function bulkApproveVenues(ids) {
+    const unique = [...new Set(ids.map((id) => String(id).trim()).filter(Boolean))];
+    if (unique.length === 0) {
+        throw new Error("ids is required");
+    }
+    const result = await prisma_1.default.user.updateMany({
+        where: { role: ROLE, id: { in: unique } },
+        data: { isVerified: true, isActive: true },
+    });
+    await (0, redis_1.invalidateVenueCaches)();
+    return { approvedCount: result.count };
 }
 async function deleteVenue(id) {
     const existing = await prisma_1.default.user.findFirst({ where: { id, role: ROLE } });

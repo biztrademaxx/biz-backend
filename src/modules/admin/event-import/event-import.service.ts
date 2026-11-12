@@ -5,6 +5,8 @@ import { randomBytes } from "crypto";
 import * as XLSX from "xlsx";
 import prisma from "../../../config/prisma";
 import { normalizeYoutubeVideoUrlForStorage } from "../../../utils/youtube-url";
+import { eventDateRangeError } from "../../../utils/event-date-range";
+import { inferImportDateOrder, type ImportDateOrder } from "./event-import-parse";
 import { createEventAdmin, findOrCreateUser } from "../../events/events-writes.service";
 import { sendEventImportThankYouEmail, FRONTEND_BASE } from "../../../services/email.service";
 import { parseDateString, parseImportTimezone, parseImportedDateTime } from "./event-import-parse";
@@ -201,25 +203,29 @@ async function rowToEventBody(
   row: Record<string, unknown>,
   organizerId: string,
   venueId: string | null,
+  dateOrder: ImportDateOrder,
 ): Promise<Record<string, unknown>> {
   const title = String(row.eventTitle ?? "").trim();
   if (!title) throw new Error("eventTitle is required");
 
   const timeZone = parseImportTimezone(row.timezone);
 
-  const startDate = parseImportedDateTime(row.startDate, row.startTime, "10:00", timeZone, "startDate");
+  const startDate = parseImportedDateTime(row.startDate, row.startTime, "10:00", timeZone, "startDate", dateOrder);
   const endDate = parseImportedDateTime(
     row.endDate || row.startDate,
     row.endTime,
     "18:00",
     timeZone,
     "endDate",
+    dateOrder,
   );
+  const dateError = eventDateRangeError(startDate, endDate);
+  if (dateError) throw new Error(dateError);
   const registrationStart = row.registrationStart
-    ? parseImportedDateTime(row.registrationStart, row.startTime, "10:00", timeZone, "registrationStart")
+    ? parseImportedDateTime(row.registrationStart, row.startTime, "10:00", timeZone, "registrationStart", dateOrder)
     : startDate;
   const registrationEnd = row.registrationEnd
-    ? parseImportedDateTime(row.registrationEnd, row.endTime, "18:00", timeZone, "registrationEnd")
+    ? parseImportedDateTime(row.registrationEnd, row.endTime, "18:00", timeZone, "registrationEnd", dateOrder)
     : endDate;
 
   const categories = [
@@ -336,6 +342,16 @@ async function runImportJob(jobId: string) {
   });
 
   const rows = (job.rowsPayload as Record<string, unknown>[]).map((r) => normalizeImportRow(r));
+  let dateOrder: ImportDateOrder;
+  try {
+    dateOrder = inferImportDateOrder(rows);
+  } catch (error) {
+    await prisma.eventImportJob.update({
+      where: { id: jobId },
+      data: { status: "FAILED", errorCount: rows.length, errors: [{ row: 1, message: (error as Error).message }] },
+    });
+    return;
+  }
   const errors: { row: number; message: string }[] = [];
   const importedSummary: { title: string; organizerEmail: string; organizerWasNew: boolean }[] = [];
 
@@ -348,7 +364,7 @@ async function runImportJob(jobId: string) {
     const rowNum = i + 2;
 
     try {
-      const dupFp = buildImportDuplicateFingerprint(row);
+      const dupFp = buildImportDuplicateFingerprint(row, dateOrder);
       if (!dupFp.titleNorm) {
         throw new Error("eventTitle is required");
       }
@@ -419,7 +435,7 @@ async function runImportJob(jobId: string) {
         console.warn(`[event-import] row ${rowNum} venue skipped:`, ve?.message);
       }
 
-      const body = await rowToEventBody(row, organizer.id, venueId);
+      const body = await rowToEventBody(row, organizer.id, venueId, dateOrder);
       body.organizerId = organizer.id;
 
       const result = await createEventAdmin({

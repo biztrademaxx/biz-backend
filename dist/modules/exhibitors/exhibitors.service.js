@@ -791,21 +791,26 @@ async function getExhibitorPromotionsMarketingForSelf(exhibitorId, viewerUserId)
     if (!resolved || viewerUserId !== resolved) {
         throw new Error("FORBIDDEN");
     }
-    const eventsFull = await getExhibitorEvents(resolved, viewerUserId, "EXHIBITOR");
+    const booths = await prisma_1.default.exhibitorBooth.findMany({
+        where: { exhibitorId: resolved },
+        select: {
+            id: true, boothNumber: true, companyName: true, status: true,
+            event: { select: {
+                    id: true, title: true, startDate: true, endDate: true, bannerImage: true, status: true,
+                    venue: { select: { venueName: true, venueCity: true, venueState: true } },
+                } },
+            space: { select: { id: true, name: true, spaceType: true } },
+        },
+        orderBy: { createdAt: "desc" },
+    });
     const eventsMap = new Map();
-    for (const row of eventsFull) {
-        const eid = row.eventId;
-        if (!eid || eventsMap.has(eid))
-            continue;
-        const v = row.venue;
-        const parts = v ? [v.venueName, v.venueCity, v.venueState].filter(Boolean) : [];
-        const location = parts.length ? parts.join(", ") : "N/A";
-        eventsMap.set(eid, {
-            id: eid,
-            title: row.eventName,
-            date: row.date,
-            location,
-            status: String(row.status ?? "Scheduled"),
+    for (const booth of booths) {
+        const event = booth.event;
+        const v = event.venue;
+        const location = v ? [v.venueName, v.venueCity, v.venueState].filter(Boolean).join(", ") : "";
+        eventsMap.set(event.id, {
+            id: event.id, title: event.title, date: event.startDate.toISOString().slice(0, 10),
+            location: location || "N/A", status: event.status,
         });
     }
     const promotions = await prisma_1.default.promotion.findMany({
@@ -833,6 +838,7 @@ async function getExhibitorPromotionsMarketingForSelf(exhibitorId, viewerUserId)
     return {
         promotions: formattedPromotions,
         events: Array.from(eventsMap.values()),
+        booths,
     };
 }
 /** Logged-in exhibitor only: create promotion after verified Razorpay payment. */

@@ -2,6 +2,7 @@
 
 export type CalendarParts = { year: number; month: number; day: number };
 export type ClockParts = { hours: number; minutes: number };
+export type ImportDateOrder = "DMY" | "MDY";
 
 const EXCEL_EPOCH_MS = Date.UTC(1899, 11, 30);
 
@@ -42,7 +43,7 @@ function normalizeDateInput(raw: unknown): unknown {
 }
 
 /** Parse `01-08-2026`, `2026-08-01`, `01/08/2026`, Excel serials, etc. */
-export function parseCalendarParts(raw: unknown): CalendarParts | null {
+export function parseCalendarParts(raw: unknown, dateOrder?: ImportDateOrder): CalendarParts | null {
   if (raw === null || raw === undefined) return null;
 
   if (raw instanceof Date && !Number.isNaN(raw.getTime())) {
@@ -103,7 +104,7 @@ export function parseCalendarParts(raw: unknown): CalendarParts | null {
     const a = parseInt(slashed[1], 10);
     const b = parseInt(slashed[2], 10);
     const year = parseInt(slashed[3], 10);
-    const parsed = parseSlashedCalendar(a, b, year);
+    const parsed = parseSlashedCalendar(a, b, year, dateOrder ?? (b > 12 ? "MDY" : "DMY"));
     if (parsed) return parsed;
   }
 
@@ -125,21 +126,25 @@ function expandTwoDigitYear(year: number): number {
   return year >= 50 ? 1900 + year : 2000 + year;
 }
 
-/** Slashed dates: DD/MM when ambiguous (India), incl. M/D/YY from Excel (e.g. 2/6/26). */
-function parseSlashedCalendar(a: number, b: number, yearRaw: number): CalendarParts | null {
-  const year = expandTwoDigitYear(yearRaw);
-  let day: number;
-  let month: number;
-  if (a > 12) {
-    day = a;
-    month = b;
-  } else if (b > 12) {
-    month = a;
-    day = b;
-  } else {
-    day = a;
-    month = b;
+/** Use one slash convention for the entire spreadsheet. */
+export function inferImportDateOrder(rows: Record<string, unknown>[]): ImportDateOrder {
+  const evidence = new Set<ImportDateOrder>();
+  for (const row of rows) {
+    for (const field of ["startDate", "endDate", "registrationStart", "registrationEnd"]) {
+      const match = String(row[field] ?? "").trim().match(/^(\d{1,2})\/(\d{1,2})\/\d{2,4}$/);
+      if (!match) continue;
+      if (Number(match[1]) > 12) evidence.add("DMY");
+      if (Number(match[2]) > 12) evidence.add("MDY");
+    }
   }
+  if (evidence.size > 1) throw new Error("Mixed DD/MM and MM/DD dates. Use YYYY-MM-DD or DD-MM-YYYY throughout the spreadsheet.");
+  return evidence.has("MDY") ? "MDY" : "DMY";
+}
+
+function parseSlashedCalendar(a: number, b: number, yearRaw: number, dateOrder: ImportDateOrder): CalendarParts | null {
+  const year = expandTwoDigitYear(yearRaw);
+  const day = dateOrder === "MDY" ? b : a;
+  const month = dateOrder === "MDY" ? a : b;
   if (!isValidCalendar(year, month, day)) return null;
   return { year, month, day };
 }
@@ -266,8 +271,9 @@ export function parseImportedDateTime(
   fallbackTime: string,
   timeZone: string,
   fieldName = "date",
+  dateOrder?: ImportDateOrder,
 ): Date {
-  const date = parseCalendarParts(dateRaw);
+  const date = parseCalendarParts(dateRaw, dateOrder);
   if (!date) {
     const preview =
       dateRaw === undefined || dateRaw === null || String(dateRaw).trim() === ""

@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import prisma from "../../config/prisma";
+import { eventDateRangeError } from "../../utils/event-date-range";
 import {
   cached,
   CACHE_KEYS,
@@ -2302,6 +2303,8 @@ export async function updateEventByOrganizer(
 
   const nextStart = body.startDate ? new Date(body.startDate as string) : existingEvent.startDate;
   const nextEnd = body.endDate ? new Date(body.endDate as string) : existingEvent.endDate;
+  const dateError = eventDateRangeError(nextStart, nextEnd);
+  if (dateError) return { error: "INVALID_DATES" as const, message: dateError };
   const postponePatch = applyPostponedOnOrganizerDateChange(existingEvent, nextStart, nextEnd);
 
   const eventUpdateData: Record<string, unknown> = {

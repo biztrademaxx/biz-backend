@@ -49,6 +49,7 @@ router.get("/", auth_middleware_1.requireAdmin, ctrl.list);
 router.get("/:id", auth_middleware_1.requireAdmin, ctrl.getById);
 router.post("/", auth_middleware_1.requireAdmin, ctrl.create);
 router.post("/import", auth_middleware_1.requireAdmin, upload.single("file"), ctrl.importBulk);
+router.post("/bulk-approve", auth_middleware_1.requireAdmin, ctrl.bulkApprove);
 router.post("/send-account-email", auth_middleware_1.requireAdmin, ctrl.sendAccountEmail);
 router.patch("/:id", auth_middleware_1.requireAdmin, ctrl.update);
 router.delete("/:id", auth_middleware_1.requireAdmin, ctrl.remove);

@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const prisma_1 = __importDefault(require("../config/prisma"));
+const venue_stats_1 = require("../modules/venues/venue-stats");
 const iana_timezones_1 = require("../utils/iana-timezones");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const venue_slug_1 = require("../utils/venue-slug");
@@ -126,18 +127,7 @@ router.get("/venue-manager/:id", auth_middleware_1.optionalUser, async (req, res
                 });
             }
         }
-        const now = new Date();
-        const [totalEvents, activeBookings] = await Promise.all([
-            prisma_1.default.event.count({
-                where: { venueId: venueManager.id },
-            }),
-            prisma_1.default.event.count({
-                where: {
-                    venueId: venueManager.id,
-                    endDate: { gte: now },
-                },
-            }),
-        ]);
+        const { totalEvents, activeBookings, monthlyEvents } = await (0, venue_stats_1.getVenueEventStats)(venueManager.id);
         const canViewContact = req.auth?.domain === "USER" && req.auth.sub === venueManager.id
             ? true
             : req.auth?.domain === "ADMIN";
@@ -206,6 +196,7 @@ router.get("/venue-manager/:id", auth_middleware_1.optionalUser, async (req, res
             floorPlans: venueManager.floorPlans ?? [],
             virtualTour: venueManager.virtualTour ?? "",
             meetingSpaces: venueManager.meetingSpaces ?? [],
+            monthlyEvents,
             reviews: [], // Venue reviews not yet modeled in backend schema
             createdAt: venueManager.createdAt.toISOString(),
             updatedAt: venueManager.updatedAt.toISOString(),
@@ -439,6 +430,7 @@ router.put("/venue-manager/:id", async (req, res) => {
             city,
         });
         const savedMeetingSpaces = updatedVenue.meetingSpaces ?? [];
+        const eventStats = await (0, venue_stats_1.getVenueEventStats)(updatedVenue.id);
         const venue = {
             id: updatedVenue.id,
             venueName: updatedVenue.venueName || updatedVenue.company || "",
@@ -455,8 +447,7 @@ router.put("/venue-manager/:id", async (req, res) => {
             description: updatedVenue.venueDescription || updatedVenue.bio || "",
             maxCapacity: updatedVenue.maxCapacity || 0,
             totalHalls: updatedVenue.totalHalls || 0,
-            totalEvents: updatedVenue.totalEvents || 0,
-            activeBookings: updatedVenue.activeBookings || 0,
+            ...eventStats,
             averageRating: updatedVenue.averageRating || 0,
             totalReviews: updatedVenue.totalReviews || 0,
             amenities: updatedVenue.amenities || [],

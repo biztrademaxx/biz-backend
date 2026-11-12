@@ -191,6 +191,9 @@ async function updateOrganizerEventHandler(req, res) {
             return res.status(403).json({ error: "Forbidden" });
         }
         const result = await (0, events_service_1.updateEventByOrganizer)(id, eventId, req.body);
+        if ("error" in result && result.error === "INVALID_DATES") {
+            return res.status(400).json({ error: result.message });
+        }
         if ("error" in result && result.error === "NOT_FOUND") {
             return res.status(404).json({ error: "Event not found or access denied" });
         }
@@ -257,6 +260,9 @@ async function createOrganizerEventHandler(req, res) {
             userAgent: req.headers["user-agent"],
         });
         if ("error" in result) {
+            if (result.error === "INVALID_DATES") {
+                return res.status(400).json({ error: result.message });
+            }
             if (result.error === "MISSING_FIELDS") {
                 return res.status(400).json({
                     error: `Missing required fields: ${(result.missing ?? []).join(", ")}`,

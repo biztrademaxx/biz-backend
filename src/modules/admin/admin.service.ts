@@ -1,4 +1,5 @@
 import prisma from "../../config/prisma";
+import { eventDateRangeError } from "../../utils/event-date-range";
 import {
   adminEventsListCacheKey,
   cached,
@@ -601,6 +602,11 @@ export async function adminUpdateEvent(
     updateData.verifiedBadgeImage = null;
   }
 
+  if (existing) {
+    const dateError = eventDateRangeError(updateData.startDate ?? existing.startDate, updateData.endDate ?? existing.endDate);
+    if (dateError) return { error: "INVALID_DATES" as const, message: dateError };
+  }
+
   if (existing && (updateData.startDate != null || updateData.endDate != null)) {
     const newStart = (updateData.startDate as Date | undefined) ?? existing.startDate;
     const newEnd = (updateData.endDate as Date | undefined) ?? existing.endDate;
@@ -1114,6 +1120,7 @@ async function adminGetDashboardSummaryFromDb(eventRange: EventOverviewRange = "
     prisma.event.findMany({
       where: {
         startDate: { gte: new Date() },
+        endDate: { gte: prisma.event.fields.startDate },
         status: { in: ["PUBLISHED", "PENDING_APPROVAL"] },
       },
       orderBy: { startDate: "asc" },

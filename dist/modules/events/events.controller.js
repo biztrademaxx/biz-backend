@@ -209,6 +209,25 @@ async function patchEventByIdHandler(req, res) {
         const body = (req.body ?? {});
         const hasSchedule = body.startDate != null || body.endDate != null;
         const auth = req.auth;
+        if (body.bannerImage !== undefined) {
+            if (!auth?.sub) {
+                return res.status(401).json({ success: false, error: "Authentication required to update banner" });
+            }
+            if (body.bannerImage !== null && typeof body.bannerImage !== "string") {
+                return res.status(400).json({ success: false, error: "Banner image must be a URL or null" });
+            }
+            const event = await prisma_1.default.event.findUnique({
+                where: { id },
+                select: { id: true, organizerId: true },
+            });
+            if (!event) {
+                return res.status(404).json({ success: false, error: "Event not found" });
+            }
+            const isAdmin = auth.role === "SUPER_ADMIN" || auth.role === "SUB_ADMIN";
+            if (event.organizerId !== auth.sub && !isAdmin) {
+                return res.status(403).json({ success: false, error: "Not allowed to update this event banner" });
+            }
+        }
         if (hasSchedule) {
             if (!auth?.sub) {
                 return res.status(401).json({ success: false, error: "Authentication required to update schedule" });
@@ -909,6 +928,9 @@ async function createEventAdminHandler(req, res) {
             userAgent: req.headers["user-agent"],
         });
         if ("error" in result) {
+            if (result.error === "INVALID_DATES") {
+                return res.status(400).json({ error: result.message });
+            }
             if (result.error === "MISSING_FIELDS") {
                 return res.status(400).json({
                     error: `Missing required fields: ${(result.missing ?? []).join(", ")}`,

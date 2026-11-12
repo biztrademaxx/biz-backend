@@ -7,6 +7,7 @@ exports.listExhibitors = listExhibitors;
 exports.getExhibitorById = getExhibitorById;
 exports.createExhibitor = createExhibitor;
 exports.updateExhibitor = updateExhibitor;
+exports.bulkApproveExhibitors = bulkApproveExhibitors;
 exports.deleteExhibitor = deleteExhibitor;
 exports.getExhibitorStats = getExhibitorStats;
 exports.listExhibitorFeedbackForAdmin = listExhibitorFeedbackForAdmin;
@@ -33,7 +34,12 @@ async function listExhibitors(query) {
     const status = String(query.status ?? "").trim().toLowerCase();
     if (status === "active")
         filters.push({ isActive: true });
-    else if (status === "suspended")
+    else if (status === "pending" || status === "suspended")
+        filters.push({ isActive: false });
+    const isActiveParam = String(query.isActive ?? "").trim().toLowerCase();
+    if (isActiveParam === "true")
+        filters.push({ isActive: true });
+    else if (isActiveParam === "false")
         filters.push({ isActive: false });
     const industry = String(query.industry ?? "").trim();
     if (industry && industry.toLowerCase() !== "all") {
@@ -173,6 +179,22 @@ async function updateExhibitor(id, body) {
     await prisma_1.default.user.update({ where: { id }, data: data });
     await (0, redis_1.invalidateExhibitorCaches)({ id });
     return getExhibitorById(id);
+}
+async function bulkApproveExhibitors(input) {
+    const allPending = input.allPending === true;
+    const unique = [...new Set((input.ids ?? []).map((id) => String(id).trim()).filter(Boolean))];
+    if (!allPending && unique.length === 0) {
+        throw new Error("ids is required");
+    }
+    const where = allPending
+        ? { role: ROLE, isActive: false }
+        : { role: ROLE, id: { in: unique } };
+    const result = await prisma_1.default.user.updateMany({
+        where,
+        data: { isActive: true },
+    });
+    await (0, redis_1.invalidateExhibitorCaches)();
+    return { approvedCount: result.count };
 }
 async function deleteExhibitor(id) {
     const existing = await prisma_1.default.user.findFirst({ where: { id, role: ROLE } });

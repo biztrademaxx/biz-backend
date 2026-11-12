@@ -24,6 +24,7 @@ exports.adminListEventCategories = adminListEventCategories;
 exports.adminGetEventMailCandidates = adminGetEventMailCandidates;
 exports.adminSendEventListingEmail = adminSendEventListingEmail;
 const prisma_1 = __importDefault(require("../../config/prisma"));
+const event_date_range_1 = require("../../utils/event-date-range");
 const redis_1 = require("../../config/redis");
 const client_1 = require("@prisma/client");
 const event_schedule_1 = require("../events/event-schedule");
@@ -574,6 +575,11 @@ async function adminUpdateEvent(id, data) {
         updateData.verifiedBy = null;
         updateData.verifiedBadgeImage = null;
     }
+    if (existing) {
+        const dateError = (0, event_date_range_1.eventDateRangeError)(updateData.startDate ?? existing.startDate, updateData.endDate ?? existing.endDate);
+        if (dateError)
+            return { error: "INVALID_DATES", message: dateError };
+    }
     if (existing && (updateData.startDate != null || updateData.endDate != null)) {
         const newStart = updateData.startDate ?? existing.startDate;
         const newEnd = updateData.endDate ?? existing.endDate;
@@ -1006,6 +1012,7 @@ async function adminGetDashboardSummaryFromDb(eventRange = "1m") {
         prisma_1.default.event.findMany({
             where: {
                 startDate: { gte: new Date() },
+                endDate: { gte: prisma_1.default.event.fields.startDate },
                 status: { in: ["PUBLISHED", "PENDING_APPROVAL"] },
             },
             orderBy: { startDate: "asc" },

@@ -49,13 +49,15 @@ const crypto_1 = require("crypto");
 const XLSX = __importStar(require("xlsx"));
 const prisma_1 = __importDefault(require("../../../config/prisma"));
 const youtube_url_1 = require("../../../utils/youtube-url");
+const event_date_range_1 = require("../../../utils/event-date-range");
+const event_import_parse_1 = require("./event-import-parse");
 const events_writes_service_1 = require("../../events/events-writes.service");
 const email_service_1 = require("../../../services/email.service");
-const event_import_parse_1 = require("./event-import-parse");
+const event_import_parse_2 = require("./event-import-parse");
 const event_import_row_1 = require("./event-import-row");
 const event_import_dedupe_1 = require("./event-import-dedupe");
-var event_import_parse_2 = require("./event-import-parse");
-Object.defineProperty(exports, "parseDateString", { enumerable: true, get: function () { return event_import_parse_2.parseDateString; } });
+var event_import_parse_3 = require("./event-import-parse");
+Object.defineProperty(exports, "parseDateString", { enumerable: true, get: function () { return event_import_parse_3.parseDateString; } });
 const BATCH_PAUSE_MS = 5;
 function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
@@ -97,7 +99,10 @@ async function ensureUniqueSlug(base) {
     let n = 0;
     // eslint-disable-next-line no-constant-condition
     while (true) {
-        const hit = await prisma_1.default.event.findUnique({ where: { slug: s } });
+        const hit = await prisma_1.default.event.findUnique({
+            where: { slug: s },
+            select: { id: true },
+        });
         if (!hit)
             return s;
         n += 1;
@@ -230,18 +235,21 @@ function buildExhibitorBooths(row) {
         currency: "USD",
     }));
 }
-async function rowToEventBody(row, organizerId, venueId) {
+async function rowToEventBody(row, organizerId, venueId, dateOrder) {
     const title = String(row.eventTitle ?? "").trim();
     if (!title)
         throw new Error("eventTitle is required");
-    const timeZone = (0, event_import_parse_1.parseImportTimezone)(row.timezone);
-    const startDate = (0, event_import_parse_1.parseImportedDateTime)(row.startDate, row.startTime, "10:00", timeZone, "startDate");
-    const endDate = (0, event_import_parse_1.parseImportedDateTime)(row.endDate || row.startDate, row.endTime, "18:00", timeZone, "endDate");
+    const timeZone = (0, event_import_parse_2.parseImportTimezone)(row.timezone);
+    const startDate = (0, event_import_parse_2.parseImportedDateTime)(row.startDate, row.startTime, "10:00", timeZone, "startDate", dateOrder);
+    const endDate = (0, event_import_parse_2.parseImportedDateTime)(row.endDate || row.startDate, row.endTime, "18:00", timeZone, "endDate", dateOrder);
+    const dateError = (0, event_date_range_1.eventDateRangeError)(startDate, endDate);
+    if (dateError)
+        throw new Error(dateError);
     const registrationStart = row.registrationStart
-        ? (0, event_import_parse_1.parseImportedDateTime)(row.registrationStart, row.startTime, "10:00", timeZone, "registrationStart")
+        ? (0, event_import_parse_2.parseImportedDateTime)(row.registrationStart, row.startTime, "10:00", timeZone, "registrationStart", dateOrder)
         : startDate;
     const registrationEnd = row.registrationEnd
-        ? (0, event_import_parse_1.parseImportedDateTime)(row.registrationEnd, row.endTime, "18:00", timeZone, "registrationEnd")
+        ? (0, event_import_parse_2.parseImportedDateTime)(row.registrationEnd, row.endTime, "18:00", timeZone, "registrationEnd", dateOrder)
         : endDate;
     const categories = [
         ...parseArray(row.category),
@@ -343,6 +351,17 @@ async function runImportJob(jobId) {
         data: { status: "PROCESSING", processedRows: 0 },
     });
     const rows = job.rowsPayload.map((r) => (0, event_import_row_1.normalizeImportRow)(r));
+    let dateOrder;
+    try {
+        dateOrder = (0, event_import_parse_1.inferImportDateOrder)(rows);
+    }
+    catch (error) {
+        await prisma_1.default.eventImportJob.update({
+            where: { id: jobId },
+            data: { status: "FAILED", errorCount: rows.length, errors: [{ row: 1, message: error.message }] },
+        });
+        return;
+    }
     const errors = [];
     const importedSummary = [];
     const adminId = job.createdByAdminId || "00000000-0000-0000-0000-000000000000";
@@ -352,7 +371,7 @@ async function runImportJob(jobId) {
         const row = rows[i];
         const rowNum = i + 2;
         try {
-            const dupFp = (0, event_import_dedupe_1.buildImportDuplicateFingerprint)(row);
+            const dupFp = (0, event_import_dedupe_1.buildImportDuplicateFingerprint)(row, dateOrder);
             if (!dupFp.titleNorm) {
                 throw new Error("eventTitle is required");
             }
@@ -361,6 +380,7 @@ async function runImportJob(jobId) {
                 throw new Error((0, event_import_dedupe_1.duplicateSkipMessage)(dupFp, "spreadsheet"));
             }
             if (await (0, event_import_dedupe_1.findExistingEventDuplicate)(dupFp)) {
+                seenDuplicateKeys.add(dupKey);
                 throw new Error((0, event_import_dedupe_1.duplicateSkipMessage)(dupFp, "database"));
             }
             const orgEmailRaw = String(row.organizerEmail ?? "").trim().toLowerCase();
@@ -420,7 +440,7 @@ async function runImportJob(jobId) {
                 // eslint-disable-next-line no-console
                 console.warn(`[event-import] row ${rowNum} venue skipped:`, ve?.message);
             }
-            const body = await rowToEventBody(row, organizer.id, venueId);
+            const body = await rowToEventBody(row, organizer.id, venueId, dateOrder);
             body.organizerId = organizer.id;
             const result = await (0, events_writes_service_1.createEventAdmin)({
                 body,
@@ -463,10 +483,12 @@ async function runImportJob(jobId) {
             });
         }
     }
+    const duplicateCount = errors.filter((e) => String(e.message).includes("Duplicate (skipped)")).length;
+    const realErrorCount = errors.length - duplicateCount;
     await prisma_1.default.eventImportJob.update({
         where: { id: jobId },
         data: {
-            status: importedSummary.length === 0 ? "FAILED" : "COMPLETED",
+            status: realErrorCount === 0 ? "COMPLETED" : importedSummary.length === 0 ? "FAILED" : "COMPLETED",
             processedRows: rows.length,
             successCount: importedSummary.length,
             errorCount: errors.length,

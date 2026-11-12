@@ -10,7 +10,7 @@ function respondWithAdminError(res, e, fallback500) {
             (0, admin_response_1.sendError)(res, 400, "A record with this unique value already exists (e.g. duplicate slug).", e.meta ? JSON.stringify(e.meta) : undefined);
             return;
         }
-        if (e.code === "P2021") {
+        if (e.code === "P2021" || e.code === "P2022") {
             (0, admin_response_1.sendError)(res, 503, "Database schema is out of date. From the backend folder run: npx prisma migrate deploy", e.message);
             return;
         }

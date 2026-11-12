@@ -15,6 +15,7 @@ import {
   parseImportTimezone,
   parseImportedDateTime,
   type CalendarParts,
+  type ImportDateOrder,
 } from "./event-import-parse";
 
 export function normalizeImportLabel(value: unknown): string {
@@ -34,11 +35,11 @@ export function formatCalendarDay(parts: CalendarParts): string {
   return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`;
 }
 
-function calendarFromRow(row: Record<string, unknown>): CalendarParts {
-  const fromCell = parseCalendarParts(row.startDate);
+function calendarFromRow(row: Record<string, unknown>, dateOrder?: ImportDateOrder): CalendarParts {
+  const fromCell = parseCalendarParts(row.startDate, dateOrder);
   if (fromCell) return fromCell;
   const timeZone = parseImportTimezone(row.timezone);
-  const instant = parseImportedDateTime(row.startDate, row.startTime, "10:00", timeZone);
+  const instant = parseImportedDateTime(row.startDate, row.startTime, "10:00", timeZone, "startDate", dateOrder);
   return calendarPartsInTimeZone(instant, timeZone);
 }
 
@@ -65,13 +66,14 @@ export type ImportDuplicateFingerprint = {
 
 export function buildImportDuplicateFingerprint(
   row: Record<string, unknown>,
+  dateOrder?: ImportDateOrder,
 ): ImportDuplicateFingerprint {
   const title = String(row.eventTitle ?? "").trim();
   const titleNorm = normalizeImportLabel(title);
-  const calendar = calendarFromRow(row);
+  const calendar = calendarFromRow(row, dateOrder);
   const calendarDay = formatCalendarDay(calendar);
   const timeZone = parseImportTimezone(row.timezone);
-  const startDate = parseImportedDateTime(row.startDate, row.startTime, "10:00", timeZone);
+  const startDate = parseImportedDateTime(row.startDate, row.startTime, "10:00", timeZone, "startDate", dateOrder);
   const venueNameNorm = normalizeImportLabel(row.venueName);
   const cityNorm = normalizeImportLabel(row.city ?? row.cityNames ?? row.cityName);
   const slug = slugBase(String(row.slug || row.eventSlug || title || ""));

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import prisma from "../config/prisma";
+import { getVenueEventStats } from "../modules/venues/venue-stats";
 import { normalizeVenueTimezoneInput } from "../utils/iana-timezones";
 import { optionalUser } from "../middleware/auth.middleware";
 import { isUuidParam, slugifyVenueSegment } from "../utils/venue-slug";
@@ -137,18 +138,7 @@ router.get("/venue-manager/:id", optionalUser, async (req, res) => {
       }
     }
 
-    const now = new Date();
-    const [totalEvents, activeBookings] = await Promise.all([
-      prisma.event.count({
-        where: { venueId: venueManager.id },
-      }),
-      prisma.event.count({
-        where: {
-          venueId: venueManager.id,
-          endDate: { gte: now },
-        },
-      }),
-    ]);
+    const { totalEvents, activeBookings, monthlyEvents } = await getVenueEventStats(venueManager.id);
 
     const canViewContact =
       req.auth?.domain === "USER" && req.auth.sub === venueManager.id
@@ -226,6 +216,7 @@ router.get("/venue-manager/:id", optionalUser, async (req, res) => {
       floorPlans: (venueManager.floorPlans as string[] | null) ?? [],
       virtualTour: venueManager.virtualTour ?? "",
       meetingSpaces: (venueManager.meetingSpaces as any[] | null) ?? [],
+      monthlyEvents,
       reviews: [], // Venue reviews not yet modeled in backend schema
       createdAt: venueManager.createdAt.toISOString(),
       updatedAt: venueManager.updatedAt.toISOString(),
@@ -547,6 +538,7 @@ router.put("/venue-manager/:id", async (req, res) => {
     });
 
     const savedMeetingSpaces = (updatedVenue.meetingSpaces as any[] | null) ?? [];
+    const eventStats = await getVenueEventStats(updatedVenue.id);
 
     const venue = {
       id: updatedVenue.id,
@@ -567,8 +559,7 @@ router.put("/venue-manager/:id", async (req, res) => {
         updatedVenue.venueDescription || updatedVenue.bio || "",
       maxCapacity: updatedVenue.maxCapacity || 0,
       totalHalls: updatedVenue.totalHalls || 0,
-      totalEvents: updatedVenue.totalEvents || 0,
-      activeBookings: updatedVenue.activeBookings || 0,
+      ...eventStats,
       averageRating: updatedVenue.averageRating || 0,
       totalReviews: updatedVenue.totalReviews || 0,
       amenities: (updatedVenue.amenities as string[] | null) || [],

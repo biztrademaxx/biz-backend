@@ -40,6 +40,7 @@ exports.list = list;
 exports.getById = getById;
 exports.create = create;
 exports.reject = reject;
+exports.bulkApprove = bulkApprove;
 exports.update = update;
 exports.remove = remove;
 exports.listOrganizerConnections = listOrganizerConnections;
@@ -127,6 +128,24 @@ async function reject(req, res) {
     }
     catch (e) {
         return (0, admin_response_1.sendError)(res, 500, "Failed to reject organizer", e?.message);
+    }
+}
+async function bulkApprove(req, res) {
+    try {
+        const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+        const allPending = req.body?.allPending === true;
+        const search = typeof req.body?.search === "string" ? req.body.search : undefined;
+        const result = await service.bulkApproveOrganizers({ ids, allPending, search });
+        return res.status(200).json({
+            success: true,
+            ...result,
+            message: `Approved ${result.approvedCount} organizer(s).`,
+        });
+    }
+    catch (e) {
+        if (e?.message?.includes("required"))
+            return (0, admin_response_1.sendError)(res, 400, e.message);
+        return (0, admin_response_1.sendError)(res, 500, "Failed to approve organizers", e?.message);
     }
 }
 async function update(req, res) {

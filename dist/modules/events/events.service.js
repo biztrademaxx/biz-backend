@@ -70,6 +70,7 @@ exports.createPromotion = createPromotion;
 exports.updateEventByOrganizer = updateEventByOrganizer;
 exports.deleteEventByOrganizer = deleteEventByOrganizer;
 const prisma_1 = __importDefault(require("../../config/prisma"));
+const event_date_range_1 = require("../../utils/event-date-range");
 const redis_1 = require("../../config/redis");
 const event_schedule_1 = require("./event-schedule");
 const public_profile_1 = require("../../utils/public-profile");
@@ -1633,7 +1634,7 @@ async function updateEventLayoutPlan(eventId, layoutPlan) {
     });
     return updated;
 }
-/** Partial update for event (description, tags, images, brochure, layoutPlan). Used by event-dashboard and Next.js proxy. */
+/** Partial update for event content and media. Used by event-dashboard and Next.js proxy. */
 async function updateEventFields(eventId, body) {
     const existing = await prisma_1.default.event.findUnique({
         where: { id: eventId },
@@ -1649,6 +1650,8 @@ async function updateEventFields(eventId, body) {
         data.tags = body.tags;
     if (Array.isArray(body.images))
         data.images = body.images;
+    if (body.bannerImage !== undefined)
+        data.bannerImage = body.bannerImage?.trim() || null;
     if (body.brochure !== undefined)
         data.brochure = body.brochure;
     if (body.layoutPlan !== undefined)
@@ -1656,7 +1659,7 @@ async function updateEventFields(eventId, body) {
     if (Object.keys(data).length === 0) {
         return prisma_1.default.event.findUnique({
             where: { id: eventId },
-            select: { id: true, description: true, tags: true, images: true, brochure: true, layoutPlan: true },
+            select: { id: true, description: true, tags: true, images: true, bannerImage: true, brochure: true, layoutPlan: true },
         });
     }
     const updated = await prisma_1.default.event.update({
@@ -1668,6 +1671,7 @@ async function updateEventFields(eventId, body) {
             description: true,
             tags: true,
             images: true,
+            bannerImage: true,
             brochure: true,
             layoutPlan: true,
         },
@@ -2014,6 +2018,9 @@ async function updateEventByOrganizer(organizerId, eventId, body) {
     const nextSubTitle = "subTitle" in body ? trimOrganizerEventText(body.subTitle) : existingEvent.subTitle;
     const nextStart = body.startDate ? new Date(body.startDate) : existingEvent.startDate;
     const nextEnd = body.endDate ? new Date(body.endDate) : existingEvent.endDate;
+    const dateError = (0, event_date_range_1.eventDateRangeError)(nextStart, nextEnd);
+    if (dateError)
+        return { error: "INVALID_DATES", message: dateError };
     const postponePatch = (0, event_schedule_1.applyPostponedOnOrganizerDateChange)(existingEvent, nextStart, nextEnd);
     const eventUpdateData = {
         title: body.title,

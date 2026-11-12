@@ -37,6 +37,7 @@ exports.list = list;
 exports.getById = getById;
 exports.create = create;
 exports.update = update;
+exports.bulkApprove = bulkApprove;
 exports.remove = remove;
 exports.importBulk = importBulk;
 exports.sendAccountEmail = sendAccountEmail;
@@ -93,6 +94,22 @@ function isVenueClientError(message) {
         m.includes("venueName is required") ||
         m.includes("venueName cannot be empty") ||
         m.includes('A venue named "'));
+}
+async function bulkApprove(req, res) {
+    try {
+        const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+        const result = await service.bulkApproveVenues(ids);
+        return res.status(200).json({
+            success: true,
+            ...result,
+            message: `Approved ${result.approvedCount} venue(s).`,
+        });
+    }
+    catch (e) {
+        if (e?.message?.includes("required"))
+            return (0, admin_response_1.sendError)(res, 400, e.message);
+        return (0, admin_response_1.sendError)(res, 500, "Failed to approve venues", e?.message);
+    }
 }
 async function remove(req, res) {
     try {

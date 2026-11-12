@@ -962,6 +962,9 @@ export async function createEventAdminHandler(req: Request, res: Response) {
       userAgent: req.headers["user-agent"],
     });
     if ("error" in result) {
+      if (result.error === "INVALID_DATES") {
+        return res.status(400).json({ error: result.message });
+      }
       if (result.error === "MISSING_FIELDS") {
         return res.status(400).json({
           error: `Missing required fields: ${(result.missing ?? []).join(", ")}`,

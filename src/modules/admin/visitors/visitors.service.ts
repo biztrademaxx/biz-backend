@@ -25,7 +25,7 @@ export async function listVisitors(query: Record<string, unknown>) {
   if (status === "verified") (where as any).isVerified = true;
   if (status === "unverified") (where as any).isVerified = false;
 
-  const [items, total] = await Promise.all([
+  const [items, total, summary] = await Promise.all([
     prisma.user.findMany({
       where,
       skip,
@@ -61,6 +61,7 @@ export async function listVisitors(query: Record<string, unknown>) {
       },
     }),
     prisma.user.count({ where }),
+    prisma.user.groupBy({ by: ["isActive", "isVerified"], where, _count: { _all: true } }),
   ]);
 
   const userIds = items.map((u) => u.id);
@@ -145,7 +146,15 @@ export async function listVisitors(query: Record<string, unknown>) {
   });
 
   return {
-    data: { visitors, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } },
+    data: {
+      visitors,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+      stats: summary.reduce((stats, row) => ({
+        active: stats.active + (row.isActive ? row._count._all : 0),
+        inactive: stats.inactive + (!row.isActive ? row._count._all : 0),
+        verified: stats.verified + (row.isVerified ? row._count._all : 0),
+      }), { active: 0, inactive: 0, verified: 0 }),
+    },
   };
 }
 

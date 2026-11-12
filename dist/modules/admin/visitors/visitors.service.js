@@ -33,7 +33,7 @@ async function listVisitors(query) {
         where.isVerified = true;
     if (status === "unverified")
         where.isVerified = false;
-    const [items, total] = await Promise.all([
+    const [items, total, summary] = await Promise.all([
         prisma_1.default.user.findMany({
             where,
             skip,
@@ -69,6 +69,7 @@ async function listVisitors(query) {
             },
         }),
         prisma_1.default.user.count({ where }),
+        prisma_1.default.user.groupBy({ by: ["isActive", "isVerified"], where, _count: { _all: true } }),
     ]);
     const userIds = items.map((u) => u.id);
     const [connections, appointments, confirmedRegCounts] = await Promise.all([
@@ -155,7 +156,15 @@ async function listVisitors(query) {
         };
     });
     return {
-        data: { visitors, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } },
+        data: {
+            visitors,
+            pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+            stats: summary.reduce((stats, row) => ({
+                active: stats.active + (row.isActive ? row._count._all : 0),
+                inactive: stats.inactive + (!row.isActive ? row._count._all : 0),
+                verified: stats.verified + (row.isVerified ? row._count._all : 0),
+            }), { active: 0, inactive: 0, verified: 0 }),
+        },
     };
 }
 async function getVisitorById(id) {

@@ -66,7 +66,7 @@ export async function getAppointmentsHandler(req: Request, res: Response) {
         designation: apt.requester?.jobTitle || apt.requesterTitle || "Unknown",
         requestedDate: reqDate,
         requestedTime: reqTime,
-        scheduledAt: `${reqDate}T${reqTime}:00.000Z` || apt.createdAt?.toISOString?.(),
+        scheduledAt: `${reqDate}T${reqTime}:00`,
         duration: apt.duration ?? 60,
         purpose: apt.purpose || apt.description || "General meeting",
         status: apt.status || "PENDING",

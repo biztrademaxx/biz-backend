@@ -202,7 +202,7 @@ async function adminUpdateEventHandler(req, res) {
                 error: "Event not found",
             });
         }
-        if ("error" in result && result.error === "INVALID_YOUTUBE_URL") {
+        if ("error" in result && (result.error === "INVALID_YOUTUBE_URL" || result.error === "INVALID_DATES")) {
             return res.status(400).json({
                 success: false,
                 error: result.message ?? "Invalid YouTube URL",

@@ -40,6 +40,7 @@ exports.list = list;
 exports.getById = getById;
 exports.getStats = getStats;
 exports.create = create;
+exports.bulkApprove = bulkApprove;
 exports.update = update;
 exports.remove = remove;
 exports.listExhibitorFeedback = listExhibitorFeedback;
@@ -108,6 +109,23 @@ async function create(req, res) {
         if (e?.message?.includes("already exists"))
             return (0, admin_response_1.sendError)(res, 400, e.message);
         return (0, admin_response_1.sendError)(res, 500, "Failed to create exhibitor", e?.message);
+    }
+}
+async function bulkApprove(req, res) {
+    try {
+        const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+        const allPending = req.body?.allPending === true;
+        const result = await service.bulkApproveExhibitors({ ids, allPending });
+        return res.status(200).json({
+            success: true,
+            ...result,
+            message: `Approved ${result.approvedCount} exhibitor(s).`,
+        });
+    }
+    catch (e) {
+        if (e?.message?.includes("required"))
+            return (0, admin_response_1.sendError)(res, 400, e.message);
+        return (0, admin_response_1.sendError)(res, 500, "Failed to approve exhibitors", e?.message);
     }
 }
 async function update(req, res) {
