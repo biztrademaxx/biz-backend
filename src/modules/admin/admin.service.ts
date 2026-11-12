@@ -6,13 +6,35 @@ import {
   CACHE_KEYS,
   CACHE_TTL,
   invalidateEventCaches,
+  invalidateVenueCaches,
 } from "../../config/redis";
 import { EventStatus } from "@prisma/client";
 import { applyPostponedOnOrganizerDateChange } from "../events/event-schedule";
 import { normalizeYoutubeVideoUrlForStorage } from "../../utils/youtube-url";
+import { tierFromPlanSlug } from "../events/event-ranking";
+import { refreshEventSearchStats } from "../events/event-ranking.service";
 import { uploadImage } from "../../services/cloudinary.service";
 import { randomBytes } from "crypto";
 import { resolveFrontendBase, sendEventListingThankYouEmail } from "../../services/email.service";
+
+const ADMIN_EVENT_ASSIGNMENTS = {
+  organizer: {
+    select: {
+      id: true, firstName: true, lastName: true, email: true, phone: true,
+      avatar: true, company: true, organizationName: true, businessEmail: true,
+      businessPhone: true, businessAddress: true, headquarters: true, website: true,
+      location: true, organizerCity: true, organizerState: true, organizerCountry: true,
+    },
+  },
+  venue: {
+    select: {
+      id: true, firstName: true, lastName: true, email: true, phone: true,
+      venueName: true, venueAddress: true, venueCity: true, venueState: true,
+      venueCountry: true, venueZipCode: true, venueEmail: true, venuePhone: true,
+      venueWebsite: true, maxCapacity: true,
+    },
+  },
+} as const;
 
 function toStatusLabel(status: EventStatus | string): string {
   switch (String(status)) {
@@ -313,6 +335,8 @@ async function adminListEventsFromDb(params: AdminListEventsParams) {
   const events = rawEvents.map((event: any) => ({
     id: event.id,
     title: event.title,
+    organizerId: event.organizerId,
+    venueId: event.venueId,
     description: event.description,
     shortDescription: event.shortDescription,
     subTitle: event.subTitle ?? null,
@@ -416,24 +440,7 @@ export async function adminGetEventById(id: string) {
   const event = await prisma.event.findUnique({
     where: { id },
     include: {
-      organizer: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          email: true,
-          avatar: true,
-        },
-      },
-      venue: {
-        select: {
-          id: true,
-          venueName: true,
-          venueCity: true,
-          venueState: true,
-          venueCountry: true,
-        },
-      },
+      ...ADMIN_EVENT_ASSIGNMENTS,
       ticketTypes: true,
       exhibitionSpaces: true,
     },
@@ -455,6 +462,8 @@ export async function adminUpdateEvent(
     where: { id },
     select: {
       id: true,
+      organizerId: true,
+      venueId: true,
       startDate: true,
       endDate: true,
       previousStartDate: true,
@@ -464,6 +473,58 @@ export async function adminUpdateEvent(
 
   if (!existing) {
     return { error: "NOT_FOUND" as const };
+  }
+
+  // Accept only explicit assignment IDs; never overwrite shared user profiles.
+  const assignmentUpdates: Record<string, unknown> = {};
+  let organizerChanged = false;
+  const isUuid = (value: unknown): value is string =>
+    typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+
+  if (data.organizerId !== undefined && data.organizerId !== existing.organizerId) {
+    if (!isUuid(data.organizerId)) {
+      return { error: "INVALID_ORGANIZER" as const, message: "Select a valid organizer" };
+    }
+    const organizer = await prisma.user.findFirst({
+      where: { id: data.organizerId, role: "ORGANIZER" },
+      select: { id: true },
+    });
+    if (!organizer) {
+      return { error: "INVALID_ORGANIZER" as const, message: "The selected organizer was not found" };
+    }
+    const now = new Date();
+    const subscription = await prisma.userPlanSubscription.findFirst({
+      where: {
+        userId: organizer.id, role: "ORGANIZER", status: "ACTIVE",
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+      },
+      orderBy: { startedAt: "desc" },
+      select: { planSlug: true },
+    });
+    assignmentUpdates.organizerId = organizer.id;
+    assignmentUpdates.organizerPlanTier = tierFromPlanSlug(subscription?.planSlug);
+    assignmentUpdates.organizerPlanUpdatedAt = now;
+    organizerChanged = true;
+  }
+
+  if (data.venueId !== undefined && data.venueId !== existing.venueId) {
+    if (data.venueId === null || data.venueId === "") {
+      Object.assign(assignmentUpdates, { venueId: null, city: null, state: null, country: null });
+    } else {
+      if (!isUuid(data.venueId)) {
+        return { error: "INVALID_VENUE" as const, message: "Select a valid venue" };
+      }
+      const venue = await prisma.user.findFirst({
+        where: { id: data.venueId, role: "VENUE_MANAGER" },
+        select: { id: true, venueCity: true, venueState: true, venueCountry: true },
+      });
+      if (!venue) {
+        return { error: "INVALID_VENUE" as const, message: "The selected venue was not found" };
+      }
+      Object.assign(assignmentUpdates, {
+        venueId: venue.id, city: venue.venueCity, state: venue.venueState, country: venue.venueCountry,
+      });
+    }
   }
 
   let youtubeVideoUrlUpdate: string | null | undefined;
@@ -478,7 +539,7 @@ export async function adminUpdateEvent(
     youtubeVideoUrlUpdate = normalized.value;
   }
 
-  // Only these fields can be updated; venue/organizer/location are relations and must not be overwritten
+  // Scalar fields are allowlisted; validated assignments are handled separately above.
   const allowedFields = [
     "title",
     "description",
@@ -557,7 +618,7 @@ export async function adminUpdateEvent(
     return [];
   };
 
-  const updateData: Record<string, unknown> = { ...raw };
+  const updateData: Record<string, unknown> = { ...raw, ...assignmentUpdates };
   if (youtubeVideoUrlUpdate !== undefined) {
     updateData.youtubeVideoUrl = youtubeVideoUrlUpdate;
   }
@@ -631,7 +692,15 @@ export async function adminUpdateEvent(
   const event = await prisma.event.update({
     where: { id },
     data: updateData as any,
+    include: ADMIN_EVENT_ASSIGNMENTS,
   });
+
+  if (Object.prototype.hasOwnProperty.call(assignmentUpdates, "venueId")) {
+    await invalidateVenueCaches();
+  }
+  if (organizerChanged) {
+    await refreshEventSearchStats(id).catch((error) => console.error("Could not refresh reassigned event ranking:", error));
+  }
 
   await invalidateEventCaches({ slug: event.slug, id: event.id });
   return { event };

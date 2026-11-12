@@ -29,9 +29,29 @@ const redis_1 = require("../../config/redis");
 const client_1 = require("@prisma/client");
 const event_schedule_1 = require("../events/event-schedule");
 const youtube_url_1 = require("../../utils/youtube-url");
+const event_ranking_1 = require("../events/event-ranking");
+const event_ranking_service_1 = require("../events/event-ranking.service");
 const cloudinary_service_1 = require("../../services/cloudinary.service");
 const crypto_1 = require("crypto");
 const email_service_1 = require("../../services/email.service");
+const ADMIN_EVENT_ASSIGNMENTS = {
+    organizer: {
+        select: {
+            id: true, firstName: true, lastName: true, email: true, phone: true,
+            avatar: true, company: true, organizationName: true, businessEmail: true,
+            businessPhone: true, businessAddress: true, headquarters: true, website: true,
+            location: true, organizerCity: true, organizerState: true, organizerCountry: true,
+        },
+    },
+    venue: {
+        select: {
+            id: true, firstName: true, lastName: true, email: true, phone: true,
+            venueName: true, venueAddress: true, venueCity: true, venueState: true,
+            venueCountry: true, venueZipCode: true, venueEmail: true, venuePhone: true,
+            venueWebsite: true, maxCapacity: true,
+        },
+    },
+};
 function toStatusLabel(status) {
     switch (String(status)) {
         case "PUBLISHED":
@@ -295,6 +315,8 @@ async function adminListEventsFromDb(params) {
     const events = rawEvents.map((event) => ({
         id: event.id,
         title: event.title,
+        organizerId: event.organizerId,
+        venueId: event.venueId,
         description: event.description,
         shortDescription: event.shortDescription,
         subTitle: event.subTitle ?? null,
@@ -393,24 +415,7 @@ async function adminGetEventById(id) {
     const event = await prisma_1.default.event.findUnique({
         where: { id },
         include: {
-            organizer: {
-                select: {
-                    id: true,
-                    firstName: true,
-                    lastName: true,
-                    email: true,
-                    avatar: true,
-                },
-            },
-            venue: {
-                select: {
-                    id: true,
-                    venueName: true,
-                    venueCity: true,
-                    venueState: true,
-                    venueCountry: true,
-                },
-            },
+            ...ADMIN_EVENT_ASSIGNMENTS,
             ticketTypes: true,
             exhibitionSpaces: true,
         },
@@ -428,6 +433,8 @@ async function adminUpdateEvent(id, data) {
         where: { id },
         select: {
             id: true,
+            organizerId: true,
+            venueId: true,
             startDate: true,
             endDate: true,
             previousStartDate: true,
@@ -436,6 +443,55 @@ async function adminUpdateEvent(id, data) {
     });
     if (!existing) {
         return { error: "NOT_FOUND" };
+    }
+    // Accept only explicit assignment IDs; never overwrite shared user profiles.
+    const assignmentUpdates = {};
+    let organizerChanged = false;
+    const isUuid = (value) => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+    if (data.organizerId !== undefined && data.organizerId !== existing.organizerId) {
+        if (!isUuid(data.organizerId)) {
+            return { error: "INVALID_ORGANIZER", message: "Select a valid organizer" };
+        }
+        const organizer = await prisma_1.default.user.findFirst({
+            where: { id: data.organizerId, role: "ORGANIZER" },
+            select: { id: true },
+        });
+        if (!organizer) {
+            return { error: "INVALID_ORGANIZER", message: "The selected organizer was not found" };
+        }
+        const now = new Date();
+        const subscription = await prisma_1.default.userPlanSubscription.findFirst({
+            where: {
+                userId: organizer.id, role: "ORGANIZER", status: "ACTIVE",
+                OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+            },
+            orderBy: { startedAt: "desc" },
+            select: { planSlug: true },
+        });
+        assignmentUpdates.organizerId = organizer.id;
+        assignmentUpdates.organizerPlanTier = (0, event_ranking_1.tierFromPlanSlug)(subscription?.planSlug);
+        assignmentUpdates.organizerPlanUpdatedAt = now;
+        organizerChanged = true;
+    }
+    if (data.venueId !== undefined && data.venueId !== existing.venueId) {
+        if (data.venueId === null || data.venueId === "") {
+            Object.assign(assignmentUpdates, { venueId: null, city: null, state: null, country: null });
+        }
+        else {
+            if (!isUuid(data.venueId)) {
+                return { error: "INVALID_VENUE", message: "Select a valid venue" };
+            }
+            const venue = await prisma_1.default.user.findFirst({
+                where: { id: data.venueId, role: "VENUE_MANAGER" },
+                select: { id: true, venueCity: true, venueState: true, venueCountry: true },
+            });
+            if (!venue) {
+                return { error: "INVALID_VENUE", message: "The selected venue was not found" };
+            }
+            Object.assign(assignmentUpdates, {
+                venueId: venue.id, city: venue.venueCity, state: venue.venueState, country: venue.venueCountry,
+            });
+        }
     }
     let youtubeVideoUrlUpdate;
     if (data.youtubeVideoUrl !== undefined) {
@@ -448,7 +504,7 @@ async function adminUpdateEvent(id, data) {
         }
         youtubeVideoUrlUpdate = normalized.value;
     }
-    // Only these fields can be updated; venue/organizer/location are relations and must not be overwritten
+    // Scalar fields are allowlisted; validated assignments are handled separately above.
     const allowedFields = [
         "title",
         "description",
@@ -524,7 +580,7 @@ async function adminUpdateEvent(id, data) {
         }
         return [];
     };
-    const updateData = { ...raw };
+    const updateData = { ...raw, ...assignmentUpdates };
     if (youtubeVideoUrlUpdate !== undefined) {
         updateData.youtubeVideoUrl = youtubeVideoUrlUpdate;
     }
@@ -602,7 +658,14 @@ async function adminUpdateEvent(id, data) {
     const event = await prisma_1.default.event.update({
         where: { id },
         data: updateData,
+        include: ADMIN_EVENT_ASSIGNMENTS,
     });
+    if (Object.prototype.hasOwnProperty.call(assignmentUpdates, "venueId")) {
+        await (0, redis_1.invalidateVenueCaches)();
+    }
+    if (organizerChanged) {
+        await (0, event_ranking_service_1.refreshEventSearchStats)(id).catch((error) => console.error("Could not refresh reassigned event ranking:", error));
+    }
     await (0, redis_1.invalidateEventCaches)({ slug: event.slug, id: event.id });
     return { event };
 }

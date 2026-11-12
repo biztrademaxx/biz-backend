@@ -155,7 +155,7 @@ export async function adminUpdateEventHandler(req: Request, res: Response) {
     const { id } = req.params;
     const body = { ...(req.body ?? {}) } as any;
 
-    // Map frontend names to Prisma fields (only these are written; venue/location/organizer are not)
+    // Map frontend names to Prisma fields; assignment IDs are validated by the service.
     if (typeof body.featured === "boolean") {
       body.isFeatured = body.featured;
     }
@@ -191,7 +191,7 @@ export async function adminUpdateEventHandler(req: Request, res: Response) {
     if ("error" in result) {
       return res.status(400).json({
         success: false,
-        error: String(result.error),
+        error: (result as { message?: string }).message ?? String(result.error),
       });
     }
 
